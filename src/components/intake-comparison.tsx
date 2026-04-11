@@ -189,7 +189,6 @@ export default function IntakeComparison({ units, propertyName, intakeId, onSave
   });
 
   const hasComps = comps.length > 0;
-  const canAnalyze = hasComps && occupiedUnits.length > 0 && compsWithRate.length > 0;
 
   return (
     <div className="flex flex-col gap-4">
@@ -316,7 +315,7 @@ export default function IntakeComparison({ units, propertyName, intakeId, onSave
             </div>
 
             {/* Apply Market Analysis button */}
-            {canAnalyze && !showAnalysis && (
+            {hasComps && !showAnalysis && (
               <div className="mt-3 flex justify-center">
                 <button
                   onClick={() => setShowAnalysis(true)}
@@ -340,7 +339,7 @@ export default function IntakeComparison({ units, propertyName, intakeId, onSave
       </Panel>
 
       {/* ── Market Analysis (shown after clicking Apply) ── */}
-      {showAnalysis && canAnalyze && (
+      {showAnalysis && hasComps && (
         <>
           {/* Summary delta cards */}
           <Panel title="Market Comparison" actions={
