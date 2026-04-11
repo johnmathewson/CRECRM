@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import * as XLSX from "xlsx";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -29,36 +30,20 @@ RULES:
 4. If rates are monthly per SF, convert to annual.
 5. Preserve document order.`;
 
-async function parseFile(file: File): Promise<{ text: string; isImage: boolean }> {
-  const name = file.name.toLowerCase();
-  const buf = Buffer.from(await file.arrayBuffer());
+function parseSpreadsheet(buf: Buffer, fileName: string): string {
+  const wb = XLSX.read(buf, { type: "buffer" });
+  const sheets: string[] = [];
+  for (const sn of wb.SheetNames) {
+    sheets.push(`--- Sheet: ${sn} ---\n${XLSX.utils.sheet_to_csv(wb.Sheets[sn])}`);
+  }
+  return sheets.join("\n\n");
+}
 
-  if (name.endsWith(".pdf")) {
-    const pdfModule = await import("pdf-parse");
-    const pdfParse = (pdfModule as any).default || pdfModule;
-    const result = await pdfParse(buf);
-    return { text: result.text, isImage: false };
-  }
-  if (name.endsWith(".docx")) {
-    const mammoth = await import("mammoth");
-    const result = await mammoth.extractRawText({ buffer: buf });
-    return { text: result.value, isImage: false };
-  }
-  if (name.endsWith(".xlsx") || name.endsWith(".xls") || name.endsWith(".csv")) {
-    const XLSX = await import("xlsx");
-    const wb = XLSX.read(buf, { type: "buffer" });
-    const sheets: string[] = [];
-    for (const sn of wb.SheetNames) {
-      sheets.push(`--- Sheet: ${sn} ---\n${XLSX.utils.sheet_to_csv(wb.Sheets[sn])}`);
-    }
-    return { text: sheets.join("\n\n"), isImage: false };
-  }
-  if (name.match(/\.(jpg|jpeg|png|webp)$/)) {
-    const base64 = buf.toString("base64");
-    const mime = name.endsWith(".png") ? "image/png" : "image/jpeg";
-    return { text: `data:${mime};base64,${base64}`, isImage: true };
-  }
-  throw new Error(`Unsupported file type: ${name}`);
+function parseImage(buf: Buffer, fileName: string): { base64: string; mediaType: string } {
+  return {
+    base64: buf.toString("base64"),
+    mediaType: fileName.endsWith(".png") ? "image/png" : "image/jpeg",
+  };
 }
 
 export async function POST(req: NextRequest) {
@@ -73,18 +58,31 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "ANTHROPIC_API_KEY not configured" }, { status: 500 });
     }
 
-    const { text, isImage } = await parseFile(file);
+    const name = file.name.toLowerCase();
+    const buf = Buffer.from(await file.arrayBuffer());
 
     let userContent: any;
-    if (isImage) {
-      const [header, base64Data] = text.split(",");
-      const mediaType = header.replace("data:", "").replace(";base64", "");
+
+    if (name.endsWith(".xlsx") || name.endsWith(".xls") || name.endsWith(".csv")) {
+      const text = parseSpreadsheet(buf, name);
+      userContent = `Extract all comparable lease data from the following document.\n\n---\n${text}\n---`;
+    } else if (name.match(/\.(jpg|jpeg|png|webp)$/)) {
+      const { base64, mediaType } = parseImage(buf, name);
       userContent = [
-        { type: "image", source: { type: "base64", media_type: mediaType, data: base64Data } },
+        { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
         { type: "text", text: "Extract all comparable lease data from this image." },
       ];
+    } else if (name.endsWith(".pdf")) {
+      const pdfModule = await import("pdf-parse");
+      const pdfParse = (pdfModule as any).default || pdfModule;
+      const result = await pdfParse(buf);
+      userContent = `Extract all comparable lease data from the following document.\n\n---\n${result.text}\n---`;
+    } else if (name.endsWith(".docx")) {
+      const mammoth = await import("mammoth");
+      const result = await mammoth.extractRawText({ buffer: buf });
+      userContent = `Extract all comparable lease data from the following document.\n\n---\n${result.value}\n---`;
     } else {
-      userContent = `Extract all comparable lease data from the following document.\n\n---\n${text}\n---`;
+      return NextResponse.json({ error: `Unsupported file type: ${name}` }, { status: 400 });
     }
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
