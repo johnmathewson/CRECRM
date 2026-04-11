@@ -134,8 +134,21 @@ export default function IntakeComparison({ units, propertyName, intakeId, onSave
         body: JSON.stringify({ comps: pendingComps, source: "upload", intakeId: id }),
       });
       if (!res.ok) { const d = await res.json(); setUploadError(d.error); setSavingComps(false); return; }
+      // Add saved comps directly to state (loadComps may have stale intakeId)
+      const savedAsComps: Comp[] = pendingComps.map((c: any, i: number) => ({
+        id: `pending-${i}`,
+        property_name: c.property_name || "Unknown",
+        address: c.address || null, city: c.city || null, state: c.state || null,
+        submarket: c.submarket || null, asset_type: c.asset_type || null,
+        tenant_name: c.tenant_name || null, suite: c.suite || null,
+        square_footage: c.square_footage || null, lease_rate: c.lease_rate || null,
+        lease_type: c.lease_type || null, lease_start: c.lease_start || null,
+        lease_end: c.lease_end || null, monthly_rent: c.monthly_rent || null,
+        annual_rent: c.annual_rent || null, source: "upload", file_name: null,
+        created_at: new Date().toISOString(),
+      }));
+      setComps((prev) => [...savedAsComps, ...prev]);
       setPendingComps([]);
-      loadComps();
     } catch (err: any) { setUploadError(err.message); }
     setSavingComps(false);
   }, [pendingComps, intakeId, onSaveIntakeFirst, loadComps]);
