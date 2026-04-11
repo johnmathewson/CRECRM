@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import * as XLSX from "xlsx";
 
-export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
 const SYSTEM_PROMPT = `You are a commercial real estate rent roll data extraction specialist. You will receive text or data extracted from a rent roll document. Your job: extract ALL tenant/unit information into structured JSON.
@@ -30,59 +28,31 @@ RULES:
 7. "confidence" = how structured the source data was.
 8. "notes" = any ambiguities or assumptions you made.`;
 
-function parseSpreadsheet(buf: Buffer): string {
-  const wb = XLSX.read(buf, { type: "buffer" });
-  const sheets: string[] = [];
-  for (const sn of wb.SheetNames) {
-    sheets.push(`--- Sheet: ${sn} ---\n${XLSX.utils.sheet_to_csv(wb.Sheets[sn])}`);
-  }
-  return sheets.join("\n\n");
-}
-
 export async function POST(req: NextRequest) {
   try {
-    const formData = await req.formData();
-    const file = formData.get("file") as File | null;
-    const propertyName = formData.get("propertyName") as string;
+    const body = await req.json();
+    const { text, propertyName, isImage, imageData, mediaType } = body;
 
-    if (!file) return NextResponse.json({ error: "No file provided" }, { status: 400 });
-    if (!propertyName?.trim()) return NextResponse.json({ error: "Property name required" }, { status: 400 });
-    if (file.size > 10 * 1024 * 1024) return NextResponse.json({ error: "File too large (max 10MB)" }, { status: 413 });
+    if (!text && !imageData) {
+      return NextResponse.json({ error: "No content provided" }, { status: 400 });
+    }
+    if (!propertyName?.trim()) {
+      return NextResponse.json({ error: "Property name required" }, { status: 400 });
+    }
 
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey || apiKey === "YOUR_ANTHROPIC_API_KEY_HERE") {
       return NextResponse.json({ error: "ANTHROPIC_API_KEY not configured" }, { status: 500 });
     }
 
-    const name = file.name.toLowerCase();
-    const buf = Buffer.from(await file.arrayBuffer());
     let userContent: any;
-    let extractedText = "";
-
-    if (name.endsWith(".xlsx") || name.endsWith(".xls") || name.endsWith(".csv")) {
-      extractedText = parseSpreadsheet(buf);
-      userContent = `Extract all rent roll / tenant data from the following document for the property: "${propertyName}".\n\n---\n${extractedText}\n---`;
-    } else if (name.match(/\.(jpg|jpeg|png|webp|gif)$/)) {
-      const base64 = buf.toString("base64");
-      const mediaType = name.endsWith(".png") ? "image/png" : "image/jpeg";
-      extractedText = "(image upload)";
+    if (isImage && imageData) {
       userContent = [
-        { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
+        { type: "image", source: { type: "base64", media_type: mediaType, data: imageData } },
         { type: "text", text: `Extract all rent roll / tenant data from this image for the property: "${propertyName}". Return structured JSON per the system instructions.` },
       ];
-    } else if (name.endsWith(".pdf")) {
-      const pdfModule = await import("pdf-parse");
-      const pdfParse = (pdfModule as any).default || pdfModule;
-      const result = await pdfParse(buf);
-      extractedText = result.text;
-      userContent = `Extract all rent roll / tenant data from the following document for the property: "${propertyName}".\n\n---\n${extractedText}\n---`;
-    } else if (name.endsWith(".docx")) {
-      const mammoth = await import("mammoth");
-      const result = await mammoth.extractRawText({ buffer: buf });
-      extractedText = result.value;
-      userContent = `Extract all rent roll / tenant data from the following document for the property: "${propertyName}".\n\n---\n${extractedText}\n---`;
     } else {
-      return NextResponse.json({ error: `Unsupported file type: ${name}` }, { status: 400 });
+      userContent = `Extract all rent roll / tenant data from the following document for the property: "${propertyName}".\n\n---\n${text}\n---`;
     }
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -102,7 +72,6 @@ export async function POST(req: NextRequest) {
 
     const data = await response.json();
     if (!response.ok) {
-      console.error("Claude API error:", data);
       return NextResponse.json({ error: data.error?.message || "Claude API error" }, { status: 502 });
     }
 
@@ -111,7 +80,6 @@ export async function POST(req: NextRequest) {
     try {
       parsed = JSON.parse(responseText.replace(/```json?\s*/g, "").replace(/```\s*/g, "").trim());
     } catch {
-      console.error("Failed to parse Claude response:", responseText);
       return NextResponse.json({ error: "Failed to parse AI response. Please try again.", rawResponse: responseText }, { status: 422 });
     }
 
@@ -119,7 +87,7 @@ export async function POST(req: NextRequest) {
       units: parsed.units || [],
       confidence: parsed.confidence || "medium",
       notes: parsed.notes || "",
-      rawText: extractedText.slice(0, 5000),
+      rawText: (text || "(image upload)").slice(0, 5000),
     });
   } catch (error: any) {
     console.error("Intake parse error:", error);

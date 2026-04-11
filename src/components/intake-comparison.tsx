@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
+import * as XLSX from "xlsx";
 import Panel, { IconBtn } from "./panel";
 import { btnPrimary, btnSecondary, inputStyle } from "./modal";
 import type { IntakeUnit } from "./intake-editable-table";
@@ -74,17 +75,38 @@ export default function IntakeComparison({ units, propertyName }: Props) {
 
   useEffect(() => { loadComps(); }, [loadComps]);
 
-  // Upload comps file
+  // Parse file client-side, send text to API
   const handleUploadComps = useCallback(async (file: File) => {
     setUploadError("");
     setUploading(true);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const res = await fetch("/api/comps/parse", { method: "POST", body: formData });
+      const name = file.name.toLowerCase();
+      let payload: any = {};
+
+      if (name.endsWith(".xlsx") || name.endsWith(".xls") || name.endsWith(".csv")) {
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(buf, { type: "array" });
+        const sheets: string[] = [];
+        for (const sn of wb.SheetNames) {
+          sheets.push(`--- Sheet: ${sn} ---\n${XLSX.utils.sheet_to_csv(wb.Sheets[sn])}`);
+        }
+        payload = { text: sheets.join("\n\n") };
+      } else if (name.match(/\.(jpg|jpeg|png|webp)$/)) {
+        const buf = await file.arrayBuffer();
+        const bytes = new Uint8Array(buf); let binary = ""; for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]); const base64 = btoa(binary);
+        payload = { isImage: true, imageData: base64, mediaType: name.endsWith(".png") ? "image/png" : "image/jpeg" };
+      } else {
+        setUploadError("Supported formats: Excel (.xlsx/.xls), CSV, JPG, PNG"); setUploading(false); return;
+      }
+
+      const res = await fetch("/api/comps/parse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
       const text = await res.text();
       let data;
-      try { data = JSON.parse(text); } catch { setUploadError("Server error — the function may have timed out. Try a smaller file or try again."); setUploading(false); return; }
+      try { data = JSON.parse(text); } catch { setUploadError("Server error — try again."); setUploading(false); return; }
       if (!res.ok) { setUploadError(data.error || "Parse failed"); setUploading(false); return; }
       setPendingComps(data.comps || []);
     } catch (err: any) {

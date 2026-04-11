@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
+import * as XLSX from "xlsx";
 import Panel, { IconBtn } from "./panel";
 import IntakeUploadZone from "./intake-upload-zone";
 import IntakeEditableTable, { IntakeUnit } from "./intake-editable-table";
@@ -109,7 +110,7 @@ export default function IntakeContent() {
     setPhase("review");
   }, []);
 
-  // Upload & analyze
+  // Upload & analyze — parse file client-side, send text to API
   const handleAnalyze = useCallback(async (file: File, name: string) => {
     setError("");
     setPhase("processing");
@@ -118,18 +119,38 @@ export default function IntakeContent() {
     setFileType(file.name.split(".").pop()?.toLowerCase() || "");
 
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("propertyName", name);
+      const fname = file.name.toLowerCase();
+      let payload: any = { propertyName: name };
+
+      if (fname.endsWith(".xlsx") || fname.endsWith(".xls") || fname.endsWith(".csv")) {
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(buf, { type: "array" });
+        const sheets: string[] = [];
+        for (const sn of wb.SheetNames) {
+          sheets.push(`--- Sheet: ${sn} ---\n${XLSX.utils.sheet_to_csv(wb.Sheets[sn])}`);
+        }
+        payload.text = sheets.join("\n\n");
+      } else if (fname.match(/\.(jpg|jpeg|png|webp|gif)$/)) {
+        const buf = await file.arrayBuffer();
+        const bytes = new Uint8Array(buf); let binary = ""; for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]); const base64 = btoa(binary);
+        payload.isImage = true;
+        payload.imageData = base64;
+        payload.mediaType = fname.endsWith(".png") ? "image/png" : "image/jpeg";
+      } else {
+        setError("Supported formats: Excel (.xlsx/.xls), CSV, JPG, PNG");
+        setPhase("upload");
+        return;
+      }
 
       const res = await fetch("/api/intake/parse", {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
 
       const text = await res.text();
       let data;
-      try { data = JSON.parse(text); } catch { setError("Server error — the function may have timed out. Try again."); setPhase("upload"); return; }
+      try { data = JSON.parse(text); } catch { setError("Server error — try again."); setPhase("upload"); return; }
 
       if (!res.ok) {
         setError(data.error || "Analysis failed");

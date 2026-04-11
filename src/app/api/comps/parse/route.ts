@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import * as XLSX from "xlsx";
 
-export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
 const SYSTEM_PROMPT = `You are a commercial real estate comparable lease data extraction specialist. You will receive text or data from documents containing lease comparables (comps). Extract ALL comparable lease/tenant records into structured JSON.
@@ -30,59 +28,28 @@ RULES:
 4. If rates are monthly per SF, convert to annual.
 5. Preserve document order.`;
 
-function parseSpreadsheet(buf: Buffer, fileName: string): string {
-  const wb = XLSX.read(buf, { type: "buffer" });
-  const sheets: string[] = [];
-  for (const sn of wb.SheetNames) {
-    sheets.push(`--- Sheet: ${sn} ---\n${XLSX.utils.sheet_to_csv(wb.Sheets[sn])}`);
-  }
-  return sheets.join("\n\n");
-}
-
-function parseImage(buf: Buffer, fileName: string): { base64: string; mediaType: string } {
-  return {
-    base64: buf.toString("base64"),
-    mediaType: fileName.endsWith(".png") ? "image/png" : "image/jpeg",
-  };
-}
-
 export async function POST(req: NextRequest) {
   try {
-    const formData = await req.formData();
-    const file = formData.get("file") as File | null;
-    if (!file) return NextResponse.json({ error: "No file" }, { status: 400 });
-    if (file.size > 10 * 1024 * 1024) return NextResponse.json({ error: "File too large" }, { status: 413 });
+    const body = await req.json();
+    const { text, isImage, imageData, mediaType } = body;
+
+    if (!text && !imageData) {
+      return NextResponse.json({ error: "No content provided" }, { status: 400 });
+    }
 
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey || apiKey === "YOUR_ANTHROPIC_API_KEY_HERE") {
       return NextResponse.json({ error: "ANTHROPIC_API_KEY not configured" }, { status: 500 });
     }
 
-    const name = file.name.toLowerCase();
-    const buf = Buffer.from(await file.arrayBuffer());
-
     let userContent: any;
-
-    if (name.endsWith(".xlsx") || name.endsWith(".xls") || name.endsWith(".csv")) {
-      const text = parseSpreadsheet(buf, name);
-      userContent = `Extract all comparable lease data from the following document.\n\n---\n${text}\n---`;
-    } else if (name.match(/\.(jpg|jpeg|png|webp)$/)) {
-      const { base64, mediaType } = parseImage(buf, name);
+    if (isImage && imageData) {
       userContent = [
-        { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
+        { type: "image", source: { type: "base64", media_type: mediaType, data: imageData } },
         { type: "text", text: "Extract all comparable lease data from this image." },
       ];
-    } else if (name.endsWith(".pdf")) {
-      const pdfModule = await import("pdf-parse");
-      const pdfParse = (pdfModule as any).default || pdfModule;
-      const result = await pdfParse(buf);
-      userContent = `Extract all comparable lease data from the following document.\n\n---\n${result.text}\n---`;
-    } else if (name.endsWith(".docx")) {
-      const mammoth = await import("mammoth");
-      const result = await mammoth.extractRawText({ buffer: buf });
-      userContent = `Extract all comparable lease data from the following document.\n\n---\n${result.value}\n---`;
     } else {
-      return NextResponse.json({ error: `Unsupported file type: ${name}` }, { status: 400 });
+      userContent = `Extract all comparable lease data from the following document.\n\n---\n${text}\n---`;
     }
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
