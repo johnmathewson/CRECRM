@@ -179,9 +179,18 @@ export default function IntakeComparison({ units, propertyName, intakeId, onSave
   const intakeTotalAnnual = units.reduce((s, u) => s + effectiveAnnual(u), 0);
 
   const compsWithRate = comps.filter((c) => c.lease_rate && c.lease_rate > 0);
-  const compTotalSF = compsWithRate.reduce((s, c) => s + (Number(c.square_footage) || 0), 0);
+
+  // Trim outliers: drop highest and lowest rate, then compute weighted avg
+  const trimComps = (list: Comp[]): Comp[] => {
+    if (list.length <= 2) return list; // not enough to trim
+    const sorted = [...list].sort((a, b) => Number(a.lease_rate) - Number(b.lease_rate));
+    return sorted.slice(1, -1); // drop lowest and highest
+  };
+
+  const trimmedComps = trimComps(compsWithRate);
+  const compTotalSF = trimmedComps.reduce((s, c) => s + (Number(c.square_footage) || 0), 0);
   const compWeightedRate = compTotalSF > 0
-    ? compsWithRate.reduce((s, c) => s + (Number(c.lease_rate) || 0) * (Number(c.square_footage) || 0), 0) / compTotalSF
+    ? trimmedComps.reduce((s, c) => s + (Number(c.lease_rate) || 0) * (Number(c.square_footage) || 0), 0) / compTotalSF
     : 0;
 
   const rateDelta = intakeWeightedRate > 0 && compWeightedRate > 0
@@ -197,13 +206,14 @@ export default function IntakeComparison({ units, propertyName, intakeId, onSave
       const csf = Number(c.square_footage) || 0;
       return csf > 0 && sf > 0 && Math.abs(csf - sf) / sf < 0.3;
     });
-    const avgCompRate = similar.length > 0
-      ? similar.reduce((s, c) => s + Number(c.lease_rate!), 0) / similar.length
+    const trimmed = trimComps(similar);
+    const avgCompRate = trimmed.length > 0
+      ? trimmed.reduce((s, c) => s + Number(c.lease_rate!), 0) / trimmed.length
       : compWeightedRate;
     const delta = uRate > 0 && avgCompRate > 0
       ? ((avgCompRate - uRate) / uRate) * 100
       : null;
-    return { ...u, compRate: avgCompRate, delta, matchCount: similar.length };
+    return { ...u, compRate: avgCompRate, delta, matchCount: trimmed.length };
   });
 
   const hasComps = comps.length > 0;
