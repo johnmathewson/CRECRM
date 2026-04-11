@@ -154,12 +154,29 @@ export default function IntakeComparison({ units, propertyName, intakeId, onSave
   }, [pendingComps, intakeId, onSaveIntakeFirst, loadComps]);
 
   // ── Comparison logic ─────────────────────────────────────
-  const occupiedUnits = units.filter((u) => !u.is_vacant && u.lease_rate);
-  const intakeTotalSF = occupiedUnits.reduce((s, u) => s + (u.square_footage || 0), 0);
+  // Derive effective lease_rate from whatever data we have
+  const effectiveRate = (u: IntakeUnit): number => {
+    if (u.lease_rate && u.lease_rate > 0) return u.lease_rate;
+    const sf = Number(u.square_footage) || 0;
+    if (sf > 0 && u.annual_rent && u.annual_rent > 0) return u.annual_rent / sf;
+    if (sf > 0 && u.monthly_rent && u.monthly_rent > 0) return (u.monthly_rent * 12) / sf;
+    return 0;
+  };
+  const effectiveAnnual = (u: IntakeUnit): number => {
+    if (u.annual_rent && u.annual_rent > 0) return u.annual_rent;
+    if (u.monthly_rent && u.monthly_rent > 0) return u.monthly_rent * 12;
+    const sf = Number(u.square_footage) || 0;
+    const rate = effectiveRate(u);
+    if (sf > 0 && rate > 0) return sf * rate;
+    return 0;
+  };
+
+  const occupiedUnits = units.filter((u) => !u.is_vacant && (effectiveRate(u) > 0 || Number(u.square_footage) > 0));
+  const intakeTotalSF = occupiedUnits.reduce((s, u) => s + (Number(u.square_footage) || 0), 0);
   const intakeWeightedRate = intakeTotalSF > 0
-    ? occupiedUnits.reduce((s, u) => s + (u.lease_rate || 0) * (u.square_footage || 0), 0) / intakeTotalSF
+    ? occupiedUnits.reduce((s, u) => s + effectiveRate(u) * (Number(u.square_footage) || 0), 0) / intakeTotalSF
     : 0;
-  const intakeTotalAnnual = units.reduce((s, u) => s + (u.annual_rent || 0), 0);
+  const intakeTotalAnnual = units.reduce((s, u) => s + effectiveAnnual(u), 0);
 
   const compsWithRate = comps.filter((c) => c.lease_rate && c.lease_rate > 0);
   const compTotalSF = compsWithRate.reduce((s, c) => s + (Number(c.square_footage) || 0), 0);
@@ -174,7 +191,8 @@ export default function IntakeComparison({ units, propertyName, intakeId, onSave
   const revenueDelta = potentialAnnual > 0 ? potentialAnnual - intakeTotalAnnual : 0;
 
   const unitComparisons = occupiedUnits.map((u) => {
-    const sf = u.square_footage || 0;
+    const sf = Number(u.square_footage) || 0;
+    const uRate = effectiveRate(u);
     const similar = compsWithRate.filter((c) => {
       const csf = Number(c.square_footage) || 0;
       return csf > 0 && sf > 0 && Math.abs(csf - sf) / sf < 0.3;
@@ -182,8 +200,8 @@ export default function IntakeComparison({ units, propertyName, intakeId, onSave
     const avgCompRate = similar.length > 0
       ? similar.reduce((s, c) => s + Number(c.lease_rate!), 0) / similar.length
       : compWeightedRate;
-    const delta = u.lease_rate && avgCompRate > 0
-      ? ((avgCompRate - u.lease_rate) / u.lease_rate) * 100
+    const delta = uRate > 0 && avgCompRate > 0
+      ? ((avgCompRate - uRate) / uRate) * 100
       : null;
     return { ...u, compRate: avgCompRate, delta, matchCount: similar.length };
   });
@@ -409,8 +427,9 @@ export default function IntakeComparison({ units, propertyName, intakeId, onSave
                 </thead>
                 <tbody>
                   {unitComparisons.map((u, i) => {
-                    const gap = u.lease_rate && u.compRate
-                      ? (u.compRate - u.lease_rate) * (u.square_footage || 0)
+                    const uRate = effectiveRate(u);
+                    const gap = uRate > 0 && u.compRate
+                      ? (u.compRate - uRate) * (Number(u.square_footage) || 0)
                       : 0;
                     return (
                       <tr key={i}>
@@ -424,7 +443,7 @@ export default function IntakeComparison({ units, propertyName, intakeId, onSave
                           {u.square_footage ? fmtSF(u.square_footage) : "—"}
                         </td>
                         <td className="px-2 py-1.5 text-[11px] text-right font-semibold tnum" style={{ background: "rgba(255,255,255,0.02)", color: C.coral }}>
-                          {u.lease_rate ? fmtRate(u.lease_rate) : "—"}
+                          {effectiveRate(u) > 0 ? fmtRate(effectiveRate(u)) : "—"}
                         </td>
                         <td className="px-2 py-1.5 text-[11px] text-right font-semibold tnum" style={{ background: "rgba(255,255,255,0.02)", color: C.teal }}>
                           {u.compRate > 0 ? fmtRate(u.compRate) : "—"}
