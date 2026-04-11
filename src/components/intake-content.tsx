@@ -6,6 +6,7 @@ import Panel, { IconBtn } from "./panel";
 import IntakeUploadZone from "./intake-upload-zone";
 import IntakeEditableTable, { IntakeUnit } from "./intake-editable-table";
 import IntakeSummary from "./intake-summary";
+import IntakeComparison from "./intake-comparison";
 import { btnPrimary, btnSecondary } from "./modal";
 
 // ── Types ──────────────────────────────────────────────────
@@ -353,46 +354,50 @@ export default function IntakeContent() {
 
       {/* ── REVIEW PHASE ── */}
       {phase === "review" && (
-        <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 370px" }}>
-          <Panel
-            title={`Rent Roll — ${propertyName}`}
-            actions={
-              <div className="flex gap-1 items-center">
-                <span className="text-[10.5px] text-cream-subtle mr-2">
-                  {units.length} units extracted
-                </span>
-                <IconBtn onClick={() => {
-                  // Export to CSV
-                  const headers = ["Unit", "Tenant", "Suite", "SF", "Rate/SF", "Type", "Start", "End", "Monthly", "Annual", "Vacant"];
-                  const rows = units.map((u) => [
-                    u.unit_number || "", u.tenant_name || "", u.suite || "",
-                    u.square_footage || "", u.lease_rate || "", u.lease_type || "",
-                    u.lease_start || "", u.lease_end || "", u.monthly_rent || "",
-                    u.annual_rent || "", u.is_vacant ? "Yes" : "No",
-                  ]);
-                  const csv = [headers, ...rows].map((r) => r.join(",")).join("\n");
-                  const blob = new Blob([csv], { type: "text/csv" });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement("a");
-                  a.href = url;
-                  a.download = `${propertyName.replace(/\s+/g, "_")}_rent_roll.csv`;
-                  a.click();
-                  URL.revokeObjectURL(url);
-                }}>↓</IconBtn>
-                <IconBtn>⋯</IconBtn>
-              </div>
-            }
-          >
-            <IntakeEditableTable units={units} onChange={setUnits} />
-          </Panel>
+        <>
+          <div className="grid gap-4 mb-4" style={{ gridTemplateColumns: "1fr 370px" }}>
+            <Panel
+              title={`Rent Roll — ${propertyName}`}
+              actions={
+                <div className="flex gap-1 items-center">
+                  <span className="text-[10.5px] text-cream-subtle mr-2">
+                    {units.length} units extracted
+                  </span>
+                  <IconBtn onClick={() => {
+                    const headers = ["Unit", "Tenant", "Suite", "SF", "Rate/SF", "Type", "Start", "End", "Monthly", "Annual", "Vacant"];
+                    const rows = units.map((u) => [
+                      u.unit_number || "", u.tenant_name || "", u.suite || "",
+                      u.square_footage || "", u.lease_rate || "", u.lease_type || "",
+                      u.lease_start || "", u.lease_end || "", u.monthly_rent || "",
+                      u.annual_rent || "", u.is_vacant ? "Yes" : "No",
+                    ]);
+                    const csv = [headers, ...rows].map((r) => r.join(",")).join("\n");
+                    const blob = new Blob([csv], { type: "text/csv" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = `${propertyName.replace(/\s+/g, "_")}_rent_roll.csv`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}>↓</IconBtn>
+                  <IconBtn>⋯</IconBtn>
+                </div>
+              }
+            >
+              <IntakeEditableTable units={units} onChange={setUnits} />
+            </Panel>
 
-          <IntakeSummary
-            units={units}
-            propertyName={propertyName}
-            confidence={confidence}
-            notes={aiNotes}
-          />
-        </div>
+            <IntakeSummary
+              units={units}
+              propertyName={propertyName}
+              confidence={confidence}
+              notes={aiNotes}
+            />
+          </div>
+
+          {/* Comps & Comparison */}
+          <IntakeComparison units={units} propertyName={propertyName} />
+        </>
       )}
 
       {/* ── SAVED PHASE ── */}
