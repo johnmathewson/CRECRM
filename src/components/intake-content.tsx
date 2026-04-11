@@ -127,7 +127,9 @@ export default function IntakeContent() {
         body: formData,
       });
 
-      const data = await res.json();
+      const text = await res.text();
+      let data;
+      try { data = JSON.parse(text); } catch { setError("Server error — the function may have timed out. Try again."); setPhase("upload"); return; }
 
       if (!res.ok) {
         setError(data.error || "Analysis failed");

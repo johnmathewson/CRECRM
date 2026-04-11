@@ -82,7 +82,9 @@ export default function IntakeComparison({ units, propertyName }: Props) {
       const formData = new FormData();
       formData.append("file", file);
       const res = await fetch("/api/comps/parse", { method: "POST", body: formData });
-      const data = await res.json();
+      const text = await res.text();
+      let data;
+      try { data = JSON.parse(text); } catch { setUploadError("Server error — the function may have timed out. Try a smaller file or try again."); setUploading(false); return; }
       if (!res.ok) { setUploadError(data.error || "Parse failed"); setUploading(false); return; }
       setPendingComps(data.comps || []);
     } catch (err: any) {

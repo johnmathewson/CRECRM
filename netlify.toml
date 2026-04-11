@@ -5,5 +5,8 @@
 [build.environment]
   NODE_VERSION = "18"
 
+[functions]
+  external_node_modules = ["pdf-parse"]
+
 [[plugins]]
   package = "@netlify/plugin-nextjs"

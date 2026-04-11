@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
+export const maxDuration = 60;
+export const dynamic = "force-dynamic";
+
 const SYSTEM_PROMPT = `You are a commercial real estate comparable lease data extraction specialist. You will receive text or data from documents containing lease comparables (comps). Extract ALL comparable lease/tenant records into structured JSON.
 
 For each comp, extract these fields (use null if not found):
