@@ -1,0 +1,188 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Base ─────────────────────────────────────── */
+:root {
+  --coral: #E07A5F;
+  --cream: #F0EDE4;
+  --teal: #4ECDC4;
+  --green: #6BCB77;
+  --amber: #F2C94C;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background: linear-gradient(160deg, #0A1615 0%, #0D1F1E 30%, #142827 60%, #0B1918 100%);
+  color: var(--cream);
+  min-height: 100vh;
+}
+
+/* ── Glassmorphism layers ─────────────────────── */
+@layer components {
+  .glass {
+    background: rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(24px) saturate(1.4);
+    -webkit-backdrop-filter: blur(24px) saturate(1.4);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-top-color: rgba(255, 255, 255, 0.14);
+    border-radius: 6px;
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.25),
+      inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+
+  .glass-inner {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 4px;
+  }
+
+  .glass-nav {
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(30px) saturate(1.4);
+    -webkit-backdrop-filter: blur(30px) saturate(1.4);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
+  }
+
+  .glass-ai {
+    background: rgba(255, 255, 255, 0.035);
+    backdrop-filter: blur(28px) saturate(1.4);
+    -webkit-backdrop-filter: blur(28px) saturate(1.4);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-top-color: rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.25),
+      inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    transition: all 0.3s ease;
+  }
+
+  .glass-ai:focus-within {
+    background: rgba(255, 255, 255, 0.055);
+    border-top-color: rgba(224, 122, 95, 0.25);
+    box-shadow:
+      0 8px 40px rgba(0, 0, 0, 0.3),
+      0 0 30px rgba(224, 122, 95, 0.35),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+}
+
+/* ── Panel header ─────────────────────────────── */
+.panel-header {
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.panel-header h3 {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  margin: 0;
+}
+
+/* ── Icon button (panel header actions) ───────── */
+.icon-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(240, 237, 228, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+  transition: all 0.15s ease;
+}
+
+.icon-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(240, 237, 228, 0.6);
+}
+
+/* ── Ambient background orbs ──────────────────── */
+.bg-orb-coral {
+  position: fixed;
+  top: -15%;
+  right: -10%;
+  width: 55vw;
+  height: 55vw;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(224, 122, 95, 0.12) 0%, rgba(224, 122, 95, 0.04) 40%, transparent 70%);
+  pointer-events: none;
+}
+
+.bg-orb-teal {
+  position: fixed;
+  bottom: -20%;
+  left: -15%;
+  width: 65vw;
+  height: 65vw;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(78, 205, 196, 0.10) 0%, rgba(78, 205, 196, 0.03) 40%, transparent 70%);
+  pointer-events: none;
+}
+
+.bg-orb-green {
+  position: fixed;
+  top: 40%;
+  left: 30%;
+  width: 40vw;
+  height: 40vw;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(107, 203, 119, 0.06) 0%, transparent 60%);
+  pointer-events: none;
+}
+
+.bg-mesh {
+  position: fixed;
+  inset: 0;
+  opacity: 0.35;
+  background:
+    radial-gradient(ellipse at 20% 50%, rgba(224, 122, 95, 0.06) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 20%, rgba(78, 205, 196, 0.05) 0%, transparent 50%),
+    radial-gradient(ellipse at 60% 80%, rgba(242, 201, 76, 0.04) 0%, transparent 50%);
+  pointer-events: none;
+}
+
+/* ── Tabular numbers for financial data ───────── */
+.tnum {
+  font-feature-settings: 'tnum';
+}
+
+/* ── Scrollbar ────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+/* ── Selection ────────────────────────────────── */
+::selection {
+  background: rgba(224, 122, 95, 0.3);
+  color: var(--cream);
+}
