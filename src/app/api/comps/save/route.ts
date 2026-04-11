@@ -5,7 +5,7 @@ const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 
 export async function POST(req: NextRequest) {
   try {
-    const { comps, source, fileName } = await req.json();
+    const { comps, source, fileName, intakeId } = await req.json();
     if (!comps?.length) return NextResponse.json({ error: "No comps provided" }, { status: 400 });
 
     const supabase = createClient(
@@ -15,6 +15,7 @@ export async function POST(req: NextRequest) {
 
     const rows = comps.map((c: any) => ({
       organization_id: ORG_ID,
+      intake_id: intakeId || null,
       property_name: c.property_name || "Unknown",
       address: c.address || null,
       city: c.city || null,

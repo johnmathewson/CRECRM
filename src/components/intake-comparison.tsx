@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import * as XLSX from "xlsx";
 import Panel, { IconBtn } from "./panel";
-import { btnPrimary, btnSecondary, inputStyle } from "./modal";
+import { btnPrimary, btnSecondary } from "./modal";
 import type { IntakeUnit } from "./intake-editable-table";
 
 // ── Types ──────────────────────────────────────────────────
@@ -44,34 +44,37 @@ const fmtRate = (n: number) => "$" + n.toFixed(2);
 const fmtSF = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 0 });
 const fmtPct = (n: number) => (n >= 0 ? "+" : "") + n.toFixed(1) + "%";
 
-const ACCEPT = ".pdf,.docx,.xlsx,.xls,.csv,.jpg,.jpeg,.png,.webp";
-
 // ── Component ──────────────────────────────────────────────
 interface Props {
   units: IntakeUnit[];
   propertyName: string;
+  intakeId: string | null;
+  onSaveIntakeFirst: () => Promise<string | null>; // returns intakeId after saving
 }
 
-export default function IntakeComparison({ units, propertyName }: Props) {
+export default function IntakeComparison({ units, propertyName, intakeId, onSaveIntakeFirst }: Props) {
   const [comps, setComps] = useState<Comp[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [showUpload, setShowUpload] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [savingComps, setSavingComps] = useState(false);
   const [pendingComps, setPendingComps] = useState<any[]>([]);
+  const [showAnalysis, setShowAnalysis] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Load all comps from DB
+  // Load comps for THIS intake only
   const loadComps = useCallback(async () => {
+    if (!intakeId) { setComps([]); return; }
+    setLoading(true);
     const supabase = createClient();
     const { data } = await supabase
       .from("comps")
       .select("*")
+      .eq("intake_id", intakeId)
       .order("created_at", { ascending: false });
     setComps((data as Comp[]) || []);
     setLoading(false);
-  }, []);
+  }, [intakeId]);
 
   useEffect(() => { loadComps(); }, [loadComps]);
 
@@ -115,25 +118,29 @@ export default function IntakeComparison({ units, propertyName }: Props) {
     setUploading(false);
   }, []);
 
-  // Save pending comps
+  // Save pending comps — auto-save intake first if needed
   const savePendingComps = useCallback(async () => {
     setSavingComps(true);
     try {
+      let id = intakeId;
+      if (!id) {
+        id = await onSaveIntakeFirst();
+        if (!id) { setUploadError("Please save the intake first"); setSavingComps(false); return; }
+      }
+
       const res = await fetch("/api/comps/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ comps: pendingComps, source: "upload" }),
+        body: JSON.stringify({ comps: pendingComps, source: "upload", intakeId: id }),
       });
       if (!res.ok) { const d = await res.json(); setUploadError(d.error); setSavingComps(false); return; }
       setPendingComps([]);
-      setShowUpload(false);
       loadComps();
     } catch (err: any) { setUploadError(err.message); }
     setSavingComps(false);
-  }, [pendingComps, loadComps]);
+  }, [pendingComps, intakeId, onSaveIntakeFirst, loadComps]);
 
   // ── Comparison logic ─────────────────────────────────────
-  // Intake averages (occupied units only)
   const occupiedUnits = units.filter((u) => !u.is_vacant && u.lease_rate);
   const intakeTotalSF = occupiedUnits.reduce((s, u) => s + (u.square_footage || 0), 0);
   const intakeWeightedRate = intakeTotalSF > 0
@@ -141,193 +148,208 @@ export default function IntakeComparison({ units, propertyName }: Props) {
     : 0;
   const intakeTotalAnnual = units.reduce((s, u) => s + (u.annual_rent || 0), 0);
 
-  // Comp averages (all comps with lease_rate)
   const compsWithRate = comps.filter((c) => c.lease_rate && c.lease_rate > 0);
   const compTotalSF = compsWithRate.reduce((s, c) => s + (Number(c.square_footage) || 0), 0);
   const compWeightedRate = compTotalSF > 0
     ? compsWithRate.reduce((s, c) => s + (Number(c.lease_rate) || 0) * (Number(c.square_footage) || 0), 0) / compTotalSF
     : 0;
 
-  // Deltas
   const rateDelta = intakeWeightedRate > 0 && compWeightedRate > 0
     ? ((compWeightedRate - intakeWeightedRate) / intakeWeightedRate) * 100
     : null;
   const potentialAnnual = compWeightedRate > 0 ? intakeTotalSF * compWeightedRate : 0;
   const revenueDelta = potentialAnnual > 0 ? potentialAnnual - intakeTotalAnnual : 0;
 
-  // Per-unit comparison (match by SF range buckets)
   const unitComparisons = occupiedUnits.map((u) => {
     const sf = u.square_footage || 0;
-    // Find comps within 30% SF range
     const similar = compsWithRate.filter((c) => {
       const csf = Number(c.square_footage) || 0;
-      return csf > 0 && Math.abs(csf - sf) / sf < 0.3;
+      return csf > 0 && sf > 0 && Math.abs(csf - sf) / sf < 0.3;
     });
     const avgCompRate = similar.length > 0
       ? similar.reduce((s, c) => s + Number(c.lease_rate!), 0) / similar.length
-      : compWeightedRate; // fallback to overall avg
+      : compWeightedRate;
     const delta = u.lease_rate && avgCompRate > 0
       ? ((avgCompRate - u.lease_rate) / u.lease_rate) * 100
       : null;
     return { ...u, compRate: avgCompRate, delta, matchCount: similar.length };
   });
 
+  const hasComps = comps.length > 0;
+  const canAnalyze = hasComps && occupiedUnits.length > 0 && compsWithRate.length > 0;
+
   return (
     <div className="flex flex-col gap-4">
-      {/* ── Comp Upload Section ── */}
+      {/* ── Comps for this Property ── */}
       <Panel
-        title={`Comps Database — ${comps.length} records`}
+        title={`Comps for ${propertyName} — ${comps.length} records`}
         actions={
           <div className="flex gap-1 items-center">
-            <button
-              onClick={() => setShowUpload(!showUpload)}
-              className="px-2.5 py-1 text-[10.5px] font-semibold cursor-pointer"
-              style={{
-                borderRadius: 4,
-                border: "none",
-                fontFamily: "inherit",
-                background: "linear-gradient(135deg, #4ECDC4, #4ECDC4CC)",
-                color: "white",
-                boxShadow: "0 2px 8px rgba(78,205,196,0.3)",
-              }}
-            >
-              + Upload Comps
-            </button>
             <IconBtn onClick={loadComps}>↻</IconBtn>
           </div>
         }
       >
-        {/* Upload area */}
-        {showUpload && (
-          <div className="glass-inner p-3.5 mb-3" style={{ borderLeft: `2px solid ${C.teal}` }}>
-            <input
-              ref={fileRef}
-              type="file"
-              accept={ACCEPT}
-              style={{ display: "none" }}
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) handleUploadComps(f);
-              }}
-            />
-            {pendingComps.length > 0 ? (
-              <div>
-                <div className="text-[12px] font-medium text-cream mb-2">
-                  {pendingComps.length} comps extracted — review and save:
-                </div>
-                <div className="overflow-x-auto mb-2" style={{ maxHeight: 200 }}>
-                  <table className="w-full" style={{ borderCollapse: "separate", borderSpacing: "0 2px" }}>
-                    <thead>
-                      <tr className="text-[9.5px] text-cream-subtle uppercase tracking-wider">
-                        {["Property", "Tenant", "SF", "Rate/SF", "Type", "City"].map((h) => (
-                          <th key={h} className="px-2 pb-1.5 font-medium text-left">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pendingComps.slice(0, 10).map((c: any, i: number) => (
-                        <tr key={i}>
-                          <td className="px-2 py-1 text-[11px]" style={{ background: "rgba(255,255,255,0.02)" }}>{c.property_name || "—"}</td>
-                          <td className="px-2 py-1 text-[11px] text-cream-muted" style={{ background: "rgba(255,255,255,0.02)" }}>{c.tenant_name || "—"}</td>
-                          <td className="px-2 py-1 text-[11px] tnum" style={{ background: "rgba(255,255,255,0.02)" }}>{c.square_footage ? fmtSF(c.square_footage) : "—"}</td>
-                          <td className="px-2 py-1 text-[11px] font-semibold tnum" style={{ background: "rgba(255,255,255,0.02)", color: C.teal }}>{c.lease_rate ? fmtRate(c.lease_rate) : "—"}</td>
-                          <td className="px-2 py-1 text-[11px] text-cream-muted" style={{ background: "rgba(255,255,255,0.02)" }}>{c.lease_type || "—"}</td>
-                          <td className="px-2 py-1 text-[11px] text-cream-muted" style={{ background: "rgba(255,255,255,0.02)" }}>{c.city || "—"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {pendingComps.length > 10 && (
-                    <div className="text-[10.5px] text-cream-subtle mt-1">...and {pendingComps.length - 10} more</div>
-                  )}
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    style={{ ...btnPrimary, fontSize: 11, padding: "6px 14px", background: "linear-gradient(135deg, #4ECDC4, #4ECDC4CC)", boxShadow: "0 2px 10px rgba(78,205,196,0.3)" }}
-                    onClick={savePendingComps}
-                    disabled={savingComps}
-                  >
-                    {savingComps ? "Saving..." : `Save ${pendingComps.length} Comps`}
-                  </button>
-                  <button style={{ ...btnSecondary, fontSize: 11, padding: "6px 14px" }} onClick={() => setPendingComps([])}>
-                    Discard
-                  </button>
-                </div>
+        {/* Upload area — always visible when no comps yet */}
+        <div className="glass-inner p-3.5 mb-3" style={{ borderLeft: `2px solid ${C.teal}` }}>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".xlsx,.xls,.csv,.jpg,.jpeg,.png,.webp"
+            style={{ display: "none" }}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleUploadComps(f);
+            }}
+          />
+          {pendingComps.length > 0 ? (
+            <div>
+              <div className="text-[12px] font-medium text-cream mb-2">
+                {pendingComps.length} comps extracted — review and save to this property:
               </div>
-            ) : (
-              <div>
-                <div className="text-[12px] text-cream-muted mb-2">
-                  Upload a file with comparable lease data (PDF, Excel, CSV, Word, or image)
-                </div>
+              <div className="overflow-x-auto mb-2" style={{ maxHeight: 200 }}>
+                <table className="w-full" style={{ borderCollapse: "separate", borderSpacing: "0 2px" }}>
+                  <thead>
+                    <tr className="text-[9.5px] text-cream-subtle uppercase tracking-wider">
+                      {["Property", "Tenant", "SF", "Rate/SF", "Type", "City"].map((h) => (
+                        <th key={h} className="px-2 pb-1.5 font-medium text-left">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pendingComps.slice(0, 10).map((c: any, i: number) => (
+                      <tr key={i}>
+                        <td className="px-2 py-1 text-[11px]" style={{ background: "rgba(255,255,255,0.02)" }}>{c.property_name || "—"}</td>
+                        <td className="px-2 py-1 text-[11px] text-cream-muted" style={{ background: "rgba(255,255,255,0.02)" }}>{c.tenant_name || "—"}</td>
+                        <td className="px-2 py-1 text-[11px] tnum" style={{ background: "rgba(255,255,255,0.02)" }}>{c.square_footage ? fmtSF(c.square_footage) : "—"}</td>
+                        <td className="px-2 py-1 text-[11px] font-semibold tnum" style={{ background: "rgba(255,255,255,0.02)", color: C.teal }}>{c.lease_rate ? fmtRate(c.lease_rate) : "—"}</td>
+                        <td className="px-2 py-1 text-[11px] text-cream-muted" style={{ background: "rgba(255,255,255,0.02)" }}>{c.lease_type || "—"}</td>
+                        <td className="px-2 py-1 text-[11px] text-cream-muted" style={{ background: "rgba(255,255,255,0.02)" }}>{c.city || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {pendingComps.length > 10 && (
+                  <div className="text-[10.5px] text-cream-subtle mt-1">...and {pendingComps.length - 10} more</div>
+                )}
+              </div>
+              <div className="flex gap-2">
                 <button
-                  onClick={() => fileRef.current?.click()}
-                  disabled={uploading}
-                  style={{ ...btnSecondary, fontSize: 11, padding: "6px 14px" }}
+                  style={{ ...btnPrimary, fontSize: 11, padding: "6px 14px", background: "linear-gradient(135deg, #4ECDC4, #4ECDC4CC)", boxShadow: "0 2px 10px rgba(78,205,196,0.3)" }}
+                  onClick={savePendingComps}
+                  disabled={savingComps}
                 >
-                  {uploading ? "Analyzing..." : "Choose File"}
+                  {savingComps ? "Saving..." : `Save ${pendingComps.length} Comps to ${propertyName}`}
+                </button>
+                <button style={{ ...btnSecondary, fontSize: 11, padding: "6px 14px" }} onClick={() => setPendingComps([])}>
+                  Discard
                 </button>
               </div>
-            )}
-            {uploadError && <div className="text-[11px] mt-2 font-medium" style={{ color: C.coral }}>{uploadError}</div>}
-          </div>
-        )}
+            </div>
+          ) : (
+            <div className="flex items-center justify-between">
+              <div className="text-[12px] text-cream-muted">
+                {hasComps ? "Upload more comps for this property" : "Upload comparable lease data for this property (Excel, CSV, or image)"}
+              </div>
+              <button
+                onClick={() => fileRef.current?.click()}
+                disabled={uploading}
+                className="px-3 py-1.5 text-[11px] font-semibold cursor-pointer"
+                style={{
+                  borderRadius: 4,
+                  border: "none",
+                  fontFamily: "inherit",
+                  background: "linear-gradient(135deg, #4ECDC4, #4ECDC4CC)",
+                  color: "white",
+                  boxShadow: "0 2px 8px rgba(78,205,196,0.3)",
+                  opacity: uploading ? 0.5 : 1,
+                }}
+              >
+                {uploading ? "Analyzing..." : "+ Upload Comps"}
+              </button>
+            </div>
+          )}
+          {uploadError && <div className="text-[11px] mt-2 font-medium" style={{ color: C.coral }}>{uploadError}</div>}
+        </div>
 
-        {/* Recent comps list */}
+        {/* Saved comps list */}
         {loading ? (
           <div className="text-cream-muted text-[12px] animate-pulse py-3 text-center">Loading comps...</div>
         ) : comps.length === 0 ? (
-          <div className="text-cream-subtle text-[12px] py-4 text-center">No comps yet — upload your first comp file</div>
+          <div className="text-cream-subtle text-[12px] py-2 text-center">No comps for this property yet</div>
         ) : (
-          <div className="overflow-x-auto" style={{ maxHeight: 220 }}>
-            <table className="w-full" style={{ borderCollapse: "separate", borderSpacing: "0 2px" }}>
-              <thead>
-                <tr className="text-[9.5px] text-cream-subtle uppercase tracking-wider">
-                  {["Property", "Tenant", "SF", "Rate/SF", "Type", "City", "Date"].map((h, i) => (
-                    <th key={h} className={`px-2 pb-1.5 font-medium ${i >= 2 && i <= 3 ? "text-right" : "text-left"}`}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {comps.slice(0, 15).map((c) => (
-                  <tr key={c.id}>
-                    <td className="px-2 py-1.5 text-[11px] font-medium" style={{ background: "rgba(255,255,255,0.02)", borderRadius: "4px 0 0 4px" }}>{c.property_name}</td>
-                    <td className="px-2 py-1.5 text-[11px] text-cream-muted" style={{ background: "rgba(255,255,255,0.02)" }}>{c.tenant_name || "—"}</td>
-                    <td className="px-2 py-1.5 text-[11px] text-right tnum" style={{ background: "rgba(255,255,255,0.02)" }}>{c.square_footage ? fmtSF(Number(c.square_footage)) : "—"}</td>
-                    <td className="px-2 py-1.5 text-[11px] text-right font-semibold tnum" style={{ background: "rgba(255,255,255,0.02)", color: C.teal }}>{c.lease_rate ? fmtRate(Number(c.lease_rate)) : "—"}</td>
-                    <td className="px-2 py-1.5 text-[11px] text-cream-muted" style={{ background: "rgba(255,255,255,0.02)" }}>{c.lease_type || "—"}</td>
-                    <td className="px-2 py-1.5 text-[11px] text-cream-muted" style={{ background: "rgba(255,255,255,0.02)" }}>{c.city || "—"}</td>
-                    <td className="px-2 py-1.5 text-[10px] text-cream-subtle" style={{ background: "rgba(255,255,255,0.02)", borderRadius: "0 4px 4px 0" }}>
-                      {new Date(c.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                    </td>
+          <>
+            <div className="overflow-x-auto" style={{ maxHeight: 220 }}>
+              <table className="w-full" style={{ borderCollapse: "separate", borderSpacing: "0 2px" }}>
+                <thead>
+                  <tr className="text-[9.5px] text-cream-subtle uppercase tracking-wider">
+                    {["Property", "Tenant", "SF", "Rate/SF", "Type", "City"].map((h, i) => (
+                      <th key={h} className={`px-2 pb-1.5 font-medium ${i >= 2 && i <= 3 ? "text-right" : "text-left"}`}>{h}</th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {comps.map((c) => (
+                    <tr key={c.id}>
+                      <td className="px-2 py-1.5 text-[11px] font-medium" style={{ background: "rgba(255,255,255,0.02)", borderRadius: "4px 0 0 4px" }}>{c.property_name}</td>
+                      <td className="px-2 py-1.5 text-[11px] text-cream-muted" style={{ background: "rgba(255,255,255,0.02)" }}>{c.tenant_name || "—"}</td>
+                      <td className="px-2 py-1.5 text-[11px] text-right tnum" style={{ background: "rgba(255,255,255,0.02)" }}>{c.square_footage ? fmtSF(Number(c.square_footage)) : "—"}</td>
+                      <td className="px-2 py-1.5 text-[11px] text-right font-semibold tnum" style={{ background: "rgba(255,255,255,0.02)", color: C.teal }}>{c.lease_rate ? fmtRate(Number(c.lease_rate)) : "—"}</td>
+                      <td className="px-2 py-1.5 text-[11px] text-cream-muted" style={{ background: "rgba(255,255,255,0.02)" }}>{c.lease_type || "—"}</td>
+                      <td className="px-2 py-1.5 text-[11px] text-cream-muted" style={{ background: "rgba(255,255,255,0.02)", borderRadius: "0 4px 4px 0" }}>{c.city || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Apply Market Analysis button */}
+            {canAnalyze && !showAnalysis && (
+              <div className="mt-3 flex justify-center">
+                <button
+                  onClick={() => setShowAnalysis(true)}
+                  className="px-5 py-2.5 text-[13px] font-bold cursor-pointer"
+                  style={{
+                    borderRadius: 6,
+                    border: "none",
+                    fontFamily: "inherit",
+                    background: "linear-gradient(135deg, #E07A5F, #E07A5FCC)",
+                    color: "white",
+                    boxShadow: "0 4px 20px rgba(224,122,95,0.4)",
+                    letterSpacing: "0.3px",
+                  }}
+                >
+                  Apply Market Analysis
+                </button>
+              </div>
+            )}
+          </>
         )}
       </Panel>
 
-      {/* ── Delta Analysis ── */}
-      {compsWithRate.length > 0 && occupiedUnits.length > 0 && (
+      {/* ── Market Analysis (shown after clicking Apply) ── */}
+      {showAnalysis && canAnalyze && (
         <>
           {/* Summary delta cards */}
-          <Panel title="Market Comparison">
+          <Panel title="Market Comparison" actions={
+            <button
+              onClick={() => setShowAnalysis(false)}
+              className="text-[10px] text-cream-subtle cursor-pointer hover:text-cream"
+              style={{ background: "none", border: "none", fontFamily: "inherit" }}
+            >
+              Hide
+            </button>
+          }>
             <div className="grid grid-cols-3 gap-2.5 mb-3">
-              {/* Actual rate */}
               <div className="glass-inner p-3">
                 <div className="text-[10px] text-cream-subtle uppercase tracking-wider font-medium mb-1">Your Avg Rate/SF</div>
                 <div className="text-[22px] font-bold tnum" style={{ color: C.coral }}>{fmtRate(intakeWeightedRate)}</div>
                 <div className="text-[10px] text-cream-subtle mt-0.5">{fmtSF(intakeTotalSF)} SF occupied</div>
               </div>
-
-              {/* Market rate */}
               <div className="glass-inner p-3">
                 <div className="text-[10px] text-cream-subtle uppercase tracking-wider font-medium mb-1">Market Avg Rate/SF</div>
                 <div className="text-[22px] font-bold tnum" style={{ color: C.teal }}>{fmtRate(compWeightedRate)}</div>
                 <div className="text-[10px] text-cream-subtle mt-0.5">{compsWithRate.length} comps</div>
               </div>
-
-              {/* Delta */}
               <div className="glass-inner p-3">
                 <div className="text-[10px] text-cream-subtle uppercase tracking-wider font-medium mb-1">Rate Delta</div>
                 <div className="text-[22px] font-bold tnum" style={{ color: rateDelta !== null && rateDelta > 0 ? C.green : C.red }}>
@@ -340,7 +362,7 @@ export default function IntakeComparison({ units, propertyName }: Props) {
             </div>
 
             {/* Revenue impact */}
-            <div className="glass-inner p-3.5 mb-3" style={{ borderLeft: `2px solid ${revenueDelta > 0 ? C.green : C.coral}` }}>
+            <div className="glass-inner p-3.5" style={{ borderLeft: `2px solid ${revenueDelta > 0 ? C.green : C.coral}` }}>
               <div className="flex justify-between items-center">
                 <div>
                   <div className="text-[10px] text-cream-subtle uppercase tracking-wider font-medium mb-0.5">
@@ -362,7 +384,7 @@ export default function IntakeComparison({ units, propertyName }: Props) {
 
           {/* Per-unit comparison table */}
           <Panel title="Unit-by-Unit Market Analysis" actions={
-            <span className="text-[10.5px] text-cream-subtle mr-2">vs. {compsWithRate.length} comps</span>
+            <span className="text-[10.5px] text-cream-subtle mr-2">vs. {compsWithRate.length} comps for this property</span>
           }>
             <div className="overflow-x-auto">
               <table className="w-full" style={{ borderCollapse: "separate", borderSpacing: "0 2px" }}>

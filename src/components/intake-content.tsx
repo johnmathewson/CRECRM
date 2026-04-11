@@ -203,6 +203,33 @@ export default function IntakeContent() {
     setSaving(false);
   }, [propertyName, units, rawText, confidence, aiNotes, fileName, fileType, loadPrevious]);
 
+  // Save intake and return the ID (used by comparison component)
+  const handleSaveAndReturnId = useCallback(async (): Promise<string | null> => {
+    if (savedId) return savedId;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/intake/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          propertyName, units, rawText,
+          claudeResponse: { confidence, notes: aiNotes },
+          fileName, fileType,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error || "Save failed"); setSaving(false); return null; }
+      setSavedId(data.intakeId);
+      loadPrevious();
+      setSaving(false);
+      return data.intakeId;
+    } catch (err: any) {
+      setError(err.message || "Failed to save");
+      setSaving(false);
+      return null;
+    }
+  }, [savedId, propertyName, units, rawText, confidence, aiNotes, fileName, fileType, loadPrevious]);
+
   // Reset
   const reset = useCallback(() => {
     setPhase("upload");
@@ -419,7 +446,7 @@ export default function IntakeContent() {
           </div>
 
           {/* Comps & Comparison */}
-          <IntakeComparison units={units} propertyName={propertyName} />
+          <IntakeComparison units={units} propertyName={propertyName} intakeId={savedId} onSaveIntakeFirst={handleSaveAndReturnId} />
         </>
       )}
 
