@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import Panel, { IconBtn } from "./panel";
 import { createClient } from "@/lib/supabase/client";
 import CreatePropertyModal from "./create-property-modal";
+import CompAnalysisModal from "./comp-analysis-modal";
 
 // ── Types ──────────────────────────────────────────────────
 interface Property {
@@ -84,6 +85,7 @@ export default function PropertiesContent() {
   const [view, setView] = useState<"table" | "grid">("table");
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [showCompAnalysis, setShowCompAnalysis] = useState(false);
 
   const load = useCallback(async () => {
       const supabase = createClient();
@@ -186,6 +188,11 @@ export default function PropertiesContent() {
       </div>
 
       <CreatePropertyModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={load} />
+      <CompAnalysisModal
+        open={showCompAnalysis}
+        onClose={() => setShowCompAnalysis(false)}
+        property={selected}
+      />
 
       {/* Status tabs + search */}
       <div className="flex items-center gap-2 mb-4 flex-wrap">
@@ -404,6 +411,9 @@ export default function PropertiesContent() {
                 ].map((a) => (
                   <button
                     key={a.label}
+                    onClick={() => {
+                      if (a.label === "Run comps") setShowCompAnalysis(true);
+                    }}
                     className="glass-inner flex items-center gap-2.5 px-3 py-2.5 text-left w-full cursor-pointer border-none transition-all hover:bg-[rgba(255,255,255,0.05)]"
                     style={{ background: "rgba(255,255,255,0.02)" }}
                   >
