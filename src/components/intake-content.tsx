@@ -234,11 +234,10 @@ export default function IntakeContent() {
     }
   }, [savedId, propertyName, units, rawText, confidence, aiNotes, fileName, fileType, loadPrevious]);
 
-  // Generate report
+  // Generate report — always re-fetch comps to get latest data
   const handleGenerateReport = useCallback(async (type: ReportType) => {
-    // Load comps for this intake if we have a savedId
     let comps = reportComps;
-    if (savedId && comps.length === 0) {
+    if (savedId) {
       const supabase = createClient();
       const { data } = await supabase.from("comps").select("*").eq("intake_id", savedId);
       if (data) { comps = data; setReportComps(data); }
@@ -520,7 +519,7 @@ export default function IntakeContent() {
           </div>
 
           {/* Comps & Comparison */}
-          <IntakeComparison units={units} propertyName={propertyName} intakeId={savedId} onSaveIntakeFirst={handleSaveAndReturnId} />
+          <IntakeComparison units={units} propertyName={propertyName} intakeId={savedId} onSaveIntakeFirst={handleSaveAndReturnId} onCompsChange={(c) => setReportComps(c)} />
         </>
       )}
 

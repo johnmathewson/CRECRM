@@ -50,9 +50,10 @@ interface Props {
   propertyName: string;
   intakeId: string | null;
   onSaveIntakeFirst: () => Promise<string | null>; // returns intakeId after saving
+  onCompsChange?: (comps: Comp[]) => void; // notify parent when comps change
 }
 
-export default function IntakeComparison({ units, propertyName, intakeId, onSaveIntakeFirst }: Props) {
+export default function IntakeComparison({ units, propertyName, intakeId, onSaveIntakeFirst, onCompsChange }: Props) {
   const [comps, setComps] = useState<Comp[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -147,11 +148,13 @@ export default function IntakeComparison({ units, propertyName, intakeId, onSave
         annual_rent: c.annual_rent || null, source: "upload", file_name: null,
         created_at: new Date().toISOString(),
       }));
-      setComps((prev) => [...savedAsComps, ...prev]);
+      const newComps = [...savedAsComps, ...comps];
+      setComps(newComps);
       setPendingComps([]);
+      onCompsChange?.(newComps);
     } catch (err: any) { setUploadError(err.message); }
     setSavingComps(false);
-  }, [pendingComps, intakeId, onSaveIntakeFirst, loadComps]);
+  }, [pendingComps, intakeId, onSaveIntakeFirst, loadComps, comps, onCompsChange]);
 
   // ── Comparison logic ─────────────────────────────────────
   // Derive effective lease_rate from whatever data we have
