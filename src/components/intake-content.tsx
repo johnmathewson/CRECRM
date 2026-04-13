@@ -9,6 +9,8 @@ import IntakeEditableTable, { IntakeUnit } from "./intake-editable-table";
 import IntakeSummary from "./intake-summary";
 import IntakeComparison from "./intake-comparison";
 import { btnPrimary, btnSecondary } from "./modal";
+import { generateReport } from "@/lib/report-generator";
+import type { ReportType } from "@/lib/report-generator";
 
 // ── Types ──────────────────────────────────────────────────
 type Phase = "upload" | "processing" | "review" | "saved";
@@ -36,6 +38,8 @@ export default function IntakeContent() {
   const [saving, setSaving] = useState(false);
   const [savedId, setSavedId] = useState<string | null>(null);
   const [previousIntakes, setPreviousIntakes] = useState<SavedIntake[]>([]);
+  const [showReportMenu, setShowReportMenu] = useState(false);
+  const [reportComps, setReportComps] = useState<any[]>([]);
   const [loadingPrevious, setLoadingPrevious] = useState(true);
 
   // Load previous intakes
@@ -230,6 +234,23 @@ export default function IntakeContent() {
     }
   }, [savedId, propertyName, units, rawText, confidence, aiNotes, fileName, fileType, loadPrevious]);
 
+  // Generate report
+  const handleGenerateReport = useCallback(async (type: ReportType) => {
+    // Load comps for this intake if we have a savedId
+    let comps = reportComps;
+    if (savedId && comps.length === 0) {
+      const supabase = createClient();
+      const { data } = await supabase.from("comps").select("*").eq("intake_id", savedId);
+      if (data) { comps = data; setReportComps(data); }
+    }
+    generateReport(type, {
+      propertyName,
+      units,
+      comps,
+    });
+    setShowReportMenu(false);
+  }, [propertyName, units, savedId, reportComps]);
+
   // Reset
   const reset = useCallback(() => {
     setPhase("upload");
@@ -264,7 +285,7 @@ export default function IntakeContent() {
           </p>
         </div>
         {phase === "review" && (
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
             <button style={btnSecondary} onClick={reset}>
               ← New Upload
             </button>
@@ -278,9 +299,62 @@ export default function IntakeContent() {
                 onClick={handleSave}
                 disabled={saving}
               >
-                {saving ? "Saving..." : "💾 Save to Database"}
+                {saving ? "Saving..." : "Save to Database"}
               </button>
             )}
+            {/* Report dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => setShowReportMenu(!showReportMenu)}
+                className="px-3 py-2 text-[11.5px] font-semibold cursor-pointer"
+                style={{
+                  borderRadius: 6,
+                  border: "none",
+                  fontFamily: "inherit",
+                  background: "linear-gradient(135deg, #4ECDC4, #4ECDC4CC)",
+                  color: "white",
+                  boxShadow: "0 3px 12px rgba(78,205,196,0.35)",
+                }}
+              >
+                Generate Report ▾
+              </button>
+              {showReportMenu && (
+                <div
+                  className="absolute right-0 mt-1 glass"
+                  style={{
+                    zIndex: 50,
+                    width: 240,
+                    borderRadius: 6,
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+                    padding: 6,
+                  }}
+                >
+                  {[
+                    { type: "sale-bov" as ReportType, label: "Broker Opinion of Value — Sale", icon: "📊" },
+                    { type: "rental-opinion" as ReportType, label: "Rental Opinion", icon: "🏢" },
+                    { type: "stabilized-valuation" as ReportType, label: "Stabilized Valuation", icon: "📈" },
+                  ].map((r) => (
+                    <button
+                      key={r.type}
+                      onClick={() => handleGenerateReport(r.type)}
+                      className="w-full text-left px-3 py-2.5 text-[11.5px] font-medium text-cream cursor-pointer"
+                      style={{
+                        background: "none",
+                        border: "none",
+                        fontFamily: "inherit",
+                        borderRadius: 4,
+                        transition: "all 0.15s",
+                      }}
+                      onMouseEnter={(e) => { (e.target as HTMLElement).style.background = "rgba(255,255,255,0.06)"; }}
+                      onMouseLeave={(e) => { (e.target as HTMLElement).style.background = "none"; }}
+                    >
+                      {r.icon} {r.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
         {phase === "saved" && (
