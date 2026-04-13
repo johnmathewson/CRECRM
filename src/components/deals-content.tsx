@@ -23,17 +23,20 @@ import { useRef } from "react";
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 const USER_ID = "b0000000-0000-0000-0000-000000000001";
 
-const STAGES = ["Lead", "Touring/Underwriting", "Under Contract", "Closed"];
+const STAGES = ["Lead", "LOI", "Listing", "Under Contract", "Closed"];
 
 const C = {
   coral: "#E07A5F", teal: "#4ECDC4", green: "#6BCB77", amber: "#F2C94C", red: "#E74C3C",
+  blue: "#5B9BD5",
   coralM: "rgba(224,122,95,0.22)", tealM: "rgba(78,205,196,0.22)",
   greenM: "rgba(107,203,119,0.20)", amberM: "rgba(242,201,76,0.20)", redM: "rgba(231,76,60,0.20)",
+  blueM: "rgba(91,155,213,0.20)",
 };
 
 const stageColors: Record<string, { bg: string; t: string; border: string }> = {
   Lead: { bg: C.amberM, t: C.amber, border: "rgba(242,201,76,0.25)" },
-  "Touring/Underwriting": { bg: C.tealM, t: C.teal, border: "rgba(78,205,196,0.25)" },
+  LOI: { bg: C.tealM, t: C.teal, border: "rgba(78,205,196,0.25)" },
+  Listing: { bg: C.blueM, t: C.blue, border: "rgba(91,155,213,0.25)" },
   "Under Contract": { bg: C.coralM, t: C.coral, border: "rgba(224,122,95,0.25)" },
   Closed: { bg: C.greenM, t: C.green, border: "rgba(107,203,119,0.25)" },
 };

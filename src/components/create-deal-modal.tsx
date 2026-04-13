@@ -97,7 +97,8 @@ export default function CreateDealModal({ open, onClose, onCreated }: Props) {
           <FormField label="Initial Stage">
             <select style={selectStyle} value={form.stage} onChange={(e) => set("stage", e.target.value)}>
               <option value="Lead">Lead</option>
-              <option value="Touring/Underwriting">Touring/Underwriting</option>
+              <option value="LOI">LOI</option>
+              <option value="Listing">Listing</option>
               <option value="Under Contract">Under Contract</option>
               <option value="Closed">Closed</option>
             </select>
