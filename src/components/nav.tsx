@@ -9,7 +9,7 @@ const links = [
   { href: "/", label: "Dashboard" },
   { href: "/intake", label: "Intake" },
   { href: "/comps", label: "Comps" },
-  { href: "/valuate", label: "Valuate" },
+  { href: "/valuate", label: "Valuation" },
   { href: "/properties", label: "Properties" },
   { href: "/contacts", label: "Contacts" },
   { href: "/deals", label: "Deals" },

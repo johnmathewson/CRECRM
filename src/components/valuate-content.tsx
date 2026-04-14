@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, DragEvent } from "react";
+import * as XLSX from "xlsx";
 import Panel from "./panel";
 import { btnPrimary, btnSecondary, inputStyle, selectStyle, FormField } from "./modal";
 
@@ -9,6 +10,10 @@ import { btnPrimary, btnSecondary, inputStyle, selectStyle, FormField } from "./
 interface UnitInput {
   name: string;
   sqft: string;
+  leaseRate: string;
+  leaseType: string;
+  monthlyRent: string;
+  tenant: string;
 }
 
 interface ValuationResultData {
@@ -57,6 +62,8 @@ interface ValuationResultData {
   reports?: Record<string, string>;
 }
 
+type InputMode = "manual" | "upload";
+
 // ── Helpers ────────────────────────────────────────────────
 
 function fmt$(n: number | undefined | null): string {
@@ -74,6 +81,24 @@ function fmtPct(n: number | undefined | null): string {
   return (n * 100).toFixed(1) + "%";
 }
 
+function emptyUnit(): UnitInput {
+  return { name: "", sqft: "", leaseRate: "", leaseType: "", monthlyRent: "", tenant: "" };
+}
+
+function fileExt(name: string) {
+  return name.split(".").pop()?.toLowerCase() || "";
+}
+
+function fileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1048576).toFixed(1)} MB`;
+}
+
+const IMAGE_EXTS = ["jpg", "jpeg", "png", "webp"];
+const SPREADSHEET_EXTS = ["xlsx", "xls", "csv"];
+const ALL_EXTS = [...SPREADSHEET_EXTS, ...IMAGE_EXTS, "pdf"];
+
 // ── Component ──────────────────────────────────────────────
 
 export default function ValuateContent() {
@@ -82,11 +107,19 @@ export default function ValuateContent() {
   const [assetType, setAssetType] = useState("");
   const [totalSqft, setTotalSqft] = useState("");
   const [yearBuilt, setYearBuilt] = useState("");
-  const [units, setUnits] = useState<UnitInput[]>([{ name: "", sqft: "" }]);
+  const [units, setUnits] = useState<UnitInput[]>([emptyUnit()]);
   const [annualIncome, setAnnualIncome] = useState("");
   const [annualExpenses, setAnnualExpenses] = useState("");
   const [occupancy, setOccupancy] = useState("");
   const [showIncome, setShowIncome] = useState(false);
+
+  // Upload state
+  const [inputMode, setInputMode] = useState<InputMode>("manual");
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [parsing, setParsing] = useState(false);
+  const [parseSource, setParseSource] = useState("");
+  const [dragging, setDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Result state
   const [loading, setLoading] = useState(false);
@@ -95,7 +128,7 @@ export default function ValuateContent() {
   const [downloading, setDownloading] = useState<string | null>(null);
 
   // ── Unit management ────────────────────────────────────
-  const addUnit = () => setUnits([...units, { name: "", sqft: "" }]);
+  const addUnit = () => setUnits([...units, emptyUnit()]);
 
   const removeUnit = (idx: number) => {
     if (units.length <= 1) return;
@@ -107,6 +140,188 @@ export default function ValuateContent() {
     updated[idx] = { ...updated[idx], [field]: value };
     setUnits(updated);
   };
+
+  // ── File handling ──────────────────────────────────────
+  function handleFile(f: File) {
+    setError("");
+    if (f.size > 10 * 1024 * 1024) {
+      setError("File too large — max 10 MB");
+      return;
+    }
+    const ext = fileExt(f.name);
+    if (!ALL_EXTS.includes(ext)) {
+      setError("Unsupported file type. Use Excel, CSV, PDF, or image files.");
+      return;
+    }
+    setUploadFile(f);
+  }
+
+  function onDrop(e: DragEvent) {
+    e.preventDefault();
+    setDragging(false);
+    const f = e.dataTransfer.files?.[0];
+    if (f) handleFile(f);
+  }
+
+  // ── Parse uploaded file ────────────────────────────────
+  async function parseUploadedFile() {
+    if (!uploadFile) return;
+    setParsing(true);
+    setError("");
+
+    const ext = fileExt(uploadFile.name);
+
+    try {
+      if (SPREADSHEET_EXTS.includes(ext)) {
+        // Parse spreadsheet locally with xlsx
+        const buffer = await uploadFile.arrayBuffer();
+        const workbook = XLSX.read(buffer, { type: "array" });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+        if (rows.length < 2) {
+          setError("Spreadsheet has no data rows.");
+          setParsing(false);
+          return;
+        }
+
+        // Send the text content to Claude for intelligent parsing
+        const textContent = rows
+          .map((row) => row.map((cell: any) => String(cell ?? "")).join("\t"))
+          .join("\n");
+
+        const res = await fetch("/api/intake/parse", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: textContent,
+            propertyName: address || "Subject Property",
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          setError(data.error || "Failed to parse spreadsheet");
+          setParsing(false);
+          return;
+        }
+
+        applyParsedUnits(data.units || []);
+        setParseSource(`Parsed ${data.units?.length || 0} units from ${uploadFile.name}`);
+      } else if (IMAGE_EXTS.includes(ext)) {
+        // Send image to Claude for OCR + parsing
+        const buffer = await uploadFile.arrayBuffer();
+        const base64 = btoa(
+          new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), "")
+        );
+        const mediaType =
+          ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
+
+        const res = await fetch("/api/intake/parse", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            isImage: true,
+            imageData: base64,
+            mediaType,
+            propertyName: address || "Subject Property",
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          setError(data.error || "Failed to parse image");
+          setParsing(false);
+          return;
+        }
+
+        applyParsedUnits(data.units || []);
+        setParseSource(
+          `Parsed ${data.units?.length || 0} units from screenshot (${data.confidence} confidence)`
+        );
+      } else if (ext === "pdf") {
+        // Read PDF as text and send to Claude
+        const buffer = await uploadFile.arrayBuffer();
+        const base64 = btoa(
+          new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), "")
+        );
+
+        // PDFs are sent as images to Claude (it can read them)
+        const res = await fetch("/api/intake/parse", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            isImage: true,
+            imageData: base64,
+            mediaType: "application/pdf",
+            propertyName: address || "Subject Property",
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          setError(data.error || "Failed to parse PDF");
+          setParsing(false);
+          return;
+        }
+
+        applyParsedUnits(data.units || []);
+        setParseSource(
+          `Parsed ${data.units?.length || 0} units from PDF (${data.confidence} confidence)`
+        );
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to parse file");
+    } finally {
+      setParsing(false);
+    }
+  }
+
+  function applyParsedUnits(parsed: any[]) {
+    if (!parsed.length) {
+      setError("No units found in the file.");
+      return;
+    }
+
+    const newUnits: UnitInput[] = parsed.map((u: any, i: number) => ({
+      name: u.unit_number || u.suite || `Unit ${i + 1}`,
+      sqft: u.square_footage ? String(u.square_footage) : "",
+      leaseRate: u.lease_rate ? String(u.lease_rate) : "",
+      leaseType: u.lease_type || "",
+      monthlyRent: u.monthly_rent ? String(u.monthly_rent) : "",
+      tenant: u.tenant_name || "",
+    }));
+
+    setUnits(newUnits);
+    setInputMode("manual"); // Switch to manual so they can see/edit the parsed data
+
+    // Auto-calculate total SF if not set
+    if (!totalSqft) {
+      const total = newUnits.reduce((sum, u) => sum + (parseFloat(u.sqft) || 0), 0);
+      if (total > 0) setTotalSqft(String(total));
+    }
+
+    // Auto-calculate income if not set
+    if (!annualIncome) {
+      const totalAnnual = parsed.reduce(
+        (sum: number, u: any) =>
+          sum + (u.annual_rent || (u.monthly_rent ? u.monthly_rent * 12 : 0)),
+        0
+      );
+      if (totalAnnual > 0) {
+        setAnnualIncome(String(Math.round(totalAnnual)));
+        setShowIncome(true);
+      }
+    }
+
+    // Calculate occupancy
+    const totalUnits = parsed.length;
+    const vacantUnits = parsed.filter((u: any) => u.is_vacant).length;
+    if (totalUnits > 0 && !occupancy) {
+      const occ = ((totalUnits - vacantUnits) / totalUnits) * 100;
+      setOccupancy(String(Math.round(occ)));
+    }
+  }
 
   // ── Run valuation ──────────────────────────────────────
   const runValuation = async () => {
@@ -186,6 +401,12 @@ export default function ValuateContent() {
   };
 
   const v = result?.valuation;
+  const ext = uploadFile ? fileExt(uploadFile.name) : "";
+  const extIcon: Record<string, string> = {
+    xlsx: "📊", xls: "📊", csv: "📊",
+    jpg: "🖼️", jpeg: "🖼️", png: "🖼️", webp: "🖼️",
+    pdf: "📄",
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -194,7 +415,7 @@ export default function ValuateContent() {
         <div>
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Property Valuation</h2>
           <p style={{ margin: "4px 0 0", fontSize: 12, color: "rgba(240,237,228,0.45)" }}>
-            Enter a property address to run a full valuation with comp analysis and PDF reports
+            Enter a property address and upload a rent roll or enter units manually
           </p>
         </div>
         {result && (
@@ -205,168 +426,308 @@ export default function ValuateContent() {
       </div>
 
       {/* Form + Results layout */}
-      <div style={{ display: "grid", gridTemplateColumns: result ? "380px 1fr" : "1fr", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: result ? "420px 1fr" : "1fr", gap: 16 }}>
         {/* ── LEFT: Input Form ────────────────────────────── */}
-        <Panel title="Subject Property" actions={<span />}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            <FormField label="Property Address *">
-              <input
-                style={inputStyle}
-                placeholder="123 Main St, City, State"
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && !loading && runValuation()}
-              />
-            </FormField>
-
-            <FormField label="Asset Type">
-              <select
-                style={selectStyle}
-                value={assetType}
-                onChange={(e) => setAssetType(e.target.value)}
-              >
-                <option value="">Auto-detect from comps</option>
-                <option value="Retail">Retail</option>
-                <option value="Office">Office</option>
-                <option value="Industrial">Industrial</option>
-                <option value="Multifamily">Multifamily</option>
-                <option value="Flex">Flex</option>
-                <option value="Land">Land</option>
-                <option value="Hospitality">Hospitality</option>
-                <option value="Medical">Medical Office</option>
-              </select>
-            </FormField>
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              <FormField label="Total SF">
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <Panel title="Subject Property" actions={<span />}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <FormField label="Property Address *">
                 <input
                   style={inputStyle}
-                  type="number"
-                  placeholder="e.g. 12000"
-                  value={totalSqft}
-                  onChange={(e) => setTotalSqft(e.target.value)}
+                  placeholder="123 Main St, City, State"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && !loading && runValuation()}
                 />
               </FormField>
-              <FormField label="Year Built">
-                <input
-                  style={inputStyle}
-                  type="number"
-                  placeholder="e.g. 1995"
-                  value={yearBuilt}
-                  onChange={(e) => setYearBuilt(e.target.value)}
-                />
+
+              <FormField label="Asset Type">
+                <select
+                  style={selectStyle}
+                  value={assetType}
+                  onChange={(e) => setAssetType(e.target.value)}
+                >
+                  <option value="">Auto-detect from comps</option>
+                  <option value="Retail">Retail</option>
+                  <option value="Office">Office</option>
+                  <option value="Industrial">Industrial</option>
+                  <option value="Multifamily">Multifamily</option>
+                  <option value="Flex">Flex</option>
+                  <option value="Land">Land</option>
+                  <option value="Hospitality">Hospitality</option>
+                  <option value="Medical">Medical Office</option>
+                </select>
               </FormField>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <FormField label="Total SF">
+                  <input
+                    style={inputStyle}
+                    type="number"
+                    placeholder="e.g. 12000"
+                    value={totalSqft}
+                    onChange={(e) => setTotalSqft(e.target.value)}
+                  />
+                </FormField>
+                <FormField label="Year Built">
+                  <input
+                    style={inputStyle}
+                    type="number"
+                    placeholder="e.g. 1995"
+                    value={yearBuilt}
+                    onChange={(e) => setYearBuilt(e.target.value)}
+                  />
+                </FormField>
+              </div>
             </div>
+          </Panel>
 
-            {/* Unit Mix */}
-            <div style={{ marginTop: 4 }}>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  marginBottom: 8,
-                }}
-              >
-                <label
-                  style={{
-                    fontSize: 10.5,
-                    color: "rgba(240,237,228,0.45)",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                    fontWeight: 500,
-                  }}
-                >
-                  Unit Mix
-                </label>
+          {/* ── Unit Data: Toggle between manual and upload ─── */}
+          <Panel
+            title="Rent Roll / Unit Data"
+            actions={
+              <div style={{ display: "flex", gap: 2 }}>
                 <button
-                  onClick={addUnit}
+                  onClick={() => setInputMode("manual")}
                   style={{
-                    background: "none",
-                    border: "none",
-                    color: "#E07A5F",
-                    fontSize: 11,
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                    fontWeight: 600,
+                    ...tabBtnStyle,
+                    background: inputMode === "manual" ? "rgba(224,122,95,0.15)" : "transparent",
+                    color: inputMode === "manual" ? "#E07A5F" : "rgba(240,237,228,0.4)",
                   }}
                 >
-                  + Add Unit
+                  Manual
+                </button>
+                <button
+                  onClick={() => setInputMode("upload")}
+                  style={{
+                    ...tabBtnStyle,
+                    background: inputMode === "upload" ? "rgba(224,122,95,0.15)" : "transparent",
+                    color: inputMode === "upload" ? "#E07A5F" : "rgba(240,237,228,0.4)",
+                  }}
+                >
+                  Upload
                 </button>
               </div>
-
-              {units.map((unit, idx) => (
+            }
+          >
+            {inputMode === "upload" ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {/* Drop zone */}
                 <div
-                  key={idx}
+                  onDrop={onDrop}
+                  onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+                  onDragLeave={() => setDragging(false)}
+                  onClick={() => fileInputRef.current?.click()}
                   style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr 28px",
-                    gap: 6,
-                    marginBottom: 6,
+                    border: `2px dashed ${dragging ? "rgba(224,122,95,0.6)" : "rgba(255,255,255,0.08)"}`,
+                    borderRadius: 6,
+                    padding: uploadFile ? "14px 16px" : "32px 16px",
+                    textAlign: "center",
+                    cursor: parsing ? "default" : "pointer",
+                    transition: "all 0.2s",
+                    background: dragging ? "rgba(224,122,95,0.04)" : "rgba(255,255,255,0.015)",
                   }}
                 >
                   <input
-                    style={{ ...inputStyle, fontSize: 11.5 }}
-                    placeholder={`Unit ${idx + 1} name`}
-                    value={unit.name}
-                    onChange={(e) => updateUnit(idx, "name", e.target.value)}
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".xlsx,.xls,.csv,.jpg,.jpeg,.png,.webp,.pdf"
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleFile(f);
+                    }}
+                    disabled={parsing}
                   />
-                  <input
-                    style={{ ...inputStyle, fontSize: 11.5 }}
-                    type="number"
-                    placeholder="SF"
-                    value={unit.sqft}
-                    onChange={(e) => updateUnit(idx, "sqft", e.target.value)}
-                  />
+
+                  {uploadFile ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ fontSize: 22 }}>{extIcon[ext] || "📎"}</span>
+                      <div style={{ flex: 1, textAlign: "left" }}>
+                        <div style={{ fontSize: 12, fontWeight: 500 }}>{uploadFile.name}</div>
+                        <div style={{ fontSize: 11, color: "rgba(240,237,228,0.4)", marginTop: 2 }}>
+                          {fileSize(uploadFile.size)} &middot; {ext.toUpperCase()}
+                        </div>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setUploadFile(null);
+                          setParseSource("");
+                        }}
+                        className="icon-btn"
+                        style={{ fontSize: 12 }}
+                        disabled={parsing}
+                      >
+                        x
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: 28, marginBottom: 6, opacity: 0.4 }}>📂</div>
+                      <div style={{ fontSize: 12, color: "rgba(240,237,228,0.6)", marginBottom: 4 }}>
+                        Drag & drop a file here, or{" "}
+                        <span style={{ color: "#E07A5F", fontWeight: 600 }}>browse</span>
+                      </div>
+                      <div style={{ fontSize: 10.5, color: "rgba(240,237,228,0.35)" }}>
+                        Excel, CSV, PDF, or screenshot/image &middot; Max 10 MB
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Parse button */}
+                {uploadFile && !parseSource && (
                   <button
-                    onClick={() => removeUnit(idx)}
+                    style={{
+                      ...btnPrimary,
+                      opacity: parsing ? 0.7 : 1,
+                      pointerEvents: parsing ? "none" : "auto",
+                    }}
+                    onClick={parseUploadedFile}
+                    disabled={parsing}
+                  >
+                    {parsing
+                      ? IMAGE_EXTS.includes(ext) || ext === "pdf"
+                        ? "Claude is reading the file..."
+                        : "Parsing spreadsheet..."
+                      : IMAGE_EXTS.includes(ext) || ext === "pdf"
+                        ? "Extract Data with AI"
+                        : "Parse Spreadsheet"}
+                  </button>
+                )}
+
+                {/* Parse result badge */}
+                {parseSource && (
+                  <div
+                    style={{
+                      padding: "8px 12px",
+                      background: "rgba(34,197,94,0.08)",
+                      border: "1px solid rgba(34,197,94,0.2)",
+                      borderRadius: 5,
+                      fontSize: 11.5,
+                      color: "#22c55e",
+                    }}
+                  >
+                    {parseSource} &mdash; review below and run valuation
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* ── Manual unit entry ────────────────────────── */
+              <div>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginBottom: 8,
+                  }}
+                >
+                  <span style={{ fontSize: 10.5, color: "rgba(240,237,228,0.35)" }}>
+                    {units.length} unit{units.length !== 1 ? "s" : ""}
+                  </span>
+                  <button
+                    onClick={addUnit}
                     style={{
                       background: "none",
-                      border: "1px solid rgba(255,255,255,0.06)",
-                      borderRadius: 4,
-                      color: "rgba(240,237,228,0.3)",
-                      cursor: units.length <= 1 ? "default" : "pointer",
-                      fontSize: 12,
-                      opacity: units.length <= 1 ? 0.3 : 1,
+                      border: "none",
+                      color: "#E07A5F",
+                      fontSize: 11,
+                      cursor: "pointer",
                       fontFamily: "inherit",
+                      fontWeight: 600,
                     }}
-                    disabled={units.length <= 1}
                   >
-                    x
+                    + Add Unit
                   </button>
                 </div>
-              ))}
-            </div>
 
-            {/* Income toggle */}
-            <div style={{ marginTop: 6 }}>
+                {/* Column headers */}
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 70px 70px 28px",
+                    gap: 6,
+                    marginBottom: 4,
+                  }}
+                >
+                  <span style={colHeaderStyle}>Unit / Tenant</span>
+                  <span style={colHeaderStyle}>SF</span>
+                  <span style={colHeaderStyle}>$/SF</span>
+                  <span />
+                </div>
+
+                {units.map((unit, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 70px 70px 28px",
+                      gap: 6,
+                      marginBottom: 5,
+                    }}
+                  >
+                    <input
+                      style={{ ...inputStyle, fontSize: 11 }}
+                      placeholder={unit.tenant || `Unit ${idx + 1}`}
+                      value={unit.name}
+                      onChange={(e) => updateUnit(idx, "name", e.target.value)}
+                    />
+                    <input
+                      style={{ ...inputStyle, fontSize: 11 }}
+                      type="number"
+                      placeholder="SF"
+                      value={unit.sqft}
+                      onChange={(e) => updateUnit(idx, "sqft", e.target.value)}
+                    />
+                    <input
+                      style={{ ...inputStyle, fontSize: 11 }}
+                      type="number"
+                      placeholder="$/SF"
+                      value={unit.leaseRate}
+                      onChange={(e) => updateUnit(idx, "leaseRate", e.target.value)}
+                    />
+                    <button
+                      onClick={() => removeUnit(idx)}
+                      style={{
+                        background: "none",
+                        border: "1px solid rgba(255,255,255,0.06)",
+                        borderRadius: 4,
+                        color: "rgba(240,237,228,0.3)",
+                        cursor: units.length <= 1 ? "default" : "pointer",
+                        fontSize: 12,
+                        opacity: units.length <= 1 ? 0.3 : 1,
+                        fontFamily: "inherit",
+                      }}
+                      disabled={units.length <= 1}
+                    >
+                      x
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Panel>
+
+          {/* ── Income Details (collapsible) ────────────────── */}
+          <Panel
+            title="Income Details"
+            actions={
               <button
                 onClick={() => setShowIncome(!showIncome)}
                 style={{
-                  background: "none",
-                  border: "none",
-                  color: "rgba(240,237,228,0.5)",
-                  fontSize: 11,
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                  padding: 0,
+                  ...tabBtnStyle,
+                  color: "rgba(240,237,228,0.4)",
                 }}
               >
-                {showIncome ? "- Hide" : "+ Show"} Income Details (optional)
+                {showIncome ? "Hide" : "Show"}
               </button>
-            </div>
-
-            {showIncome && (
-              <div
-                style={{
-                  marginTop: 8,
-                  padding: 12,
-                  background: "rgba(255,255,255,0.02)",
-                  border: "1px solid rgba(255,255,255,0.05)",
-                  borderRadius: 5,
-                }}
-              >
-                <FormField label="Annual Gross Income">
+            }
+          >
+            {showIncome ? (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                <FormField label="Annual Income">
                   <input
                     style={inputStyle}
                     type="number"
@@ -394,54 +755,56 @@ export default function ValuateContent() {
                   />
                 </FormField>
               </div>
-            )}
-
-            {/* Error */}
-            {error && (
-              <div
-                style={{
-                  marginTop: 8,
-                  padding: "8px 12px",
-                  background: "rgba(239,68,68,0.1)",
-                  border: "1px solid rgba(239,68,68,0.25)",
-                  borderRadius: 5,
-                  fontSize: 12,
-                  color: "#ef4444",
-                }}
-              >
-                {error}
+            ) : (
+              <div style={{ fontSize: 11, color: "rgba(240,237,228,0.3)" }}>
+                Optional — provide if available for more accurate income approach
               </div>
             )}
+          </Panel>
 
-            {/* Submit */}
-            <button
+          {/* Error */}
+          {error && (
+            <div
               style={{
-                ...btnPrimary,
-                marginTop: 12,
-                width: "100%",
-                opacity: loading ? 0.7 : 1,
-                pointerEvents: loading ? "none" : "auto",
+                padding: "8px 12px",
+                background: "rgba(239,68,68,0.1)",
+                border: "1px solid rgba(239,68,68,0.25)",
+                borderRadius: 5,
+                fontSize: 12,
+                color: "#ef4444",
               }}
-              onClick={runValuation}
-              disabled={loading}
             >
-              {loading ? "Running Valuation..." : "Run Valuation"}
-            </button>
+              {error}
+            </div>
+          )}
 
-            {loading && (
-              <p
-                style={{
-                  fontSize: 11,
-                  color: "rgba(240,237,228,0.4)",
-                  textAlign: "center",
-                  margin: "6px 0 0",
-                }}
-              >
-                Geocoding address, pulling comps, running analysis...
-              </p>
-            )}
-          </div>
-        </Panel>
+          {/* Submit */}
+          <button
+            style={{
+              ...btnPrimary,
+              width: "100%",
+              opacity: loading ? 0.7 : 1,
+              pointerEvents: loading ? "none" : "auto",
+            }}
+            onClick={runValuation}
+            disabled={loading}
+          >
+            {loading ? "Running Valuation..." : "Run Valuation"}
+          </button>
+
+          {loading && (
+            <p
+              style={{
+                fontSize: 11,
+                color: "rgba(240,237,228,0.4)",
+                textAlign: "center",
+                margin: "2px 0 0",
+              }}
+            >
+              Geocoding address, pulling comps, running analysis...
+            </p>
+          )}
+        </div>
 
         {/* ── RIGHT: Results ──────────────────────────────── */}
         {result && v && (
@@ -543,25 +906,8 @@ export default function ValuateContent() {
                 {/* Approaches grid */}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                   {/* Income Approach */}
-                  <div
-                    style={{
-                      padding: 12,
-                      background: "rgba(255,255,255,0.02)",
-                      border: "1px solid rgba(255,255,255,0.06)",
-                      borderRadius: 5,
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontSize: 10,
-                        color: "rgba(240,237,228,0.4)",
-                        textTransform: "uppercase",
-                        letterSpacing: "0.06em",
-                        marginBottom: 8,
-                      }}
-                    >
-                      Income Approach
-                    </div>
+                  <div style={approachBoxStyle}>
+                    <div style={approachLabelStyle}>Income Approach</div>
                     {v.incomeApproach?.available ? (
                       <>
                         <div style={{ fontSize: 12, marginBottom: 4 }}>
@@ -592,25 +938,8 @@ export default function ValuateContent() {
                   </div>
 
                   {/* Sales Comparison */}
-                  <div
-                    style={{
-                      padding: 12,
-                      background: "rgba(255,255,255,0.02)",
-                      border: "1px solid rgba(255,255,255,0.06)",
-                      borderRadius: 5,
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontSize: 10,
-                        color: "rgba(240,237,228,0.4)",
-                        textTransform: "uppercase",
-                        letterSpacing: "0.06em",
-                        marginBottom: 8,
-                      }}
-                    >
-                      Sales Comparison
-                    </div>
+                  <div style={approachBoxStyle}>
+                    <div style={approachLabelStyle}>Sales Comparison</div>
                     {v.salesComparison?.available ? (
                       <>
                         <div style={{ fontSize: 12, marginBottom: 4 }}>
@@ -651,20 +980,9 @@ export default function ValuateContent() {
                 {v.comps.totalFound} comps found within {v.comps.radiusMiles} mile radius
               </div>
               <div style={{ maxHeight: 280, overflowY: "auto" }}>
-                <table
-                  style={{
-                    width: "100%",
-                    borderCollapse: "collapse",
-                    fontSize: 11,
-                  }}
-                >
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                   <thead>
-                    <tr
-                      style={{
-                        borderBottom: "1px solid rgba(255,255,255,0.06)",
-                        textAlign: "left",
-                      }}
-                    >
+                    <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", textAlign: "left" }}>
                       <th style={thStyle}>Address</th>
                       <th style={thStyle}>Dist</th>
                       <th style={thStyle}>Price</th>
@@ -676,21 +994,9 @@ export default function ValuateContent() {
                   </thead>
                   <tbody>
                     {v.comps.saleComps.slice(0, 15).map((c: any, i: number) => (
-                      <tr
-                        key={i}
-                        style={{
-                          borderBottom: "1px solid rgba(255,255,255,0.03)",
-                        }}
-                      >
+                      <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
                         <td style={tdStyle} title={c.address}>
-                          <div
-                            style={{
-                              maxWidth: 200,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
+                          <div style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             {c.address}
                           </div>
                         </td>
@@ -700,9 +1006,7 @@ export default function ValuateContent() {
                         <td style={tdStyle}>{fmt$(c.salePrice)}</td>
                         <td style={tdStyle}>{fmtPsf(c.pricePsf)}</td>
                         <td style={tdStyle}>{c.capRate ? fmtPct(c.capRate) : "-"}</td>
-                        <td style={tdStyle}>
-                          {c.sqft ? c.sqft.toLocaleString() : "-"}
-                        </td>
+                        <td style={tdStyle}>{c.sqft ? c.sqft.toLocaleString() : "-"}</td>
                         <td style={tdStyle}>{c.saleDate || "-"}</td>
                       </tr>
                     ))}
@@ -733,11 +1037,7 @@ export default function ValuateContent() {
                 {[
                   { key: "sale-bov", label: "BOV Sale", file: "BOV_Sale" },
                   { key: "rental-opinion", label: "Rental Opinion", file: "Rental_Opinion" },
-                  {
-                    key: "stabilized-valuation",
-                    label: "Stabilized Valuation",
-                    file: "Stabilized_Valuation",
-                  },
+                  { key: "stabilized-valuation", label: "Stabilized Valuation", file: "Stabilized_Valuation" },
                 ].map((r) => (
                   <button
                     key={r.key}
@@ -754,18 +1054,12 @@ export default function ValuateContent() {
                 ))}
               </div>
 
-              {/* Disclaimers */}
               {v.disclaimers && v.disclaimers.length > 0 && (
                 <div style={{ marginTop: 12 }}>
                   {v.disclaimers.map((d: string, i: number) => (
                     <p
                       key={i}
-                      style={{
-                        fontSize: 10,
-                        color: "rgba(240,237,228,0.3)",
-                        margin: "4px 0",
-                        lineHeight: 1.4,
-                      }}
+                      style={{ fontSize: 10, color: "rgba(240,237,228,0.3)", margin: "4px 0", lineHeight: 1.4 }}
                     >
                       {d}
                     </p>
@@ -780,7 +1074,39 @@ export default function ValuateContent() {
   );
 }
 
-// ── Table styles ──────────────────────────────────────────
+// ── Shared styles ─────────────────────────────────────────
+
+const tabBtnStyle: React.CSSProperties = {
+  padding: "3px 10px",
+  borderRadius: 4,
+  border: "none",
+  cursor: "pointer",
+  fontSize: 11,
+  fontWeight: 500,
+  fontFamily: "inherit",
+};
+
+const colHeaderStyle: React.CSSProperties = {
+  fontSize: 9.5,
+  color: "rgba(240,237,228,0.3)",
+  textTransform: "uppercase",
+  letterSpacing: "0.06em",
+};
+
+const approachBoxStyle: React.CSSProperties = {
+  padding: 12,
+  background: "rgba(255,255,255,0.02)",
+  border: "1px solid rgba(255,255,255,0.06)",
+  borderRadius: 5,
+};
+
+const approachLabelStyle: React.CSSProperties = {
+  fontSize: 10,
+  color: "rgba(240,237,228,0.4)",
+  textTransform: "uppercase",
+  letterSpacing: "0.06em",
+  marginBottom: 8,
+};
 
 const thStyle: React.CSSProperties = {
   padding: "6px 8px",
