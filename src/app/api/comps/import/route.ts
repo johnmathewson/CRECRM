@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     );
 
-    const results = [];
+    const results: { fileName: string; inserted: number; skipped: number; error?: string }[] = [];
 
     for (const file of files) {
       const buffer = Buffer.from(await file.arrayBuffer());
@@ -33,12 +33,12 @@ export async function POST(req: NextRequest) {
       const data: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
       if (data.length < 2) {
-        results.push({ fileName: file.name, error: "File has no data rows" });
+        results.push({ fileName: file.name, inserted: 0, skipped: 0, error: "File has no data rows" });
         continue;
       }
 
       const headers = data[0].map((h: any) => String(h || "").trim());
-      const rows = data.slice(1).filter((row) => row.some((cell: any) => cell != null && cell !== ""));
+      const rows = data.slice(1).filter((row: any[]) => row.some((cell: any) => cell != null && cell !== ""));
 
       const result = await importCoStarFile(rows, headers, ORG_ID, supabase, {
         fileName: file.name,
@@ -46,11 +46,11 @@ export async function POST(req: NextRequest) {
         includeActive,
       });
 
-      results.push({ fileName: file.name, ...result });
+      results.push({ fileName: file.name, inserted: result.inserted, skipped: result.skipped });
     }
 
-    const totalInserted = results.reduce((sum, r) => sum + (r.inserted || 0), 0);
-    const totalSkipped = results.reduce((sum, r) => sum + (r.skipped || 0), 0);
+    const totalInserted = results.reduce((sum, r) => sum + r.inserted, 0);
+    const totalSkipped = results.reduce((sum, r) => sum + r.skipped, 0);
 
     return NextResponse.json({
       success: true,

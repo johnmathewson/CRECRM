@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
     if (format === "pdf") {
       // Return single BOV Sale PDF
       const pdfBytes = generateReportBytes("sale-bov", reportData);
-      return new NextResponse(pdfBytes, {
+      return new NextResponse(Buffer.from(pdfBytes), {
         headers: {
           "Content-Type": "application/pdf",
           "Content-Disposition": `attachment; filename="${safeName(body.address)}_BOV.pdf"`,

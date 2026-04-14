@@ -137,8 +137,8 @@ export default function CompsContent() {
   useEffect(() => { load(); }, [load]);
 
   // Derive city list from sale comps
-  const cities = [...new Set(saleComps.map((c) => c.city).filter(Boolean))].sort();
-  const assetTypes = [...new Set(saleComps.map((c) => c.asset_type).filter(Boolean))].sort();
+  const cities = Array.from(new Set(saleComps.map((c) => c.city).filter(Boolean))).sort();
+  const assetTypes = Array.from(new Set(saleComps.map((c) => c.asset_type).filter(Boolean) as string[])).sort();
 
   // Filter sale comps
   const filteredSales = saleComps.filter((c) => {
@@ -217,10 +217,10 @@ export default function CompsContent() {
         </div>
         <div className="flex gap-2">
           <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" multiple className="hidden" onChange={handleImport} />
-          <IconBtn onClick={() => fileInputRef.current?.click()} title="Import comps from file">
+          <IconBtn onClick={() => fileInputRef.current?.click()}>
             {importing ? "⏳" : "📥"}
           </IconBtn>
-          <IconBtn onClick={() => setShowAdd(!showAdd)} title="Quick add comp">➕</IconBtn>
+          <IconBtn onClick={() => setShowAdd(!showAdd)}>➕</IconBtn>
         </div>
       </div>
 
@@ -234,19 +234,19 @@ export default function CompsContent() {
 
       {/* Stats row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Panel className="p-4 text-center">
+        <Panel title="" className="p-4 text-center">
           <div className="text-2xl font-bold text-cream">{totalSales.toLocaleString()}</div>
           <div className="text-[10px] text-cream-muted mt-0.5">Sale Comps</div>
         </Panel>
-        <Panel className="p-4 text-center">
+        <Panel title="" className="p-4 text-center">
           <div className="text-2xl font-bold text-cream">{cities.length}</div>
           <div className="text-[10px] text-cream-muted mt-0.5">Cities Covered</div>
         </Panel>
-        <Panel className="p-4 text-center">
+        <Panel title="" className="p-4 text-center">
           <div className="text-2xl font-bold" style={{ color: C.teal }}>{avgPpsf > 0 ? `$${avgPpsf.toFixed(0)}` : "—"}</div>
           <div className="text-[10px] text-cream-muted mt-0.5">Avg $/SF (Filtered)</div>
         </Panel>
-        <Panel className="p-4 text-center">
+        <Panel title="" className="p-4 text-center">
           <div className="text-2xl font-bold" style={{ color: C.coral }}>{avgCap > 0 ? `${(avgCap * 100).toFixed(1)}%` : "—"}</div>
           <div className="text-[10px] text-cream-muted mt-0.5">Avg Cap Rate (Filtered)</div>
         </Panel>
@@ -357,7 +357,7 @@ export default function CompsContent() {
 
       {/* Table */}
       {tab === "sale" && (
-        <Panel className="overflow-x-auto">
+        <Panel title="" className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
               <tr className="text-cream-muted border-b border-white/5">
@@ -404,7 +404,7 @@ export default function CompsContent() {
       )}
 
       {tab === "lease" && (
-        <Panel className="overflow-x-auto">
+        <Panel title="" className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
               <tr className="text-cream-muted border-b border-white/5">
@@ -444,7 +444,7 @@ export default function CompsContent() {
 
       {/* Detail panel */}
       {selected && (
-        <Panel className="p-5 space-y-3">
+        <Panel title="" className="p-5 space-y-3">
           <div className="flex justify-between items-start">
             <div>
               <h2 className="text-sm font-bold text-cream">{selected.address}</h2>
