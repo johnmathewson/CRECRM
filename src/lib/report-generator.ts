@@ -975,4 +975,26 @@ export function generateReport(type: ReportType, data: ReportData): void {
   doc.save(filename);
 }
 
+/**
+ * Generate a report and return the PDF as a Uint8Array (for server-side / API use).
+ * Does NOT trigger a download — returns raw bytes.
+ */
+export function generateReportBytes(type: ReportType, data: ReportData): Uint8Array {
+  let doc: jsPDF;
+
+  switch (type) {
+    case "sale-bov":
+      doc = generateSaleBOV(data);
+      break;
+    case "rental-opinion":
+      doc = generateRentalOpinion(data);
+      break;
+    case "stabilized-valuation":
+      doc = generateStabilizedValuation(data);
+      break;
+  }
+
+  return doc.output("arraybuffer") as unknown as Uint8Array;
+}
+
 export type { ReportData, ReportType };
