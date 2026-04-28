@@ -61,13 +61,31 @@ RPCs:
 
 **No `database.types.ts` exists.** Types are inferred inline from component state objects.
 
-**Single-user constants** (hardcoded in inserts, see `/src/app/api/intake/save/route.ts:4-5`):
+**Single-user constants** (hardcoded in inserts, see `/src/app/api/intake/save/route.ts:4-5`) — **VERIFIED real rows in DB:**
 ```ts
-const ORG_ID  = "a0000000-0000-0000-0000-000000000001"
-const USER_ID = "b0000000-0000-0000-0000-000000000001"
+const ORG_ID  = "a0000000-0000-0000-0000-000000000001"  // organizations.name = "Stewardship Asset Group"
+const USER_ID = "b0000000-0000-0000-0000-000000000001"  // users.email = "john@johnmathewson.co"
 ```
 
-Use these same constants for any new table inserts.
+The DB has full multi-tenant capability (`organizations` + `users` + `roles` tables) but the frontend currently hardcodes these constants. Match the existing pattern.
+
+**Supabase project:** `CRE Intelligence Platform` (project_id `sxqvrcmmgawaunssstyd`, region `us-east-1`). Connect via Supabase MCP — Claude has direct access to apply migrations and run SQL.
+
+**Project memory table** — `project_memory` (created in migration 0002). Cross-machine state cursor for major builds:
+```sql
+SELECT * FROM project_memory WHERE project_slug = 'lead-pipeline';
+```
+Read this from any machine to pick up current phase, pending tasks, decisions, and a markdown summary.
+
+**The full DB has 38 tables** — way more than what the frontend currently uses. Beyond the 8 mapped above:
+`submarkets`, `submarket_benchmarks`, `demand_profiles` (market intel layer) ·
+`signals`, `signal_actions` (opportunity-detection / agent system) ·
+`sale_comps` (1853 rows — the real comp DB; `comps` is just 82 rows of curated subset), `lease_comps`, `assessor_records`, `parcels`, `property_parcels`, `beneficial_owners` (county/ownership data) ·
+`listings`, `buildings`, `leases`, `units` (proper inventory model) ·
+`activities`, `tasks`, `communications`, `linked_deals`, `deal_offers`, `commissions` ·
+`documents`, `document_extractions`, `import_jobs` ·
+`organizations`, `users`, `roles` ·
+PostGIS extension active (`spatial_ref_sys`).
 
 ---
 
@@ -121,64 +139,45 @@ Lead arrives  ──►  Apps Script catches  ──►  POST /api/leads/intake 
 
 ---
 
-## Schema additions queued (write as supabase/migrations/0001_leads.sql)
+## Schema for the lead pipeline (APPLIED — see migrations 0001 + 0002)
 
-We adopted a `supabase/migrations/` discipline going forward. Existing schema lives in production only; **new schema goes in tracked SQL files first.**
+**Important correction:** the original plan was "create a new `leads` table + `lead_messages` table." The actual DB already had a `leads` table (used by the public valuation_agent endpoint) AND a `communications` table that already provides channel/direction/from/to/subject/body/raw_payload — exactly what `lead_messages` would have been.
 
-```sql
--- New tables to add
-CREATE TYPE lead_source   AS ENUM ('crexi','loopnet','buildout','costar','website','email','phone','sms');
-CREATE TYPE lead_intent   AS ENUM ('buy','lease','sell','info');
-CREATE TYPE lead_urgency  AS ENUM ('hot','warm','cold');
-CREATE TYPE lead_status   AS ENUM ('new','acknowledged','drafted','sent','archived');
-CREATE TYPE message_dir   AS ENUM ('inbound','outbound');
+**The real plan, applied:**
 
-CREATE TABLE leads (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now(),
-  org_id uuid NOT NULL,
-  created_by uuid NOT NULL,
-  source lead_source NOT NULL,
-  sender_name text,
-  sender_email text,
-  sender_phone text,
-  property_id uuid REFERENCES properties(id) ON DELETE SET NULL,
-  property_label text,                  -- "Joliet medical building" (raw mention)
-  intent lead_intent,
-  urgency lead_urgency DEFAULT 'warm',
-  qualifier_summary text,
-  raw_email_subject text,
-  raw_email_body text,
-  claude_extraction jsonb,
-  auto_ack_sent_at timestamptz,
-  draft_reply text,
-  draft_attachments jsonb,
-  final_reply text,
-  final_sent_at timestamptz,
-  status lead_status NOT NULL DEFAULT 'new',
-  linked_contact_id uuid REFERENCES contacts(id) ON DELETE SET NULL,
-  linked_deal_id uuid REFERENCES deals(id) ON DELETE SET NULL
-);
+1. **Extend the existing `leads` table** with inbox fields (rather than creating a parallel one). Backwards-compatible with the existing valuation_agent rows.
+2. **Add `lead_id` FK to `communications`** so each inbound/outbound message threads to a lead.
+3. **Don't create a `lead_messages` table** — `communications` is exactly that.
 
-CREATE INDEX idx_leads_status_created ON leads (status, created_at DESC);
-CREATE INDEX idx_leads_property ON leads (property_id);
-CREATE INDEX idx_leads_contact ON leads (linked_contact_id);
+**Net schema for the lead pipeline:**
 
-CREATE TABLE lead_messages (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  lead_id uuid NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
-  sent_at timestamptz NOT NULL DEFAULT now(),
-  direction message_dir NOT NULL,
-  subject text,
-  body text NOT NULL,
-  attachments jsonb
-);
+```
+leads  (existing table, extended)
+├── id, organization_id, contact_id, property_id           [pre-existing]
+├── source, status, assigned_to, notes                      [pre-existing — source/status are text not enums]
+├── sender_name, sender_email, sender_phone                 [NEW]
+├── property_label                                          [NEW — "Joliet medical building"]
+├── intent (enum: buy|lease|sell|info|other)                [NEW]
+├── urgency (enum: hot|warm|cold)                           [NEW, default 'warm']
+├── qualifier_summary                                       [NEW — AI-extracted: "1031 buyer, $4M, 60-day"]
+├── raw_subject, raw_body                                   [NEW]
+├── claude_extraction jsonb                                 [NEW]
+├── auto_ack_sent_at                                        [NEW — 60-sec receipt fired at]
+├── draft_reply, draft_attachments jsonb                    [NEW]
+├── final_reply, final_sent_at                              [NEW]
+└── linked_deal_id → deals                                  [NEW — promote-to-deal path]
 
-CREATE INDEX idx_lead_messages_lead ON lead_messages (lead_id, sent_at);
+communications  (existing table, extended)
+└── lead_id → leads                                         [NEW — thread inbound/outbound to a lead]
 ```
 
-**RLS:** existing tables don't use RLS (single-user app, anon key). Match that for now — single user, no need.
+**Files in repo:**
+- `supabase/migrations/0001_extend_leads_for_inbox.sql` — schema extension above
+- `supabase/migrations/0002_project_memory.sql` — cross-machine state table
+
+**Schema migrations are managed via Supabase MCP.** Claude can apply migrations directly, then writes the corresponding SQL file to `supabase/migrations/` for replayability.
+
+**RLS:** existing tables have RLS enabled (38 of them) but the frontend uses the anon key with hardcoded org/user IDs. Match that for now — single user. Tighten when we add multi-user.
 
 ---
 
@@ -303,12 +302,18 @@ Use existing `.glass` classes for cards. Mobile-first: 16px+ font, no horizontal
 
 ## Open threads (as of this write)
 
-1. **Schema migration** — write `supabase/migrations/0001_leads.sql` with the schema above. John runs it once in Supabase Studio.
-2. **`/api/leads/intake`** — first deliverable. Mirrors the existing `/api/intake/parse` pattern (raw fetch, JSON-prompt extraction).
-3. **`/inbox` UI** — mobile-first card stack list + split detail page with sticky bottom action bar.
+1. ~~**Schema migration**~~ — DONE. Migrations 0001 + 0002 applied via Supabase MCP. Tracked in `supabase/migrations/`.
+2. **`/api/leads/intake`** — next deliverable. Mirrors the existing `/api/intake/parse` pattern (raw fetch, JSON-prompt extraction). **Mirror the `/api/valuate` middleware exemption** so Apps Script + Twilio can POST without auth.
+3. **`/inbox` + `/inbox/[id]` UI** — mobile-first card list + split detail page with sticky bottom action bar.
 4. **Apps Script email watcher** — separate Apps Script project in John's Google Workspace. Polls `inquiries@stewardshipcre.com` every 60s, POSTs new emails to `/api/leads/intake`.
-5. **Twilio SMS + voice webhooks** — point at `/api/leads/intake` with `source: 'sms'` / `source: 'phone'`.
+5. **Twilio SMS + voice webhooks** — point at `/api/leads/intake` (or dedicated `/api/leads/sms-webhook`, `/api/leads/voice-webhook`) with `source: 'sms'` / `source: 'phone'`.
 6. **Public site contact form** — currently unwired; will POST to this CRM's `/api/leads/intake` once endpoint exists.
+
+**Reading current build state from any machine:**
+```sql
+SELECT current_phase, state, markdown FROM project_memory WHERE project_slug = 'lead-pipeline';
+```
+Or in Supabase Studio: Table Editor → `project_memory` → row.
 
 ---
 
