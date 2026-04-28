@@ -42,15 +42,22 @@ Tables already in production (do **NOT** alter without explicit ask):
 ```
 intakes              -- rent-roll document submissions
 intake_units         -- individual units/tenants from rent rolls
-comps                -- comparable lease/sale data
-deals                -- sales/leasing opportunities (with deal_stages history)
-deal_stages          -- deal pipeline state transitions
+comps                -- comparable lease/sale data (rich schema: sale + lease, geo, dates, terms)
+deals                -- sales/leasing opportunities (incl. is_dead, dead_reason)
+deal_stages          -- deal pipeline state transitions, current = WHERE exited_at IS NULL
 properties           -- asset inventory (id, name, address, asset_type, status, asking_price, sqft, your_role)
 contacts             -- relationship database (full_name, email, phone, warmth, contact_type)
 companies            -- vendor/partner entities
 
-RPC: get_assistant_context()  -- SECURITY DEFINER, returns deals/stages/properties/contacts/companies in one call, bypasses RLS
+RPCs:
+  get_assistant_context()    -- SECURITY DEFINER, returns deals/stages/properties/contacts/companies in one call
+  find_nearby_comps()        -- PostGIS function: find_nearby_comps(lat, lng, radius_miles, asset_type, limit)
+                                used by stateless valuation engine
 ```
+
+**Pipeline stages** (`deal_stages.stage` enum): `Lead | LOI | Listing | Under Contract | Closed`. Note: the first stage is literally **"Lead"** — semantic overlap with the `leads` table is intentional. When an inbox lead promotes to a deal via "Promote to Deal" button, the deal enters at stage `Lead`.
+
+**Valuation engine is stateless** — no `valuations` table. Pulls comps via `find_nearby_comps()`, analyzes in-memory, returns JSON or PDF. Pattern lesson: don't over-engineer storage for AI extractions; jsonb + re-derive is fine. (See `src/lib/valuation-engine.ts`.)
 
 **No `database.types.ts` exists.** Types are inferred inline from component state objects.
 
@@ -66,11 +73,13 @@ Use these same constants for any new table inserts.
 
 ## Auth model
 
-**Supabase email + password**, gated at the middleware layer (`/src/middleware.ts:33-37`). Any route not under `/login` or `/auth` requires a valid session.
+**Supabase email + password**, gated at the middleware layer (`/src/middleware.ts`). Any route not whitelisted requires a valid session.
 
-**Single user:** John Mathewson (`john@johnmathewson.co`, hardcoded display in `/src/components/nav.tsx:117`).
+**Single user:** John Mathewson (`john@johnmathewson.co`, hardcoded display in `/src/components/nav.tsx`).
 
-**To gate a new route** (e.g., `/inbox`): nothing to do. Middleware protects it automatically. Just create `/src/app/inbox/page.tsx`.
+**To gate a new authenticated route** (e.g., `/inbox`): nothing to do. Middleware protects it automatically. Just create `/src/app/inbox/page.tsx`.
+
+**To create a PUBLIC API route** (e.g., `/api/leads/intake` for Apps Script + Twilio webhooks that can't authenticate): mirror the existing `/api/valuate` pattern — that endpoint accepts unauthenticated POSTs. **Check `src/middleware.ts` to see how `/api/valuate` is exempted, and add `/api/leads/intake` (and `/api/leads/[id]/sms-webhook`, etc.) to the same allowlist.** This is critical — without it, the Apps Script POSTs will 401.
 
 ---
 
@@ -173,23 +182,67 @@ CREATE INDEX idx_lead_messages_lead ON lead_messages (lead_id, sent_at);
 
 ---
 
-## Routes to add
+## Routes — what exists, what's being added
+
+**Existing pages** (`src/app/`):
+```
+/                Dashboard
+/intake          Rent-roll intake (XLSX/CSV/image upload → Claude → intake_units)
+/comps           Comps database viewer
+/valuate         Property valuation UI
+/properties      Asset inventory
+/contacts        Contact database
+/deals           Deal pipeline (drag-and-drop via @dnd-kit, multi-select, mark-dead)
+/reports         Reports
+/login, /auth/callback
+```
+
+**Existing API routes:**
+```
+/api/assistant            Claude Sonnet, AI assistant bar (db snapshot in system prompt)
+/api/intake/parse         Claude Haiku, parses rent-roll text/image → JSON
+/api/intake/save          Persists parsed intake to Supabase
+/api/comps/parse          Claude Haiku, parses comp data
+/api/comps/import         CoStar Excel import
+/api/valuate              PUBLIC route — accepts JSON, returns JSON | PDF | both. Mirror this pattern for /api/leads/intake.
+/api/test                 Dev test endpoint
+```
+
+**Current nav tabs** (`src/components/nav.tsx`, `links` array):
+```
+Dashboard | Intake | Comps | Valuation | Properties | Contacts | Deals | Reports
+```
+
+**To add (lead pipeline):**
 
 | Route | Purpose | Notes |
 |---|---|---|
 | `/inbox` | Lead list view | Card stack (NOT a table — mobile-first). Sort by `created_at desc`. Status badges. Urgency color (hot=teal, warm=charcoal, cold=muted). |
 | `/inbox/[id]` | Lead detail + draft review | Twilio SMS deeplinks land here. Sticky bottom action bar: **Send · Edit · Archive · Promote to Deal**. Thumb-zone buttons. |
-| `/api/leads/intake` | Universal ingress endpoint | POSTs from Apps Script (email), Twilio (SMS/voice), public site (form). Branches on `source`. |
-| `/api/leads/[id]/send` | Sends final approved reply | Reads possibly-edited `draft_reply`, sends via Gmail API from `john@stewardshipcre.com`, updates `final_reply`, `final_sent_at`, `status='sent'`. |
-| `/api/leads/[id]/ack` | Internal — fires the 60-sec auto-receipt | Called by `/intake`. Inserts row in `lead_messages` (direction: outbound). |
+| `/api/leads/intake` | Universal ingress endpoint, **PUBLIC** | POSTs from Apps Script (email), Twilio (SMS/voice), public site (form). Branches on `source`. Add to middleware allowlist alongside `/api/valuate`. |
+| `/api/leads/[id]/send` | Sends final approved reply | Reads possibly-edited `draft_reply`, sends via Gmail API from `john@stewardshipcre.com`, updates `final_reply`, `final_sent_at`, `status='sent'`. Authenticated. |
+| `/api/leads/[id]/ack` | Internal — fires 60-sec auto-receipt | Called by `/intake`. Inserts row in `lead_messages` (direction: outbound). |
+| `/api/leads/sms-webhook` | Twilio SMS inbound webhook | **PUBLIC.** Twilio POSTs here; converts to standard intake payload. |
+| `/api/leads/voice-webhook` | Twilio voicemail transcription webhook | **PUBLIC.** |
 
-Add `/inbox` link to `/src/components/nav.tsx` `links` array (current tabs: Dashboard, Intake, Properties, Contacts, Deals, Reports).
+**Adding to nav** — append to `links` array. Note: 9 tabs total now (Dashboard | Intake | Comps | Valuation | Properties | Contacts | Deals | Reports | **Inbox**) — likely needs mobile nav redesign (hamburger or icon-only at narrow widths). Worth raising with John before just appending.
+
+---
+
+## Reusable patterns already in the codebase
+
+These are solved muscles. Don't reinvent.
+
+- **PDF generation:** `src/lib/report-generator.ts` uses `jspdf` + `jspdf-autotable` server-side. Pattern: `generateReportBytes(type, data) → Uint8Array → NextResponse(Buffer.from(bytes), {Content-Type: 'application/pdf'})`. Reuse for AI-generated lead briefs / OM teasers if we want.
+- **Drag-and-drop:** `@dnd-kit/core` + `@dnd-kit/sortable` powers the deal pipeline. `PointerSensor` works on touch. If we want drag-to-archive or drag-to-promote-deal in the inbox, this lib is already vendored.
+- **Inline edit + modal pattern:** `EditableField` + modal in `src/components/deals-content.tsx` is the canonical inline-edit pattern. Mirror it in the inbox's draft-reply edit experience for visual consistency.
+- **PostGIS geo queries:** if the lead pipeline ever needs "leads within X miles of a property," `find_nearby_comps()` shows the RPC pattern.
 
 ---
 
 ## Coding conventions (lock these — they're already in the codebase)
 
-- **kebab-case** filenames (`create-contact-modal.tsx`, `intake-upload-zone.tsx`)
+- **kebab-case** filenames (`create-contact-modal.tsx`, `intake-upload-zone.tsx`, `deals-content.tsx`)
 - All components use `"use client"`
 - **Raw fetch** to Anthropic API (NOT the SDK abstraction):
   ```ts
