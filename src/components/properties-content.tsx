@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Panel, { IconBtn } from "./panel";
 import { createClient } from "@/lib/supabase/client";
-import CreatePropertyModal from "./create-property-modal";
+import AddListingWizard from "./add-listing-wizard";
 import CompAnalysisModal from "./comp-analysis-modal";
 
 // ── Types ──────────────────────────────────────────────────
@@ -182,12 +182,12 @@ export default function PropertiesContent() {
               boxShadow: "0 3px 16px rgba(224,122,95,0.35)",
             }}
           >
-            + New Property
+            + New Listing
           </button>
         </div>
       </div>
 
-      <CreatePropertyModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={load} />
+      <AddListingWizard open={showCreate} onClose={() => setShowCreate(false)} onCreated={load} organizationId="a0000000-0000-0000-0000-000000000001" />
       <CompAnalysisModal
         open={showCompAnalysis}
         onClose={() => setShowCompAnalysis(false)}
