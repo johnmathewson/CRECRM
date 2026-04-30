@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
+import type { StatusFilter, PropertyOption } from "./inbox-split-view";
 
 // ── Types ────────────────────────────────────────────────────────
 export interface LeadRow {
@@ -17,6 +17,7 @@ export interface LeadRow {
   property_label: string | null;
   qualifier_summary: string | null;
   raw_subject: string | null;
+  raw_body?: string | null;
   draft_reply: string | null;
   property_id: string | null;
   linked_deal_id: string | null;
@@ -41,17 +42,15 @@ const URGENCY_COLOR: Record<string, string> = {
   cold: C.teal,
 };
 
-type FilterKey = "active" | "hot" | "today" | "unmatched" | "promoted" | "spam" | "archived" | "all";
-
-const FILTERS: { key: FilterKey; label: string }[] = [
-  { key: "active", label: "Active" },
-  { key: "hot", label: "Hot" },
-  { key: "today", label: "Today" },
-  { key: "unmatched", label: "Unmatched" },
-  { key: "promoted", label: "Promoted" },
-  { key: "spam", label: "Spam" },
-  { key: "archived", label: "Archived" },
-  { key: "all", label: "All" },
+const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
+  { value: "active", label: "Active" },
+  { value: "hot", label: "Hot" },
+  { value: "today", label: "Today" },
+  { value: "unmatched", label: "Unmatched" },
+  { value: "promoted", label: "Promoted" },
+  { value: "spam", label: "Spam" },
+  { value: "archived", label: "Archived" },
+  { value: "all", label: "All" },
 ];
 
 // ── Helpers ────────────────────────────────────────────────────
@@ -89,78 +88,40 @@ const GROUP_LABELS: Record<string, string> = {
   older: "Older",
 };
 
-// ── Components ─────────────────────────────────────────────────
-
+// ── Props ─────────────────────────────────────────────────────
 interface ListProps {
+  leads: LeadRow[];
+  loading: boolean;
   selectedLeadId?: string;
+  statusFilter: StatusFilter;
+  propertyFilter: string;
+  propertyOptions: PropertyOption[];
+  onStatusFilterChange: (f: StatusFilter) => void;
+  onPropertyFilterChange: (f: string) => void;
+  seedingFixture: string | null;
+  seedError: string | null;
+  onSeed: (fixture: string) => void;
 }
 
-export default function InboxList({ selectedLeadId }: ListProps) {
-  const [leads, setLeads] = useState<LeadRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<FilterKey>("active");
-  const [seedingFixture, setSeedingFixture] = useState<string | null>(null);
-  const [seedError, setSeedError] = useState<string | null>(null);
+export default function InboxList({
+  leads,
+  loading,
+  selectedLeadId,
+  statusFilter,
+  propertyFilter,
+  propertyOptions,
+  onStatusFilterChange,
+  onPropertyFilterChange,
+  seedingFixture,
+  seedError,
+  onSeed,
+}: ListProps) {
   const [seederExpanded, setSeederExpanded] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    const supabase = createClient();
-    let query = supabase
-      .from("leads")
-      .select(`
-        id, source, status, intent, urgency,
-        sender_name, sender_email, sender_phone,
-        property_label, qualifier_summary, raw_subject,
-        draft_reply, property_id, linked_deal_id, created_at,
-        property:properties(id, name, headline)
-      `)
-      .order("created_at", { ascending: false })
-      .limit(200);
-
-    if (filter === "active") {
-      query = query.in("status", ["new", "reviewing", "unmatched"]);
-    } else if (filter === "hot") {
-      query = query.eq("urgency", "hot").not("status", "in", '("spam","archived")');
-    } else if (filter === "today") {
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
-      query = query.gte("created_at", todayStart.toISOString()).not("status", "in", '("spam","archived")');
-    } else if (filter !== "all") {
-      query = query.eq("status", filter);
-    }
-
-    const { data } = await query;
-    setLeads((data as any) || []);
-    setLoading(false);
-  }, [filter]);
-
-  useEffect(() => { load(); }, [load]);
-
-  async function seed(fixture: string) {
-    setSeedingFixture(fixture);
-    setSeedError(null);
-    try {
-      const res = await fetch("/api/leads/test", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fixture }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) setSeedError(body.error || `Failed (${res.status})`);
-      else await load();
-    } catch (e: any) {
-      setSeedError(e.message || "Seed failed");
-    } finally {
-      setSeedingFixture(null);
-    }
-  }
-
-  // ── Group leads ──────────────────────────────────────────
+  // Group leads
   const grouped = useMemo(() => {
     const out: Record<string, LeadRow[]> = { hot: [], today: [], yesterday: [], thisWeek: [], older: [] };
     for (const l of leads) {
-      // Hot leads (urgency=hot, status active) get pinned at top
       const isActive = !["spam", "archived", "promoted"].includes(l.status || "");
       if (l.urgency === "hot" && isActive) {
         out.hot.push(l);
@@ -176,7 +137,7 @@ export default function InboxList({ selectedLeadId }: ListProps) {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
-      <div className="flex items-baseline gap-3 px-5 pt-5 pb-3 flex-shrink-0">
+      <div className="flex items-baseline gap-3 px-5 pt-5 pb-2 flex-shrink-0">
         <h1 className="text-[20px] font-semibold m-0" style={{ color: C.cream }}>Inbox</h1>
         <span className="text-[11px]" style={{ color: C.charSubtle }}>
           {loading ? "loading…" : `${leads.length}`}
@@ -190,23 +151,23 @@ export default function InboxList({ selectedLeadId }: ListProps) {
         </Link>
       </div>
 
-      {/* Filter chips */}
-      <div className="flex flex-wrap gap-1.5 px-5 pb-3 flex-shrink-0">
-        {FILTERS.map(f => (
-          <button
-            key={f.key}
-            onClick={() => setFilter(f.key)}
-            className="text-[10.5px] py-1 px-2.5 rounded-full font-medium tracking-wide uppercase"
-            style={{
-              border: `1px solid ${filter === f.key ? "rgba(224,122,95,0.5)" : "rgba(255,255,255,0.08)"}`,
-              background: filter === f.key ? "rgba(224,122,95,0.1)" : "transparent",
-              color: filter === f.key ? C.coral : C.charMuted,
-              cursor: "pointer",
-            }}
-          >
-            {f.label}
-          </button>
-        ))}
+      {/* Filter dropdowns */}
+      <div className="flex gap-2 px-5 pb-3 flex-shrink-0">
+        <FilterSelect
+          label="View"
+          value={statusFilter}
+          onChange={(v) => onStatusFilterChange(v as StatusFilter)}
+          options={STATUS_OPTIONS.map(o => ({ value: o.value, label: o.label }))}
+        />
+        <FilterSelect
+          label="Property"
+          value={propertyFilter}
+          onChange={onPropertyFilterChange}
+          options={[
+            { value: "all", label: "All properties" },
+            ...propertyOptions.map(p => ({ value: p.id, label: `${p.label} · ${p.count}` })),
+          ]}
+        />
       </div>
 
       {/* Scrollable lead list */}
@@ -217,10 +178,10 @@ export default function InboxList({ selectedLeadId }: ListProps) {
           <div className="px-5 py-10 text-center">
             <div className="text-[26px] mb-2 opacity-30">📭</div>
             <div className="text-[12px] mb-1" style={{ color: C.charMuted }}>
-              {filter === "active" ? "Nothing in the queue" : `No "${filter}" leads`}
+              No leads matching this filter
             </div>
             <div className="text-[10.5px]" style={{ color: C.charSubtle }}>
-              Test by seeding a synthetic lead below.
+              Try widening the filter or seed a synthetic lead below.
             </div>
           </div>
         ) : (
@@ -281,7 +242,7 @@ export default function InboxList({ selectedLeadId }: ListProps) {
               ].map(f => (
                 <button
                   key={f.id}
-                  onClick={() => seed(f.id)}
+                  onClick={() => onSeed(f.id)}
                   disabled={seedingFixture !== null}
                   className="text-[10.5px] py-1 px-2 rounded"
                   style={{
@@ -308,6 +269,58 @@ export default function InboxList({ selectedLeadId }: ListProps) {
 
 // ── Sub-components ─────────────────────────────────────────────
 
+function FilterSelect({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  return (
+    <label className="flex-1 min-w-0">
+      <span
+        className="block text-[9px] tracking-wider uppercase font-semibold mb-1"
+        style={{ color: C.charSubtle }}
+      >
+        {label}
+      </span>
+      <div className="relative">
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full appearance-none cursor-pointer text-[11.5px] py-1.5 pl-2.5 pr-7 rounded font-medium"
+          style={{
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.08)",
+            color: C.cream,
+            outline: "none",
+          }}
+        >
+          {options.map(o => (
+            <option
+              key={o.value}
+              value={o.value}
+              style={{ background: "#1a1a1a", color: C.cream }}
+            >
+              {o.label}
+            </option>
+          ))}
+        </select>
+        <span
+          className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-[9px]"
+          style={{ color: C.charSubtle }}
+        >
+          ▾
+        </span>
+      </div>
+    </label>
+  );
+}
+
 function DateHeader({ label, count }: { label: string; count: number }) {
   return (
     <div
@@ -328,14 +341,12 @@ function LeadRowItem({ lead, selected }: { lead: LeadRow; selected: boolean }) {
   const isArchived = lead.status === "archived";
   const muted = isSpam || isArchived;
 
-  // Match indicator
   const matchTag = matched
     ? { label: lead.property?.headline || lead.property?.name || "matched", color: C.green, bg: "rgba(107,203,119,0.15)" }
     : lead.property_label
-    ? { label: `${lead.property_label} · needs review`, color: C.amber, bg: "rgba(242,201,76,0.12)" }
+    ? { label: `${lead.property_label} · review`, color: C.amber, bg: "rgba(242,201,76,0.12)" }
     : null;
 
-  // Intent tag
   const intent = lead.intent
     ? { label: lead.intent.toUpperCase(), color: C.cream, bg: "rgba(255,255,255,0.05)" }
     : null;
@@ -353,7 +364,6 @@ function LeadRowItem({ lead, selected }: { lead: LeadRow; selected: boolean }) {
       }}
     >
       <div className="px-4 py-2.5 hover:bg-white/[0.02]">
-        {/* Top line: sender + time */}
         <div className="flex items-baseline gap-2 mb-1">
           <span
             className="text-[12.5px] font-semibold flex-1 truncate"
@@ -366,7 +376,6 @@ function LeadRowItem({ lead, selected }: { lead: LeadRow; selected: boolean }) {
           </span>
         </div>
 
-        {/* Tags row */}
         {(intent || matchTag) && (
           <div className="flex items-center gap-1.5 mb-1 flex-wrap">
             {intent && (
@@ -388,7 +397,6 @@ function LeadRowItem({ lead, selected }: { lead: LeadRow; selected: boolean }) {
           </div>
         )}
 
-        {/* Summary */}
         {lead.qualifier_summary && (
           <div
             className="text-[11.5px] leading-tight line-clamp-2"

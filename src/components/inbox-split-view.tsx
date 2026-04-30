@@ -1,10 +1,29 @@
 "use client";
 
-import InboxList from "./inbox-list";
+import { useEffect, useState, useCallback, useMemo } from "react";
+import { createClient } from "@/lib/supabase/client";
+import InboxList, { type LeadRow } from "./inbox-list";
+import InboxOverview from "./inbox-overview";
 import LeadDetailContent from "./lead-detail-content";
 
 interface Props {
   selectedLeadId?: string;
+}
+
+export type StatusFilter =
+  | "active"
+  | "hot"
+  | "today"
+  | "unmatched"
+  | "promoted"
+  | "spam"
+  | "archived"
+  | "all";
+
+export interface PropertyOption {
+  id: string;
+  label: string;
+  count: number;
 }
 
 const C = {
@@ -14,6 +33,93 @@ const C = {
 };
 
 export default function InboxSplitView({ selectedLeadId }: Props) {
+  const [leads, setLeads] = useState<LeadRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
+  const [propertyFilter, setPropertyFilter] = useState<string>("all"); // "all" or property id or "unmatched"
+  const [seedingFixture, setSeedingFixture] = useState<string | null>(null);
+  const [seedError, setSeedError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const supabase = createClient();
+    let query = supabase
+      .from("leads")
+      .select(`
+        id, source, status, intent, urgency,
+        sender_name, sender_email, sender_phone,
+        property_label, qualifier_summary, raw_subject, raw_body,
+        draft_reply, property_id, linked_deal_id, created_at,
+        property:properties(id, name, headline)
+      `)
+      .order("created_at", { ascending: false })
+      .limit(300);
+
+    if (statusFilter === "active") {
+      query = query.in("status", ["new", "reviewing", "unmatched"]);
+    } else if (statusFilter === "hot") {
+      query = query.eq("urgency", "hot").not("status", "in", '("spam","archived")');
+    } else if (statusFilter === "today") {
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      query = query.gte("created_at", todayStart.toISOString()).not("status", "in", '("spam","archived")');
+    } else if (statusFilter !== "all") {
+      query = query.eq("status", statusFilter);
+    }
+
+    if (propertyFilter === "unmatched") {
+      query = query.is("property_id", null);
+    } else if (propertyFilter !== "all") {
+      query = query.eq("property_id", propertyFilter);
+    }
+
+    const { data } = await query;
+    setLeads((data as any) || []);
+    setLoading(false);
+  }, [statusFilter, propertyFilter]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Derive property options from leads (so the dropdown only shows properties
+  // that actually have leads; otherwise it'd be a giant unfiltered list).
+  const propertyOptions = useMemo<PropertyOption[]>(() => {
+    const map = new Map<string, { label: string; count: number }>();
+    let unmatched = 0;
+    for (const lead of leads) {
+      if (lead.property?.id) {
+        const existing = map.get(lead.property.id);
+        const label = lead.property.headline || lead.property.name || "(unnamed)";
+        if (existing) existing.count += 1;
+        else map.set(lead.property.id, { label, count: 1 });
+      } else {
+        unmatched += 1;
+      }
+    }
+    const opts: PropertyOption[] = Array.from(map.entries()).map(([id, v]) => ({ id, label: v.label, count: v.count }));
+    opts.sort((a, b) => b.count - a.count);
+    if (unmatched > 0) opts.unshift({ id: "unmatched", label: "Unmatched (no CRM property)", count: unmatched });
+    return opts;
+  }, [leads]);
+
+  async function seed(fixture: string) {
+    setSeedingFixture(fixture);
+    setSeedError(null);
+    try {
+      const res = await fetch("/api/leads/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fixture }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) setSeedError(body.error || `Failed (${res.status})`);
+      else await load();
+    } catch (e: any) {
+      setSeedError(e.message || "Seed failed");
+    } finally {
+      setSeedingFixture(null);
+    }
+  }
+
   return (
     <div
       className="flex w-full"
@@ -28,10 +134,22 @@ export default function InboxSplitView({ selectedLeadId }: Props) {
         `}
         style={{ borderColor: "rgba(255,255,255,0.05)" }}
       >
-        <InboxList selectedLeadId={selectedLeadId} />
+        <InboxList
+          leads={leads}
+          loading={loading}
+          selectedLeadId={selectedLeadId}
+          statusFilter={statusFilter}
+          propertyFilter={propertyFilter}
+          propertyOptions={propertyOptions}
+          onStatusFilterChange={setStatusFilter}
+          onPropertyFilterChange={setPropertyFilter}
+          seedingFixture={seedingFixture}
+          seedError={seedError}
+          onSeed={seed}
+        />
       </aside>
 
-      {/* Detail pane — visible on mobile when selected; always visible on desktop */}
+      {/* Right pane — detail when selected; overview (all leads) when not */}
       <section
         className={`
           ${selectedLeadId ? "flex" : "hidden lg:flex"}
@@ -41,24 +159,15 @@ export default function InboxSplitView({ selectedLeadId }: Props) {
         {selectedLeadId ? (
           <LeadDetailContent leadId={selectedLeadId} mode="pane" />
         ) : (
-          <EmptyDetail />
+          <InboxOverview
+            leads={leads}
+            loading={loading}
+            statusFilter={statusFilter}
+            propertyFilter={propertyFilter}
+            propertyOptions={propertyOptions}
+          />
         )}
       </section>
-    </div>
-  );
-}
-
-function EmptyDetail() {
-  return (
-    <div className="flex-1 flex flex-col items-center justify-center text-center px-10">
-      <div className="text-[48px] opacity-20 mb-4">✉️</div>
-      <div className="text-[14px] mb-2" style={{ color: C.charMuted }}>
-        Select a lead to review
-      </div>
-      <div className="text-[11px] max-w-[320px]" style={{ color: C.charSubtle }}>
-        New inbound emails, SMS, and voicemails will appear in the queue. The agent qualifies
-        them, matches to a property if it can, and drafts a reply for you to review.
-      </div>
     </div>
   );
 }
