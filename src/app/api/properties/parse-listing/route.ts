@@ -43,9 +43,9 @@ RULES:
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { text, isImage, imageData, mediaType, sourceUrl } = body;
+    const { text, isImage, isPdf, imageData, pdfData, mediaType, sourceUrl } = body;
 
-    if (!text && !imageData) {
+    if (!text && !imageData && !pdfData) {
       return NextResponse.json({ error: "No content provided" }, { status: 400 });
     }
 
@@ -55,7 +55,18 @@ export async function POST(req: NextRequest) {
     }
 
     let userContent: any;
-    if (isImage && imageData) {
+    if (isPdf && pdfData) {
+      userContent = [
+        {
+          type: "document",
+          source: { type: "base64", media_type: "application/pdf", data: pdfData },
+        },
+        {
+          type: "text",
+          text: `Extract all commercial real estate listing/property data from this Offering Memorandum / brochure PDF${sourceUrl ? ` (source: ${sourceUrl})` : ""}. Return structured JSON per the system instructions.`,
+        },
+      ];
+    } else if (isImage && imageData) {
       userContent = [
         { type: "image", source: { type: "base64", media_type: mediaType, data: imageData } },
         {

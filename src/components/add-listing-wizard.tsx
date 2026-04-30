@@ -163,13 +163,33 @@ export default function AddListingWizard({ open, onClose, onCreated, organizatio
   // ── File drop handling ────────────────────────────────────────────────────
 
   const handleOmFile = (f: File) => {
-    if (f.size > 20 * 1024 * 1024) { setError("File too large — max 20 MB"); return; }
     const ext = f.name.split(".").pop()?.toLowerCase() || "";
     if (!["pdf", "doc", "docx", "jpg", "jpeg", "png"].includes(ext)) {
       setError("Unsupported file type. Use PDF, Word, or image."); return;
     }
+    // PDFs are sent as base64 in a JSON body; Netlify caps function payloads
+    // at ~6 MB. After base64+JSON overhead a 4.5 MB PDF is the safe ceiling.
+    if (ext === "pdf" && f.size > 4.5 * 1024 * 1024) {
+      setError("PDF too large — max 4.5 MB. Try compressing or splitting the OM."); return;
+    }
+    if (f.size > 20 * 1024 * 1024) { setError("File too large — max 20 MB"); return; }
     setError(""); setOmFile(f);
   };
+
+  // FileReader-based base64 (efficient for large files; the manual loop
+  // approach is O(n²) and crashes on multi-MB PDFs).
+  function fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        const base64 = dataUrl.split(",")[1] || "";
+        resolve(base64);
+      };
+      reader.onerror = () => reject(new Error("Failed to read file"));
+      reader.readAsDataURL(file);
+    });
+  }
 
   // ── Step 1: Import mode selection & trigger ───────────────────────────────
 
@@ -189,7 +209,9 @@ export default function AddListingWizard({ open, onClose, onCreated, organizatio
     try {
       let text = "";
       let isImage = false;
+      let isPdf = false;
       let imageData = "";
+      let pdfData = "";
       let mediaType = "";
 
       if (mode === "crexi") {
@@ -207,32 +229,16 @@ export default function AddListingWizard({ open, onClose, onCreated, organizatio
         setLoadingMsg("Reading document...");
         const ext = omFile!.name.split(".").pop()?.toLowerCase() || "";
         if (["jpg", "jpeg", "png"].includes(ext)) {
-          // Image: send as base64
-          const buf = await omFile!.arrayBuffer();
-          const bytes = new Uint8Array(buf);
-          let binary = "";
-          for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-          imageData = btoa(binary);
+          imageData = await fileToBase64(omFile!);
           mediaType = ext === "png" ? "image/png" : "image/jpeg";
           isImage = true;
         } else if (ext === "pdf") {
-          // PDF: extract text client-side using pdf-parse via API
-          const formData = new FormData();
-          formData.append("file", omFile!);
-          const res = await fetch("/api/properties/extract-pdf", { method: "POST", body: formData });
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error || "Failed to extract PDF text");
-          text = data.text;
+          // Send PDF directly to Claude (native PDF input — no server-side text extraction needed)
+          pdfData = await fileToBase64(omFile!);
+          isPdf = true;
         } else {
-          // Word doc: send as base64 for server-side extraction
-          const buf = await omFile!.arrayBuffer();
-          const bytes = new Uint8Array(buf);
-          let binary = "";
-          for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-          imageData = btoa(binary);
-          mediaType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-          isImage = false;
-          text = "[Word document — extracted server-side]";
+          // Word doc — not yet supported (placeholder; no extraction wired up)
+          throw new Error("Word document support is coming soon. For now, please convert to PDF or paste a CREXi URL.");
         }
       }
 
@@ -243,14 +249,26 @@ export default function AddListingWizard({ open, onClose, onCreated, organizatio
         body: JSON.stringify({
           text: text || undefined,
           isImage: isImage || undefined,
+          isPdf: isPdf || undefined,
           imageData: imageData || undefined,
+          pdfData: pdfData || undefined,
           mediaType: mediaType || undefined,
           sourceUrl: mode === "crexi" ? crexiUrl : undefined,
         }),
       });
 
-      const parseData = await parseRes.json();
-      if (!parseRes.ok) throw new Error(parseData.error || "AI extraction failed");
+      const parseRaw = await parseRes.text();
+      let parseData: any;
+      try {
+        parseData = parseRaw ? JSON.parse(parseRaw) : {};
+      } catch {
+        throw new Error(
+          parseRes.ok
+            ? "AI extraction returned an invalid response. Please try again."
+            : `AI extraction failed (status ${parseRes.status}). The function may have timed out — try a smaller PDF.`
+        );
+      }
+      if (!parseRes.ok) throw new Error(parseData.error || `AI extraction failed (status ${parseRes.status})`);
 
       // Populate form with extracted data
       const p = parseData.property || {};
