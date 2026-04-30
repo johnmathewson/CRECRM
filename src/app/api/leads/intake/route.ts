@@ -208,7 +208,8 @@ async function upsertContact(
       full_name: name,
       email,
       phone,
-      contact_type: "prospect",
+      contact_type: "other",
+      relationship_type: "prospect",
       warmth: q.urgency === "hot" ? "hot" : q.urgency === "cold" ? "cold" : "warm",
       last_conversation: new Date().toISOString().slice(0, 10),
     })
