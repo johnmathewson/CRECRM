@@ -43,9 +43,9 @@ RULES:
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { text, isImage, isPdf, imageData, pdfData, mediaType, sourceUrl } = body;
+    const { text, isImage, imageData, pdfUrl, mediaType, sourceUrl } = body;
 
-    if (!text && !imageData && !pdfData) {
+    if (!text && !imageData && !pdfUrl) {
       return NextResponse.json({ error: "No content provided" }, { status: 400 });
     }
 
@@ -55,11 +55,11 @@ export async function POST(req: NextRequest) {
     }
 
     let userContent: any;
-    if (isPdf && pdfData) {
+    if (pdfUrl) {
       userContent = [
         {
           type: "document",
-          source: { type: "base64", media_type: "application/pdf", data: pdfData },
+          source: { type: "url", url: pdfUrl },
         },
         {
           type: "text",

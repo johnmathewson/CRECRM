@@ -2,6 +2,7 @@
 import { useState, useRef, useCallback } from "react";
 import Modal, { FormField, inputStyle, selectStyle, btnPrimary, btnSecondary } from "./modal";
 import ListingImageUploader, { type ListingImage } from "./listing-image-uploader";
+import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -167,12 +168,14 @@ export default function AddListingWizard({ open, onClose, onCreated, organizatio
     if (!["pdf", "doc", "docx", "jpg", "jpeg", "png"].includes(ext)) {
       setError("Unsupported file type. Use PDF, Word, or image."); return;
     }
-    // PDFs are sent as base64 in a JSON body; Netlify caps function payloads
-    // at ~6 MB. After base64+JSON overhead a 4.5 MB PDF is the safe ceiling.
-    if (ext === "pdf" && f.size > 4.5 * 1024 * 1024) {
-      setError("PDF too large — max 4.5 MB. Try compressing or splitting the OM."); return;
+    // PDFs upload to Supabase Storage (50 MB cap). Images are base64-inlined
+    // in the JSON body (4 MB safe under Netlify's 6 MB function limit).
+    if (ext === "pdf" && f.size > 50 * 1024 * 1024) {
+      setError("PDF too large — max 50 MB."); return;
     }
-    if (f.size > 20 * 1024 * 1024) { setError("File too large — max 20 MB"); return; }
+    if (["jpg", "jpeg", "png"].includes(ext) && f.size > 4 * 1024 * 1024) {
+      setError("Image too large — max 4 MB."); return;
+    }
     setError(""); setOmFile(f);
   };
 
@@ -209,9 +212,8 @@ export default function AddListingWizard({ open, onClose, onCreated, organizatio
     try {
       let text = "";
       let isImage = false;
-      let isPdf = false;
       let imageData = "";
-      let pdfData = "";
+      let pdfUrl = "";
       let mediaType = "";
 
       if (mode === "crexi") {
@@ -226,18 +228,34 @@ export default function AddListingWizard({ open, onClose, onCreated, organizatio
         if (!res.ok) throw new Error(data.error || "Failed to fetch listing page");
         text = data.text;
       } else if (mode === "om") {
-        setLoadingMsg("Reading document...");
         const ext = omFile!.name.split(".").pop()?.toLowerCase() || "";
         if (["jpg", "jpeg", "png"].includes(ext)) {
+          setLoadingMsg("Reading image...");
           imageData = await fileToBase64(omFile!);
           mediaType = ext === "png" ? "image/png" : "image/jpeg";
           isImage = true;
         } else if (ext === "pdf") {
-          // Send PDF directly to Claude (native PDF input — no server-side text extraction needed)
-          pdfData = await fileToBase64(omFile!);
-          isPdf = true;
+          // Upload to Supabase Storage (private bucket), then hand Claude a
+          // signed URL — bypasses Netlify's 6 MB function payload limit.
+          setLoadingMsg("Uploading PDF...");
+          const supabase = createSupabaseClient();
+          const ts = Date.now();
+          const rand = Math.random().toString(36).slice(2, 8);
+          const safeName = omFile!.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-60);
+          const path = `${ts}-${rand}-${safeName}`;
+          const { error: upErr } = await supabase.storage
+            .from("listing-documents")
+            .upload(path, omFile!, { contentType: "application/pdf", upsert: false });
+          if (upErr) throw new Error(`PDF upload failed: ${upErr.message}`);
+          // 10-minute signed URL — long enough for Claude to fetch + parse.
+          const { data: signed, error: signErr } = await supabase.storage
+            .from("listing-documents")
+            .createSignedUrl(path, 600);
+          if (signErr || !signed?.signedUrl) {
+            throw new Error(`Could not create signed URL: ${signErr?.message || "unknown"}`);
+          }
+          pdfUrl = signed.signedUrl;
         } else {
-          // Word doc — not yet supported (placeholder; no extraction wired up)
           throw new Error("Word document support is coming soon. For now, please convert to PDF or paste a CREXi URL.");
         }
       }
@@ -249,10 +267,9 @@ export default function AddListingWizard({ open, onClose, onCreated, organizatio
         body: JSON.stringify({
           text: text || undefined,
           isImage: isImage || undefined,
-          isPdf: isPdf || undefined,
           imageData: imageData || undefined,
-          pdfData: pdfData || undefined,
           mediaType: mediaType || undefined,
+          pdfUrl: pdfUrl || undefined,
           sourceUrl: mode === "crexi" ? crexiUrl : undefined,
         }),
       });
