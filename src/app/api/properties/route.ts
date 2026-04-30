@@ -4,6 +4,46 @@ export const dynamic = "force-dynamic";
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 
+// ── Slug generation ─────────────────────────────────────────────────────────
+function slugify(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function buildBaseSlug(address?: string, city?: string, name?: string): string {
+  if (address && city) return slugify(`${address} ${city}`);
+  if (address) return slugify(address);
+  if (name) return slugify(name);
+  return "";
+}
+
+async function ensureUniqueSlug(
+  supabase: any,
+  base: string,
+  excludeId?: string
+): Promise<string> {
+  if (!base) base = `property-${Date.now().toString(36)}`;
+  let candidate = base;
+  let n = 1;
+  while (true) {
+    const query = supabase.from("properties").select("id").eq("slug", candidate);
+    const { data, error } = excludeId
+      ? await query.neq("id", excludeId).maybeSingle()
+      : await query.maybeSingle();
+    if (error && error.code !== "PGRST116") {
+      // unexpected error — give up uniqueness search, append timestamp
+      return `${base}-${Date.now().toString(36)}`;
+    }
+    if (!data) return candidate;
+    n += 1;
+    candidate = `${base}-${n}`;
+    if (n > 50) return `${base}-${Date.now().toString(36)}`;
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const supabase = createClient(
@@ -13,14 +53,12 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
 
-    // Validate required fields
     if (!body.name?.trim()) {
       return NextResponse.json({ error: "Property name is required" }, { status: 400 });
     }
 
     const orgId = body.organization_id || ORG_ID;
 
-    // Build the insert payload — only include columns that exist in the properties table
     const insertPayload: Record<string, any> = {
       organization_id: orgId,
       name: body.name.trim(),
@@ -29,7 +67,6 @@ export async function POST(req: NextRequest) {
       your_role: body.your_role || "listing_broker",
     };
 
-    // Optional fields — only set if provided and non-empty
     const optionalFields = [
       "address", "city", "state", "zip", "zoning",
       "asking_price", "lease_rate", "sqft", "acreage",
@@ -38,6 +75,8 @@ export async function POST(req: NextRequest) {
       "description", "highlights", "notes", "crexi_url",
       "transaction_type", "publish_to_website", "crexi_sync_status",
       "source_import",
+      // publish-path fields
+      "headline", "images",
     ];
 
     for (const field of optionalFields) {
@@ -45,6 +84,12 @@ export async function POST(req: NextRequest) {
         insertPayload[field] = body[field];
       }
     }
+
+    // Auto-generate slug if not provided. If provided, slugify and dedupe.
+    const slugSource =
+      body.slug?.trim() ||
+      buildBaseSlug(body.address, body.city, body.name);
+    insertPayload.slug = await ensureUniqueSlug(supabase, slugify(slugSource));
 
     const { data, error } = await supabase
       .from("properties")
@@ -54,35 +99,6 @@ export async function POST(req: NextRequest) {
 
     if (error) {
       console.error("Supabase insert error:", error);
-
-      // If extended columns don't exist yet (migration not run), fall back to base fields
-      if (error.code === "42703" || error.message?.includes("column")) {
-        const basePayload = {
-          organization_id: orgId,
-          name: body.name.trim(),
-          status: body.status || "listed",
-          asset_type: body.asset_type || null,
-          your_role: body.your_role || "listing_broker",
-          address: body.address || null,
-          city: body.city || null,
-          state: body.state || null,
-          zip: body.zip || null,
-          asking_price: body.asking_price || null,
-          lease_rate: body.lease_rate || null,
-          sqft: body.sqft || null,
-          year_built: body.year_built || null,
-          notes: body.notes || null,
-        };
-        const { data: data2, error: error2 } = await supabase
-          .from("properties")
-          .insert(basePayload)
-          .select()
-          .single();
-        if (error2) {
-          return NextResponse.json({ error: error2.message }, { status: 500 });
-        }
-        return NextResponse.json({ property: data2 }, { status: 201 });
-      }
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 

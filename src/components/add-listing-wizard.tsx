@@ -1,11 +1,13 @@
 "use client";
 import { useState, useRef, useCallback } from "react";
 import Modal, { FormField, inputStyle, selectStyle, btnPrimary, btnSecondary } from "./modal";
+import ListingImageUploader, { type ListingImage } from "./listing-image-uploader";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface ListingForm {
   name: string;
+  headline: string;
   address: string;
   city: string;
   state: string;
@@ -33,7 +35,7 @@ interface ListingForm {
 }
 
 const emptyForm = (): ListingForm => ({
-  name: "", address: "", city: "", state: "IN", zip: "",
+  name: "", headline: "", address: "", city: "", state: "IN", zip: "",
   asset_type: "retail", transaction_type: "sale", status: "listed",
   your_role: "listing_broker", asking_price: "", lease_rate: "",
   sqft: "", acreage: "", year_built: "", parking_spaces: "",
@@ -135,6 +137,7 @@ export default function AddListingWizard({ open, onClose, onCreated, organizatio
   const [saving, setSaving] = useState(false);
   const [publishToWebsite, setPublishToWebsite] = useState(true);
   const [publishToCrexi, setPublishToCrexi] = useState(false);
+  const [images, setImages] = useState<ListingImage[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const set = (k: keyof ListingForm, v: string) => setForm(f => ({ ...f, [k]: v }));
@@ -152,6 +155,7 @@ export default function AddListingWizard({ open, onClose, onCreated, organizatio
     setCrexiUrl(""); setOmFile(null); setLoading(false);
     setConfidence(""); setExtractionNotes(""); setError(""); setSaving(false);
     setPublishToWebsite(true); setPublishToCrexi(false);
+    setImages([]);
   }
 
   function handleClose() { reset(); onClose(); }
@@ -253,6 +257,7 @@ export default function AddListingWizard({ open, onClose, onCreated, organizatio
       setForm(f => ({
         ...f,
         name: p.name || f.name,
+        headline: p.headline || f.headline,
         address: p.address || f.address,
         city: p.city || f.city,
         state: p.state || f.state,
@@ -299,6 +304,8 @@ export default function AddListingWizard({ open, onClose, onCreated, organizatio
       const payload = {
         organization_id: organizationId,
         name: form.name.trim(),
+        headline: form.headline.trim() || null,
+        images: images.length > 0 ? images : null,
         address: form.address.trim(),
         city: form.city.trim(),
         state: form.state.trim(),
@@ -532,8 +539,11 @@ export default function AddListingWizard({ open, onClose, onCreated, organizatio
               )}
 
               <div style={sectionLabel}>Property Identity</div>
-              <FormField label="Property Name *">
+              <FormField label="Property Name * (internal)">
                 <input style={inputStyle} value={form.name} onChange={e => set("name", e.target.value)} placeholder="e.g. Liberty Square Shopping Center" />
+              </FormField>
+              <FormField label="Public Headline (marketing-friendly title shown on stewardshipcre.com)">
+                <input style={inputStyle} value={form.headline} onChange={e => set("headline", e.target.value)} placeholder="e.g. Anchored Retail Center — Strong Cash Flow" />
               </FormField>
               <div style={grid2}>
                 <FormField label="Street Address">
@@ -709,9 +719,15 @@ export default function AddListingWizard({ open, onClose, onCreated, organizatio
                 />
               </FormField>
 
-              {error && <div style={{ fontSize: 12, color: coral, marginBottom: 12, fontWeight: 500 }}>{error}</div>}
+              <div style={sectionLabel}>Photos</div>
+              <p style={{ fontSize: 11.5, color: creamSubtle, margin: "0 0 10px" }}>
+                These appear on the public listing page. The first image is used as the hero.
+              </p>
+              <ListingImageUploader value={images} onChange={setImages} />
 
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 8 }}>
+              {error && <div style={{ fontSize: 12, color: coral, marginBottom: 12, marginTop: 12, fontWeight: 500 }}>{error}</div>}
+
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 16 }}>
                 <button style={btnSecondary} onClick={() => setStep(3)}>← Back</button>
                 <button style={btnPrimary} onClick={() => setStep(5)}>Next: Publish →</button>
               </div>

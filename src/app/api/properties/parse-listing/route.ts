@@ -5,6 +5,7 @@ const SYSTEM_PROMPT = `You are a commercial real estate listing data extraction 
 
 Extract these fields (use null if not found):
 - name: string (property name or common name, e.g. "Liberty Square Shopping Center")
+- headline: string (a punchy marketing-friendly title for the public listing page — different from internal name. Lead with the investment thesis or asset's strongest hook. Examples: "Anchored Retail Center — 6.5% Cap, NNN", "Class A Industrial Build — 100% Leased to FedEx", "Trophy Office Tower — Downtown Indianapolis". Max 70 characters. Numbers-forward, no broker fluff like "premier" or "elevate".)
 - address: string (street address only)
 - city: string
 - state: string (2-letter abbreviation, e.g. "IN")
