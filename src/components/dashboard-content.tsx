@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -139,6 +140,8 @@ export default function DashboardContent() {
   const [closedDeals, setClosedDeals] = useState<Deal[]>([]);
   const [propertyCount, setPropertyCount] = useState(0);
   const [contactCount, setContactCount] = useState(0);
+  const [inboxActive, setInboxActive] = useState(0);
+  const [inboxToday, setInboxToday] = useState(0);
   const [loading, setLoading] = useState(true);
   const [showCreateDeal, setShowCreateDeal] = useState(false);
 
@@ -184,10 +187,24 @@ export default function DashboardContent() {
       const { count: pCount } = await supabase.from("properties").select("id", { count: "exact", head: true });
       const { count: cCount } = await supabase.from("contacts").select("id", { count: "exact", head: true });
 
+      // Inbox stats
+      const { count: inboxActiveCount } = await supabase
+        .from("leads")
+        .select("id", { count: "exact", head: true })
+        .in("status", ["new", "reviewing", "unmatched"]);
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const { count: inboxTodayCount } = await supabase
+        .from("leads")
+        .select("id", { count: "exact", head: true })
+        .gte("created_at", todayStart.toISOString());
+
       setActiveDeals((active as any) || []);
       setClosedDeals((closed as any) || []);
       setPropertyCount(pCount || 0);
       setContactCount(cCount || 0);
+      setInboxActive(inboxActiveCount || 0);
+      setInboxToday(inboxTodayCount || 0);
       setLoading(false);
   }, []);
 
@@ -279,6 +296,15 @@ export default function DashboardContent() {
         <StatCard icon="⚖️" label="Weighted" value={fmt(weightTotal)} sub={pipeTotal > 0 ? `${pct(weightTotal / pipeTotal)} avg probability` : "—"} accent={C.teal} />
         <StatCard icon="✅" label="Earned YTD" value={fmt(earned)} sub={`${pct(goalPct)} of $2M goal`} accent={C.green} />
         <StatCard icon="🏢" label="Properties" value={String(propertyCount)} sub={`${contactCount} contacts`} accent={C.amber} />
+        <Link href="/inbox" className="flex-1 min-w-[200px]" style={{ textDecoration: "none" }}>
+          <StatCard
+            icon="📨"
+            label="Inbox"
+            value={String(inboxActive)}
+            sub={inboxToday > 0 ? `${inboxToday} new today · agent →` : "agent activity →"}
+            accent={C.red}
+          />
+        </Link>
       </div>
 
       {/* Grid */}
