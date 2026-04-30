@@ -60,9 +60,9 @@ const C = {
 };
 
 const sectionLabel: React.CSSProperties = {
-  fontSize: 10,
+  fontSize: 9.5,
   fontWeight: 700,
-  letterSpacing: "0.12em",
+  letterSpacing: "0.16em",
   textTransform: "uppercase" as const,
   color: C.coral,
   marginBottom: 10,
@@ -94,7 +94,14 @@ function eventIcon(type: string): string {
   }
 }
 
-export default function LeadDetailContent({ leadId }: { leadId: string }) {
+interface Props {
+  leadId: string;
+  /** "page" = standalone full-screen, fixed bottom action bar.
+   *  "pane" = inside a flex container, sticky bottom action bar. */
+  mode?: "page" | "pane";
+}
+
+export default function LeadDetailContent({ leadId, mode = "page" }: Props) {
   const router = useRouter();
   const [lead, setLead] = useState<Lead | null>(null);
   const [events, setEvents] = useState<LeadEvent[]>([]);
@@ -123,9 +130,7 @@ export default function LeadDetailContent({ leadId }: { leadId: string }) {
     }
   }, [leadId]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
 
   async function saveDraft() {
     if (!lead) return;
@@ -187,308 +192,378 @@ export default function LeadDetailContent({ leadId }: { leadId: string }) {
     }
   }
 
+  // ── Render ───────────────────────────────────────────────
   if (loading) {
-    return <div style={{ padding: 40, textAlign: "center", color: C.charSubtle }}>Loading…</div>;
+    return <div className="px-6 py-12 text-center text-[12px]" style={{ color: C.charSubtle }}>Loading…</div>;
   }
   if (error || !lead) {
     return (
-      <div style={{ padding: 40, textAlign: "center" }}>
-        <div style={{ color: C.red, fontSize: 13, marginBottom: 12 }}>{error || "Lead not found"}</div>
-        <Link href="/inbox" style={{ color: C.teal, fontSize: 12 }}>← Back to inbox</Link>
+      <div className="px-6 py-12 text-center">
+        <div className="text-[13px] mb-3" style={{ color: C.red }}>{error || "Lead not found"}</div>
+        <Link href="/inbox" className="text-[12px]" style={{ color: C.teal }}>← Back to inbox</Link>
       </div>
     );
   }
 
   const draftDirty = draftText !== (lead.draft_reply || "");
+  const isPane = mode === "pane";
+
+  // Outer container: in pane mode, full-height flex column with internal scroll.
+  // In page mode, uses page flow + bottom padding for the fixed action bar.
+  const containerClass = isPane
+    ? "flex flex-col h-full overflow-hidden"
+    : "pb-[100px]";
+
+  // Scroll container: in pane mode, the inner div scrolls. In page mode, body scrolls.
+  const scrollClass = isPane ? "flex-1 overflow-y-auto" : "";
 
   return (
-    <>
-      {/* Back link */}
-      <Link
-        href="/inbox"
+    <div className={containerClass}>
+      {/* ── Top bar (mobile back link in pane mode + on page mode) ─ */}
+      <div
+        className={`flex-shrink-0 flex items-center gap-3 px-4 lg:px-6 py-3 ${isPane ? "lg:hidden" : ""}`}
         style={{
-          fontSize: 11,
-          color: C.charSubtle,
-          textDecoration: "none",
-          letterSpacing: "0.1em",
-          textTransform: "uppercase",
-          fontWeight: 500,
-          display: "inline-block",
-          marginBottom: 16,
+          borderBottom: "1px solid rgba(255,255,255,0.05)",
+          background: "rgba(0,0,0,0.18)",
         }}
       >
-        ← Inbox
-      </Link>
-
-      {/* Header */}
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 8 }}>
-          {lead.urgency && (
-            <span style={{
-              fontSize: 9.5, fontWeight: 700, padding: "2px 8px", borderRadius: 3,
-              background: lead.urgency === "hot" ? "rgba(231,76,60,0.18)" : lead.urgency === "cold" ? "rgba(78,205,196,0.18)" : "rgba(242,201,76,0.18)",
-              color: lead.urgency === "hot" ? C.red : lead.urgency === "cold" ? C.teal : C.amber,
-              letterSpacing: "0.06em", textTransform: "uppercase",
-            }}>{lead.urgency}</span>
-          )}
-          {lead.intent && (
-            <span style={{
-              fontSize: 9.5, fontWeight: 700, padding: "2px 8px", borderRadius: 3,
-              background: "rgba(255,255,255,0.05)", color: C.cream,
-              letterSpacing: "0.06em", textTransform: "uppercase",
-            }}>{lead.intent}</span>
-          )}
-          {lead.status && (
-            <span style={{
-              fontSize: 9.5, fontWeight: 700, padding: "2px 8px", borderRadius: 3,
-              background: "rgba(224,122,95,0.12)", color: C.coral,
-              letterSpacing: "0.06em", textTransform: "uppercase",
-            }}>{lead.status}</span>
-          )}
-        </div>
-        <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0, color: C.cream, lineHeight: 1.3 }}>
-          {lead.sender_name || lead.sender_email || lead.sender_phone || "Anonymous lead"}
-        </h1>
-        {(lead.sender_email || lead.sender_phone) && (
-          <div style={{ fontSize: 12, color: C.charSubtle, marginTop: 4 }}>
-            {[lead.sender_email, lead.sender_phone].filter(Boolean).join(" · ")}
-          </div>
-        )}
-        <div style={{ fontSize: 11, color: C.charSubtle, marginTop: 4 }}>
-          via {lead.source} · {fmtTime(lead.created_at)}
-        </div>
-      </div>
-
-      {/* AI Summary */}
-      {lead.qualifier_summary && (
-        <div className="glass" style={{ padding: 16, marginBottom: 16, borderLeft: "3px solid " + C.teal }}>
-          <div style={sectionLabel}>AI Summary</div>
-          <div style={{ fontSize: 13, color: C.cream, lineHeight: 1.5 }}>{lead.qualifier_summary}</div>
-          {lead.claude_extraction?.notes && (
-            <div style={{ fontSize: 11, color: C.charSubtle, marginTop: 8, fontStyle: "italic" }}>
-              Notes: {lead.claude_extraction.notes}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Property match */}
-      <div className="glass" style={{ padding: 16, marginBottom: 16 }}>
-        <div style={sectionLabel}>Property</div>
-        {lead.property ? (
-          <div>
-            <Link
-              href="/properties"
-              style={{ fontSize: 14, fontWeight: 600, color: C.cream, textDecoration: "none" }}
-            >
-              {lead.property.headline || lead.property.name}
-            </Link>
-            <div style={{ fontSize: 11, color: C.charSubtle, marginTop: 4 }}>
-              {[lead.property.address, lead.property.city, lead.property.state].filter(Boolean).join(", ")}
-              {lead.property.asset_type && ` · ${lead.property.asset_type}`}
-            </div>
-          </div>
-        ) : (
-          <div>
-            <div style={{ fontSize: 13, color: C.amber, marginBottom: 4 }}>
-              {lead.property_label ? `Mentioned: "${lead.property_label}"` : "No property reference"}
-            </div>
-            <div style={{ fontSize: 11, color: C.charSubtle }}>
-              No matching listing in the CRM. Manually link from a listing page (coming soon) or treat as off-market.
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Inbound message */}
-      <div className="glass" style={{ padding: 16, marginBottom: 16 }}>
-        <div style={sectionLabel}>Inbound Message</div>
-        {lead.raw_subject && (
-          <div style={{ fontSize: 12, color: C.charMuted, marginBottom: 8 }}>
-            <strong>Subject:</strong> {lead.raw_subject}
-          </div>
-        )}
-        <div
+        <Link
+          href="/inbox"
+          aria-label="Back to inbox"
+          className="flex items-center gap-1.5 py-2 px-3 rounded font-semibold text-[12px]"
           style={{
-            fontSize: 12.5,
+            border: "1px solid rgba(255,255,255,0.08)",
+            background: "rgba(255,255,255,0.02)",
             color: C.charMuted,
-            lineHeight: 1.55,
-            whiteSpace: "pre-wrap",
-            background: "rgba(0,0,0,0.18)",
-            padding: 12,
-            borderRadius: 4,
-            maxHeight: 280,
-            overflow: "auto",
+            textDecoration: "none",
+            minHeight: 40,
+            minWidth: 80,
           }}
         >
-          {lead.raw_body || "(empty body)"}
-        </div>
+          <span style={{ fontSize: 14 }}>←</span>
+          <span>Inbox</span>
+        </Link>
       </div>
 
-      {/* Draft reply (editable) */}
-      <div className="glass" style={{ padding: 16, marginBottom: 16 }}>
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 10 }}>
-          <span style={sectionLabel}>Draft Reply</span>
-          {draftDirty && (
-            <span style={{ fontSize: 10, color: C.amber, fontWeight: 600 }}>UNSAVED CHANGES</span>
+      {/* ── Scrollable content ────────────────────────────── */}
+      <div className={scrollClass}>
+        <div className={`px-4 lg:px-6 ${isPane ? "py-5" : "py-5 max-w-[920px] mx-auto"}`}>
+          {/* Header */}
+          <div className="mb-5">
+            <div className="flex flex-wrap gap-2 items-center mb-2">
+              {lead.urgency && <Badge label={lead.urgency} color={lead.urgency === "hot" ? C.red : lead.urgency === "cold" ? C.teal : C.amber} />}
+              {lead.intent && <Badge label={lead.intent} color={C.cream} />}
+              {lead.status && <Badge label={lead.status} color={C.coral} />}
+            </div>
+            <h1 className="text-[20px] lg:text-[22px] font-semibold m-0 leading-tight" style={{ color: C.cream }}>
+              {lead.sender_name || lead.sender_email || lead.sender_phone || "Anonymous lead"}
+            </h1>
+            {(lead.sender_email || lead.sender_phone) && (
+              <div className="text-[12px] mt-1" style={{ color: C.charSubtle }}>
+                {[lead.sender_email, lead.sender_phone].filter(Boolean).join(" · ")}
+              </div>
+            )}
+            <div className="text-[10.5px] mt-1" style={{ color: C.charSubtle }}>
+              via {lead.source} · {fmtTime(lead.created_at)}
+            </div>
+          </div>
+
+          {/* Status banner — explains we're not yet auto-sending */}
+          <div
+            className="mb-4 px-3.5 py-2.5 rounded text-[11.5px] flex items-start gap-2"
+            style={{
+              background: "rgba(78,205,196,0.06)",
+              border: "1px solid rgba(78,205,196,0.18)",
+              color: C.charMuted,
+            }}
+          >
+            <span style={{ color: C.teal, fontSize: 14 }}>ⓘ</span>
+            <span>
+              <strong style={{ color: C.cream }}>Draft only — nothing has been sent.</strong>
+              {" "}The agent qualified this lead, matched (or flagged) the property, and drafted a reply for your review.
+              Gmail send + auto-acknowledgment ship in the next slice.
+            </span>
+          </div>
+
+          {/* Match / unmatch banner */}
+          <div
+            className="mb-4 px-3.5 py-2.5 rounded flex items-start gap-2"
+            style={{
+              background: lead.property ? "rgba(107,203,119,0.07)" : "rgba(242,201,76,0.07)",
+              border: `1px solid ${lead.property ? "rgba(107,203,119,0.25)" : "rgba(242,201,76,0.25)"}`,
+            }}
+          >
+            <span style={{ fontSize: 14 }}>{lead.property ? "✓" : "⚠"}</span>
+            <div className="flex-1 min-w-0">
+              {lead.property ? (
+                <>
+                  <div className="text-[10px] font-bold tracking-wider uppercase mb-0.5" style={{ color: C.green }}>
+                    Matched property
+                  </div>
+                  <div className="text-[13px] font-semibold" style={{ color: C.cream }}>
+                    {lead.property.headline || lead.property.name}
+                  </div>
+                  <div className="text-[11px] mt-0.5" style={{ color: C.charSubtle }}>
+                    {[lead.property.address, lead.property.city, lead.property.state].filter(Boolean).join(", ")}
+                    {lead.property.asset_type && ` · ${lead.property.asset_type}`}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="text-[10px] font-bold tracking-wider uppercase mb-0.5" style={{ color: C.amber }}>
+                    Needs review · no CRM match
+                  </div>
+                  <div className="text-[12px]" style={{ color: C.charMuted }}>
+                    {lead.property_label
+                      ? <>Sender mentioned <em>"{lead.property_label}"</em>. The matcher couldn't tie it to a listing — could be a real listing we have or one we don't. Confirm before sending.</>
+                      : "No specific property referenced. Likely a general inquiry or browsing investor."}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* AI Summary */}
+          {lead.qualifier_summary && (
+            <Card>
+              <div style={sectionLabel}>AI Summary</div>
+              <div className="text-[13px] leading-relaxed" style={{ color: C.cream }}>
+                {lead.qualifier_summary}
+              </div>
+              {lead.claude_extraction?.notes && (
+                <div className="text-[10.5px] mt-2 italic" style={{ color: C.charSubtle }}>
+                  Notes: {lead.claude_extraction.notes}
+                </div>
+              )}
+            </Card>
+          )}
+
+          {/* Thread (inbound + future replies) */}
+          <Card>
+            <div style={sectionLabel}>
+              {thread.length > 1 ? `Thread (${thread.length})` : "Inbound message"}
+            </div>
+            <div className="space-y-3">
+              {(thread.length > 0 ? thread : [{
+                id: "_initial",
+                channel: lead.source || "email",
+                direction: "inbound",
+                subject: lead.raw_subject,
+                body_preview: lead.raw_body,
+                from_address: lead.sender_email || lead.sender_phone,
+                occurred_at: lead.created_at,
+              }] as Communication[]).map((msg, i) => (
+                <ThreadItem key={msg.id} msg={msg} isFirst={i === 0} />
+              ))}
+            </div>
+          </Card>
+
+          {/* Draft reply (editable) */}
+          <Card>
+            <div className="flex items-baseline justify-between mb-2.5">
+              <span style={sectionLabel}>Draft reply</span>
+              {draftDirty && (
+                <span className="text-[9.5px] font-bold tracking-wider" style={{ color: C.amber }}>
+                  UNSAVED
+                </span>
+              )}
+            </div>
+            {lead.draft_reply ? (
+              <textarea
+                value={draftText}
+                onChange={e => setDraftText(e.target.value)}
+                spellCheck
+                className="w-full text-[13px] leading-relaxed resize-y"
+                style={{
+                  minHeight: 220,
+                  fontFamily: "inherit",
+                  color: C.cream,
+                  background: "rgba(0,0,0,0.18)",
+                  border: "1px solid rgba(255,255,255,0.06)",
+                  borderRadius: 4,
+                  padding: 12,
+                  outline: "none",
+                }}
+              />
+            ) : (
+              <div className="text-[11.5px] italic px-3 py-2" style={{ color: C.charSubtle }}>
+                No draft generated. Lead may have been flagged spam, or the drafting step errored. Check the activity log below.
+              </div>
+            )}
+            {actionMsg && (
+              <div
+                className="text-[11px] mt-2"
+                style={{ color: actionMsg.toLowerCase().includes("fail") ? C.red : C.teal }}
+              >
+                {actionMsg}
+              </div>
+            )}
+          </Card>
+
+          {/* Activity timeline */}
+          {events.length > 0 && (
+            <Card>
+              <div style={sectionLabel}>Activity</div>
+              <div className="space-y-2">
+                {events.map(ev => (
+                  <div key={ev.id} className="flex gap-2.5 items-start">
+                    <span className="text-[14px] mt-[1px]">{eventIcon(ev.event_type)}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[12px] leading-snug" style={{ color: C.cream }}>
+                        {ev.summary}
+                      </div>
+                      <div className="text-[10px] mt-0.5" style={{ color: C.charSubtle }}>
+                        {ev.actor === "agent" ? "agent" : ev.actor === "user" ? "you" : "system"} · {fmtTime(ev.occurred_at)}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
           )}
         </div>
-
-        {lead.draft_reply ? (
-          <textarea
-            value={draftText}
-            onChange={e => setDraftText(e.target.value)}
-            spellCheck
-            style={{
-              width: "100%",
-              minHeight: 220,
-              fontFamily: "inherit",
-              fontSize: 13,
-              lineHeight: 1.55,
-              color: C.cream,
-              background: "rgba(0,0,0,0.18)",
-              border: "1px solid rgba(255,255,255,0.06)",
-              borderRadius: 4,
-              padding: 12,
-              resize: "vertical",
-              outline: "none",
-            }}
-          />
-        ) : (
-          <div style={{ fontSize: 12, color: C.charSubtle, fontStyle: "italic", padding: 12 }}>
-            No draft generated. Lead may have been flagged spam, or the drafting step errored. Check the activity log below.
-          </div>
-        )}
-
-        {actionMsg && (
-          <div style={{ fontSize: 11.5, color: actionMsg.includes("failed") ? C.red : C.teal, marginTop: 8 }}>
-            {actionMsg}
-          </div>
-        )}
       </div>
 
-      {/* Activity timeline */}
-      {events.length > 0 && (
-        <div className="glass" style={{ padding: 16, marginBottom: 16 }}>
-          <div style={sectionLabel}>Activity</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {events.map(ev => (
-              <div key={ev.id} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                <div style={{ fontSize: 14, marginTop: 1 }}>{eventIcon(ev.event_type)}</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12, color: C.cream, lineHeight: 1.4 }}>
-                    {ev.summary}
-                    <span style={{ color: C.charSubtle, marginLeft: 8, fontSize: 10.5 }}>
-                      {ev.actor === "agent" ? "agent" : ev.actor === "user" ? "you" : "system"} · {fmtTime(ev.occurred_at)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Sticky action bar */}
+      {/* ── Action bar — sticky to pane bottom (pane mode) or fixed (page mode) ─── */}
       <div
+        className={`
+          ${isPane ? "flex-shrink-0" : "fixed left-0 right-0 bottom-0 z-50"}
+          flex gap-2 items-center justify-center
+        `}
         style={{
-          position: "fixed",
-          left: 0,
-          right: 0,
-          bottom: 0,
-          padding: "12px 20px",
+          padding: "12px 16px",
           background: "rgba(13,13,13,0.96)",
           borderTop: "1px solid rgba(255,255,255,0.06)",
           backdropFilter: "blur(12px)",
-          zIndex: 50,
-          display: "flex",
-          gap: 8,
-          alignItems: "center",
-          justifyContent: "center",
-          flexWrap: "wrap",
         }}
       >
-        <div style={{ display: "flex", gap: 8, maxWidth: 920, width: "100%" }}>
-          <button
-            onClick={archive}
-            disabled={saving}
-            style={{
-              flex: "0 1 100px",
-              padding: "10px 14px",
-              fontSize: 12,
-              fontWeight: 600,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              border: "1px solid rgba(255,255,255,0.1)",
-              background: "transparent",
-              color: C.charMuted,
-              borderRadius: 4,
-              cursor: saving ? "wait" : "pointer",
-            }}
-          >
+        <div className="flex gap-2 w-full max-w-[920px]">
+          <ActionButton variant="muted" onClick={archive} disabled={saving}>
             Archive
-          </button>
-          <button
+          </ActionButton>
+          <ActionButton
+            variant={draftDirty ? "teal" : "ghost"}
             onClick={saveDraft}
             disabled={saving || !draftDirty}
-            style={{
-              flex: 1,
-              padding: "10px 14px",
-              fontSize: 12,
-              fontWeight: 600,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              border: "1px solid rgba(78,205,196,0.4)",
-              background: draftDirty ? "rgba(78,205,196,0.15)" : "transparent",
-              color: draftDirty ? C.teal : C.charSubtle,
-              borderRadius: 4,
-              cursor: saving || !draftDirty ? "not-allowed" : "pointer",
-              opacity: saving || !draftDirty ? 0.5 : 1,
-            }}
+            className="flex-1"
           >
             {saving ? "Saving…" : "Save Draft"}
-          </button>
-          <button
-            disabled
-            title="Gmail send wires up in Slice C"
-            style={{
-              flex: 1,
-              padding: "10px 14px",
-              fontSize: 12,
-              fontWeight: 600,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              border: "1px solid rgba(255,255,255,0.06)",
-              background: "rgba(255,255,255,0.03)",
-              color: C.charSubtle,
-              borderRadius: 4,
-              cursor: "not-allowed",
-            }}
-          >
+          </ActionButton>
+          <ActionButton variant="disabled" disabled className="flex-1" title="Gmail send wires up in Slice C">
             Send (soon)
-          </button>
-          <button
+          </ActionButton>
+          <ActionButton
+            variant="coral"
             onClick={promote}
             disabled={saving || lead.status === "spam"}
-            style={{
-              flex: 1,
-              padding: "10px 14px",
-              fontSize: 12,
-              fontWeight: 600,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              border: "1px solid rgba(224,122,95,0.5)",
-              background: "rgba(224,122,95,0.15)",
-              color: C.coral,
-              borderRadius: 4,
-              cursor: saving ? "wait" : "pointer",
-              opacity: saving ? 0.5 : 1,
-            }}
+            className="flex-1"
           >
-            {lead.linked_deal_id ? "View Deal →" : "Promote to Deal"}
-          </button>
+            {lead.linked_deal_id ? "View Deal →" : "Promote"}
+          </ActionButton>
         </div>
       </div>
-    </>
+    </div>
+  );
+}
+
+// ── Sub-components ─────────────────────────────────────────────
+
+function Badge({ label, color }: { label: string; color: string }) {
+  const bg =
+    color === C.red ? "rgba(231,76,60,0.18)"
+    : color === C.amber ? "rgba(242,201,76,0.18)"
+    : color === C.teal ? "rgba(78,205,196,0.18)"
+    : color === C.coral ? "rgba(224,122,95,0.12)"
+    : "rgba(255,255,255,0.05)";
+  return (
+    <span
+      className="text-[9.5px] font-bold py-[2px] px-2 rounded tracking-wider uppercase"
+      style={{ background: bg, color }}
+    >
+      {label}
+    </span>
+  );
+}
+
+function Card({ children }: { children: React.ReactNode }) {
+  return <div className="glass mb-4" style={{ padding: 14 }}>{children}</div>;
+}
+
+function ThreadItem({ msg, isFirst }: { msg: Communication; isFirst: boolean }) {
+  const inbound = msg.direction === "inbound";
+  return (
+    <div
+      style={{
+        padding: 11,
+        borderRadius: 4,
+        background: inbound ? "rgba(0,0,0,0.18)" : "rgba(78,205,196,0.05)",
+        border: "1px solid rgba(255,255,255,0.04)",
+      }}
+    >
+      <div className="flex items-baseline gap-2 mb-1.5">
+        <span className="text-[11px] font-semibold" style={{ color: C.cream }}>
+          {inbound ? (msg.from_address || "Sender") : "John (sent)"}
+        </span>
+        <span className="text-[9.5px] tracking-wider uppercase font-bold" style={{ color: inbound ? C.cream : C.teal }}>
+          {msg.direction} · {msg.channel}
+        </span>
+        <span className="ml-auto text-[10px]" style={{ color: C.charSubtle }}>
+          {fmtTime(msg.occurred_at)}
+        </span>
+      </div>
+      {msg.subject && (
+        <div className="text-[11.5px] mb-1.5" style={{ color: C.charMuted }}>
+          <strong>Subject:</strong> {msg.subject}
+        </div>
+      )}
+      <div
+        className="text-[12px] leading-relaxed whitespace-pre-wrap"
+        style={{ color: C.charMuted, maxHeight: isFirst ? "none" : 200, overflow: "auto" }}
+      >
+        {msg.body_preview || "(empty)"}
+      </div>
+    </div>
+  );
+}
+
+function ActionButton({
+  children,
+  onClick,
+  disabled,
+  variant,
+  className = "",
+  title,
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  disabled?: boolean;
+  variant: "muted" | "ghost" | "teal" | "coral" | "disabled";
+  className?: string;
+  title?: string;
+}) {
+  const styles: Record<string, React.CSSProperties> = {
+    muted: { border: "1px solid rgba(255,255,255,0.1)", background: "transparent", color: C.charMuted },
+    ghost: { border: "1px solid rgba(255,255,255,0.06)", background: "transparent", color: C.charSubtle },
+    teal: { border: "1px solid rgba(78,205,196,0.4)", background: "rgba(78,205,196,0.15)", color: C.teal },
+    coral: { border: "1px solid rgba(224,122,95,0.5)", background: "rgba(224,122,95,0.15)", color: C.coral },
+    disabled: { border: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.03)", color: C.charSubtle },
+  };
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={`text-[11.5px] font-semibold tracking-wider uppercase rounded ${className}`}
+      style={{
+        ...styles[variant],
+        padding: "11px 14px",
+        cursor: disabled ? (variant === "disabled" ? "not-allowed" : "wait") : "pointer",
+        opacity: disabled && variant !== "disabled" ? 0.5 : 1,
+        minHeight: 42,
+        flex: variant === "muted" ? "0 0 90px" : undefined,
+      }}
+    >
+      {children}
+    </button>
   );
 }

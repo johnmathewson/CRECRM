@@ -95,12 +95,12 @@ export default function ContactsContent() {
         .select(`
           id, full_name, role, phone, email, city, state,
           relationship_type, warmth, contact_type, last_conversation,
-          next_follow_up, notes,
+          next_follow_up, notes, created_at,
           company:companies(name),
           deals(id, deal_name, is_closed),
           demand_profiles(id, profile_type, asset_types)
         `)
-        .order("full_name");
+        .order("created_at", { ascending: false });
 
       setContacts((data as any) || []);
       setLoading(false);
@@ -110,7 +110,11 @@ export default function ContactsContent() {
 
   // Filter + search
   const filtered = contacts.filter((c) => {
-    if (filter !== "all" && c.contact_type?.toLowerCase() !== filter) return false;
+    if (filter === "prospect") {
+      if (c.relationship_type?.toLowerCase() !== "prospect") return false;
+    } else if (filter !== "all" && c.contact_type?.toLowerCase() !== filter) {
+      return false;
+    }
     if (search) {
       const q = search.toLowerCase();
       return (
@@ -123,8 +127,9 @@ export default function ContactsContent() {
     return true;
   });
 
-  // Counts by type
-  const typeCounts: Record<string, number> = { all: contacts.length };
+  // Counts by type. Prospect is its own tab (joined via relationship_type, not contact_type).
+  const prospectCount = contacts.filter(c => c.relationship_type?.toLowerCase() === "prospect").length;
+  const typeCounts: Record<string, number> = { all: contacts.length, prospect: prospectCount };
   contacts.forEach((c) => {
     const t = (c.contact_type || "other").toLowerCase();
     typeCounts[t] = (typeCounts[t] || 0) + 1;
