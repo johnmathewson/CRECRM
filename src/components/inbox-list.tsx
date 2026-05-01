@@ -19,6 +19,8 @@ export interface LeadRow {
   raw_subject: string | null;
   raw_body?: string | null;
   draft_reply: string | null;
+  final_sent_at: string | null;
+  auto_ack_sent_at: string | null;
   property_id: string | null;
   linked_deal_id: string | null;
   created_at: string;
@@ -371,6 +373,15 @@ function LeadRowItem({ lead, selected }: { lead: LeadRow; selected: boolean }) {
           >
             {lead.sender_name || lead.sender_email || lead.sender_phone || "Anonymous"}
           </span>
+          {lead.final_sent_at ? (
+            <span className="text-[9px] font-bold tracking-wider uppercase flex-shrink-0" style={{ color: C.green }}>
+              ✓ Sent
+            </span>
+          ) : lead.auto_ack_sent_at ? (
+            <span className="text-[9px] font-bold tracking-wider uppercase flex-shrink-0" style={{ color: C.amber }}>
+              ◷ Acked
+            </span>
+          ) : null}
           <span className="text-[10px] flex-shrink-0" style={{ color: C.charSubtle }}>
             {timeAgo(lead.created_at)}
           </span>

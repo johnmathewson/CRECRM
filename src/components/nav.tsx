@@ -170,6 +170,12 @@ export default function Nav() {
                   <div className="text-xs font-semibold">John Mathewson</div>
                   <div className="text-[10px] text-cream-subtle mt-0.5">john@johnmathewson.co</div>
                 </div>
+                <Link
+                  href="/settings/integrations"
+                  className="block w-full text-left px-3.5 py-2 text-xs text-cream-muted hover:text-cream cursor-pointer no-underline"
+                >
+                  Integrations
+                </Link>
                 <button
                   onClick={handleSignOut}
                   className="w-full text-left px-3.5 py-2 text-xs text-cream-muted hover:text-cream cursor-pointer border-none font-sans"
@@ -298,6 +304,12 @@ export default function Nav() {
               <div className="text-[10px] text-cream-subtle truncate">john@johnmathewson.co</div>
             </div>
           </div>
+          <Link
+            href="/settings/integrations"
+            className="block text-[11px] text-cream-muted py-1 mb-1 no-underline"
+          >
+            Integrations →
+          </Link>
           <div className="flex items-center justify-between">
             <span className="text-[11px] text-cream-subtle">
               {new Date().toLocaleDateString("en-US", {

@@ -188,7 +188,17 @@ export default function AgentDashboardContent() {
         <span style={{ fontSize: 12, color: C.charSubtle }}>
           What your AI sales employee has been doing
         </span>
-        <div style={{ marginLeft: "auto" }}>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          <Link
+            href="/settings/integrations"
+            style={{
+              fontSize: 11.5, padding: "6px 12px", borderRadius: 6,
+              border: "1px solid rgba(255,255,255,0.1)",
+              color: C.charMuted, textDecoration: "none", fontWeight: 600, letterSpacing: "0.04em",
+            }}
+          >
+            Integrations
+          </Link>
           <Link
             href="/inbox"
             style={{

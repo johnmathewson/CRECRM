@@ -5,5 +5,10 @@
 [build.environment]
   NODE_VERSION = "18"
 
+[functions]
+  # Netlify scheduled functions live here. Schedule is set via each
+  # function's exported `config.schedule` (see netlify/functions/poll-gmail.mts).
+  directory = "netlify/functions"
+
 [[plugins]]
   package = "@netlify/plugin-nextjs"

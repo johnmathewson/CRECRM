@@ -19,6 +19,9 @@ interface Lead {
   raw_subject: string | null;
   raw_body: string | null;
   draft_reply: string | null;
+  final_reply: string | null;
+  final_sent_at: string | null;
+  auto_ack_sent_at: string | null;
   notes: string | null;
   linked_deal_id: string | null;
   property_id: string | null;
@@ -192,6 +195,46 @@ export default function LeadDetailContent({ leadId, mode = "page" }: Props) {
     }
   }
 
+  async function send() {
+    if (!lead) return;
+    if (!lead.sender_email) {
+      setActionMsg("This lead has no recipient email — can't send.");
+      return;
+    }
+    if (lead.final_sent_at) {
+      setActionMsg("Already sent.");
+      return;
+    }
+    if (draftDirty && !confirm("You have unsaved edits in the draft. Send your edited text?")) {
+      return;
+    }
+    if (!confirm(`Send this reply to ${lead.sender_email}?`)) return;
+    setSaving(true);
+    setActionMsg(null);
+    try {
+      const res = await fetch(`/api/leads/${lead.id}/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draftDirty ? { body: draftText } : {}),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (res.status === 412) {
+          setActionMsg("Gmail not connected. Connect at Settings → Integrations.");
+        } else {
+          throw new Error(data.error || `HTTP ${res.status}`);
+        }
+        return;
+      }
+      setActionMsg("Sent ✓");
+      await load();
+    } catch (e: any) {
+      setActionMsg(`Send failed: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   // ── Render ───────────────────────────────────────────────
   if (loading) {
     return <div className="px-6 py-12 text-center text-[12px]" style={{ color: C.charSubtle }}>Loading…</div>;
@@ -268,22 +311,53 @@ export default function LeadDetailContent({ leadId, mode = "page" }: Props) {
             </div>
           </div>
 
-          {/* Status banner — explains we're not yet auto-sending */}
-          <div
-            className="mb-4 px-3.5 py-2.5 rounded text-[11.5px] flex items-start gap-2"
-            style={{
-              background: "rgba(78,205,196,0.06)",
-              border: "1px solid rgba(78,205,196,0.18)",
-              color: C.charMuted,
-            }}
-          >
-            <span style={{ color: C.teal, fontSize: 14 }}>ⓘ</span>
-            <span>
-              <strong style={{ color: C.cream }}>Draft only — nothing has been sent.</strong>
-              {" "}The agent qualified this lead, matched (or flagged) the property, and drafted a reply for your review.
-              Gmail send + auto-acknowledgment ship in the next slice.
-            </span>
-          </div>
+          {/* Status banner — reflects current send state */}
+          {lead.final_sent_at ? (
+            <div
+              className="mb-4 px-3.5 py-2.5 rounded text-[11.5px] flex items-start gap-2"
+              style={{
+                background: "rgba(107,203,119,0.07)",
+                border: "1px solid rgba(107,203,119,0.25)",
+                color: C.charMuted,
+              }}
+            >
+              <span style={{ color: C.green, fontSize: 14 }}>✓</span>
+              <span>
+                <strong style={{ color: C.cream }}>Reply sent {fmtTime(lead.final_sent_at)}.</strong>
+                {" "}Sitting in {lead.sender_email}'s inbox.
+              </span>
+            </div>
+          ) : lead.auto_ack_sent_at ? (
+            <div
+              className="mb-4 px-3.5 py-2.5 rounded text-[11.5px] flex items-start gap-2"
+              style={{
+                background: "rgba(242,201,76,0.06)",
+                border: "1px solid rgba(242,201,76,0.18)",
+                color: C.charMuted,
+              }}
+            >
+              <span style={{ color: C.amber, fontSize: 14 }}>◷</span>
+              <span>
+                <strong style={{ color: C.cream }}>Auto-acknowledgment sent {fmtTime(lead.auto_ack_sent_at)}.</strong>
+                {" "}The prospect knows you got their message. Review and send your full reply when ready.
+              </span>
+            </div>
+          ) : (
+            <div
+              className="mb-4 px-3.5 py-2.5 rounded text-[11.5px] flex items-start gap-2"
+              style={{
+                background: "rgba(78,205,196,0.06)",
+                border: "1px solid rgba(78,205,196,0.18)",
+                color: C.charMuted,
+              }}
+            >
+              <span style={{ color: C.teal, fontSize: 14 }}>ⓘ</span>
+              <span>
+                <strong style={{ color: C.cream }}>Draft ready — nothing sent yet.</strong>
+                {" "}Review the reply below; hit Send when it reads right.
+              </span>
+            </div>
+          )}
 
           {/* Match / unmatch banner */}
           <div
@@ -449,9 +523,21 @@ export default function LeadDetailContent({ leadId, mode = "page" }: Props) {
           >
             {saving ? "Saving…" : "Save Draft"}
           </ActionButton>
-          <ActionButton variant="disabled" disabled className="flex-1" title="Gmail send wires up in Slice C">
-            Send (soon)
-          </ActionButton>
+          {lead.final_sent_at ? (
+            <ActionButton variant="ghost" disabled className="flex-1" title={`Sent ${fmtTime(lead.final_sent_at)}`}>
+              ✓ Sent
+            </ActionButton>
+          ) : (
+            <ActionButton
+              variant="teal"
+              onClick={send}
+              disabled={saving || !lead.sender_email || !lead.draft_reply}
+              className="flex-1"
+              title={!lead.sender_email ? "No recipient email" : !lead.draft_reply ? "No draft to send" : ""}
+            >
+              {saving ? "Sending…" : "Send"}
+            </ActionButton>
+          )}
           <ActionButton
             variant="coral"
             onClick={promote}

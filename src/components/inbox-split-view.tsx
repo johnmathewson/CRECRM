@@ -49,7 +49,8 @@ export default function InboxSplitView({ selectedLeadId }: Props) {
         id, source, status, intent, urgency,
         sender_name, sender_email, sender_phone,
         property_label, qualifier_summary, raw_subject, raw_body,
-        draft_reply, property_id, linked_deal_id, created_at,
+        draft_reply, final_sent_at, auto_ack_sent_at,
+        property_id, linked_deal_id, created_at,
         property:properties(id, name, headline)
       `)
       .order("created_at", { ascending: false })

@@ -242,12 +242,16 @@ function OverviewCard({ lead }: { lead: LeadRow }) {
           </div>
         )}
 
-        {/* Footer: draft state */}
+        {/* Footer: send state */}
         <div
           className="flex items-center gap-3 pt-2 mt-2 text-[10.5px]"
           style={{ borderTop: "1px solid rgba(255,255,255,0.05)", color: C.charSubtle }}
         >
-          {lead.draft_reply ? (
+          {lead.final_sent_at ? (
+            <span style={{ color: C.green }}>✓ Reply sent</span>
+          ) : lead.auto_ack_sent_at ? (
+            <span style={{ color: C.amber }}>◷ Auto-ack sent · waiting on full reply</span>
+          ) : lead.draft_reply ? (
             <span style={{ color: C.teal }}>✍️ Draft ready · {lead.draft_reply.length} chars</span>
           ) : (
             <span>No draft</span>

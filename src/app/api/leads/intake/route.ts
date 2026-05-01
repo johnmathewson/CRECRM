@@ -565,6 +565,41 @@ Draft John's reply now. Plain text email body only, no subject, signed "— John
     char_count: draftReply.length,
   });
 
+  // ── 11. Schedule auto-acknowledgment (Slice C) ───────────────────────────
+  // Conditions per the blueprint:
+  //   - Real channel (not manual test seeds — those use fake emails)
+  //   - Status 'new' (matched, not spam, not unmatched)
+  //   - We have an email to send to
+  //   - Brand-new contact (no prior history) OR new property thread
+  //   - Auto-ack hasn't already been queued
+  const eligibleSource = body.source !== "manual_test";
+  const eligibleStatus = status === "new";
+  const hasEmail = !!(qualification.sender_email_clean || body.sender_email);
+  const isFreshContact = intel.contactHistory?.isNew !== false;
+
+  if (eligibleSource && eligibleStatus && hasEmail && isFreshContact) {
+    // Random delay 2-5 minutes for the humanizing pause
+    const delayMs = (2 + Math.random() * 3) * 60 * 1000;
+    const sendAfter = new Date(Date.now() + delayMs).toISOString();
+
+    const { error: schedErr } = await supabase.from("scheduled_acks").insert({
+      organization_id: ORG_ID,
+      lead_id: leadId,
+      send_after: sendAfter,
+    });
+
+    if (!schedErr) {
+      await recordEvent(
+        supabase,
+        leadId,
+        "qualified",
+        "system",
+        `Auto-ack scheduled for ${new Date(sendAfter).toLocaleTimeString()}`,
+        { send_after: sendAfter, delay_seconds: Math.round(delayMs / 1000) }
+      );
+    }
+  }
+
   return NextResponse.json({
     lead_id: leadId,
     status,
