@@ -14,17 +14,21 @@
 
   // ── Listing ID extraction ────────────────────────────────────────────────
   function extractListingId() {
-    // CREXi listing URLs look like: /properties/12345/state-city-name
-    const m = window.location.pathname.match(/\/properties\/(\d+)/);
+    // CREXi listing URLs come in a few shapes:
+    //   /properties/12345/state-city-name      (public listing page)
+    //   /property/12345/dashboard              (seller dashboard)
+    //   /property/12345                        (other seller views)
+    const m = window.location.pathname.match(/\/(?:properties|property)\/(\d+)/);
     return m ? m[1] : null;
   }
 
   // ── Metric extraction ────────────────────────────────────────────────────
   // Walks the DOM looking for labeled stat cards. Robust to layout changes
   // because we match by adjacent label text, not absolute selectors.
+  // Returns { value, foundLabel } so callers can debug.
   function findMetricNear(labelKeywords) {
     const allText = Array.from(document.querySelectorAll("body *"))
-      .filter((el) => el.children.length === 0 && el.textContent && el.textContent.trim().length < 40);
+      .filter((el) => el.children.length === 0 && el.textContent && el.textContent.trim().length < 60);
 
     for (const el of allText) {
       const txt = el.textContent.trim().toLowerCase();
@@ -37,13 +41,55 @@
             .filter((n) => n.children.length === 0 && /^[\d,]+$/.test((n.textContent || "").trim()))
             .find((n) => n !== el);
           if (numericNode) {
-            return parseInt(numericNode.textContent.replace(/,/g, ""), 10) || 0;
+            return {
+              value: parseInt(numericNode.textContent.replace(/,/g, ""), 10) || 0,
+              foundLabel: txt,
+            };
           }
           cursor = cursor.parentElement;
         }
+        // Found a label but no number near it — record that for debugging.
+        return { value: 0, foundLabel: txt + " (no number nearby)" };
       }
     }
-    return 0;
+    return { value: 0, foundLabel: null };
+  }
+
+  // Collect every label-ish + number pair on the page so we can tune
+  // selectors when CREXi rephrases. Returned as `debug.candidates`.
+  function collectAllLabeledNumbers() {
+    const out = [];
+    const numericNodes = Array.from(document.querySelectorAll("body *"))
+      .filter(
+        (n) =>
+          n.children.length === 0 &&
+          /^[\d,]+$/.test((n.textContent || "").trim()) &&
+          parseInt(n.textContent.replace(/,/g, ""), 10) > 0
+      );
+    for (const numNode of numericNodes.slice(0, 60)) {
+      // Walk up looking for a short label sibling
+      let cursor = numNode.parentElement;
+      let label = null;
+      for (let i = 0; i < 3 && cursor && !label; i++) {
+        const sibTexts = Array.from(cursor.querySelectorAll("*"))
+          .filter(
+            (n) =>
+              n !== numNode &&
+              n.children.length === 0 &&
+              n.textContent &&
+              n.textContent.trim().length > 0 &&
+              n.textContent.trim().length < 40 &&
+              !/^[\d,]+$/.test(n.textContent.trim())
+          )
+          .map((n) => n.textContent.trim());
+        if (sibTexts.length > 0) label = sibTexts[0];
+        cursor = cursor.parentElement;
+      }
+      if (label) {
+        out.push({ label: label.slice(0, 50), value: parseInt(numNode.textContent.replace(/,/g, ""), 10) });
+      }
+    }
+    return out;
   }
 
   function scrape() {
@@ -51,19 +97,41 @@
     if (!id) return null;
 
     // Multiple keyword groups so we don't break if CREXi rephrases.
-    const views = findMetricNear(["views", "page views", "impressions"]);
-    const saves = findMetricNear(["saves", "saved", "watchlists"]);
-    const inquiries = findMetricNear(["inquiries", "leads", "messages", "contacts"]);
-    const downloads = findMetricNear(["downloads", "om downloads", "documents downloaded"]);
+    const views = findMetricNear([
+      "views", "page views", "listing views", "total views",
+      "30 day views", "30-day views", "impressions",
+    ]);
+    const saves = findMetricNear([
+      "saves", "saved", "watchlists", "watchlist", "favorites",
+    ]);
+    const inquiries = findMetricNear([
+      "inquiries", "leads", "messages", "contacts", "lead submissions",
+    ]);
+    const downloads = findMetricNear([
+      "downloads", "om downloads", "documents downloaded",
+      "document downloads", "brochure downloads",
+    ]);
 
     return {
       external_listing_id: id,
       external_url: window.location.href.split("?")[0],
-      metrics: { views, saves, inquiries, downloads },
+      metrics: {
+        views: views.value,
+        saves: saves.value,
+        inquiries: inquiries.value,
+        downloads: downloads.value,
+      },
       raw: {
         title: document.title,
         url: window.location.href,
         scraped_dom_at: new Date().toISOString(),
+        matched_labels: {
+          views: views.foundLabel,
+          saves: saves.foundLabel,
+          inquiries: inquiries.foundLabel,
+          downloads: downloads.foundLabel,
+        },
+        candidates: collectAllLabeledNumbers(),
       },
     };
   }
@@ -93,7 +161,9 @@
         return;
       }
       const result = await syncToCrm(data);
-      sendResponse(result);
+      // Pass debug info back so the popup can show what we found on this
+      // page if the metrics came back zero. Helps tune label keywords.
+      sendResponse({ ...result, scrapedDebug: data.raw });
     })();
     return true; // keep channel open for async response
   });

@@ -21,7 +21,11 @@
   "options_page": "options.html",
   "content_scripts": [
     {
-      "matches": ["https://*.crexi.com/properties/*", "https://*.crexi.com/dashboard/*"],
+      "matches": [
+        "https://*.crexi.com/properties/*",
+        "https://*.crexi.com/property/*",
+        "https://*.crexi.com/dashboard/*"
+      ],
       "js": ["content-crexi.js"],
       "run_at": "document_idle"
     },

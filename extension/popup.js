@@ -20,7 +20,11 @@ async function getActiveTab() {
 
 function detectSource(url) {
   if (!url) return null;
-  if (url.includes("crexi.com/properties/") || url.includes("crexi.com/dashboard")) return "crexi";
+  if (
+    url.includes("crexi.com/properties/") ||
+    url.includes("crexi.com/property/") ||
+    url.includes("crexi.com/dashboard")
+  ) return "crexi";
   if (/loopnet\.com\/(Listing|listing|products)\//.test(url)) return "loopnet";
   return null;
 }
@@ -67,10 +71,25 @@ els.sync.addEventListener("click", async () => {
   try {
     const result = await chrome.tabs.sendMessage(tab.id, { action: "sync" });
     if (result?.ok) {
-      setStatus(`✓ Synced. ${result.metrics?.views ?? 0} views recorded.`, "ok");
+      const m = result.metrics || {};
+      const total = (m.views || 0) + (m.saves || 0) + (m.inquiries || 0) + (m.downloads || 0);
+      setStatus(`✓ Synced. ${m.views ?? 0} views recorded.`, "ok");
       await chrome.storage.local.set({ [`last_sync_${source}`]: Date.now() });
-      const ago = "just now";
-      els.meta.innerHTML = `<strong>Last ${source} sync:</strong> ${ago}`;
+
+      if (total === 0 && result.scrapedDebug?.candidates?.length) {
+        // Help us tune selectors: show up to 8 label/number candidates we found.
+        const sample = result.scrapedDebug.candidates
+          .slice(0, 8)
+          .map((c) => `· ${c.label}: ${c.value}`)
+          .join("<br>");
+        els.meta.innerHTML =
+          `<strong>No metrics matched our labels.</strong> ` +
+          `Numbers we did find on this page:<br>${sample}` +
+          `<br><br>If you see the right metrics here, copy this whole list and send it to John — ` +
+          `we'll tune the label list.`;
+      } else {
+        els.meta.innerHTML = `<strong>Last ${source} sync:</strong> just now`;
+      }
     } else {
       setStatus(result?.error || "Sync failed", "err");
       if (result?.hint) {
