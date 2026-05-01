@@ -1,0 +1,33 @@
+name: Poll Gmail Inbox
+
+on:
+  schedule:
+    # Every 5 minutes — GitHub Actions' minimum reliable interval.
+    # Means new inbound surfaces in /inbox within 0–5 min of arrival,
+    # and the 2–5 min auto-ack window stretches to ~2–10 min worst case
+    # (still well inside what feels human).
+    - cron: "*/5 * * * *"
+  # Allow manual trigger from the Actions tab for testing.
+  workflow_dispatch:
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Trigger Gmail polling cron
+        run: |
+          response=$(curl -s -o /tmp/body -w "%{http_code}" \
+            -X POST \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+            "https://stewardship-crm.netlify.app/api/cron/poll-gmail")
+
+          echo "Status: $response"
+          # Truncate body in logs to avoid leaking history IDs
+          head -c 500 /tmp/body || true
+          echo ""
+
+          if [ "$response" != "200" ]; then
+            echo "::error::Cron failed with status $response"
+            exit 1
+          fi
