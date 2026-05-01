@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "Stewardship CRE — Listing Sync",
+  "version": "0.1.0",
+  "description": "Pulls listing performance metrics from CREXi and LoopNet into the Stewardship CRM.",
+  "permissions": ["storage", "alarms", "activeTab", "tabs"],
+  "host_permissions": [
+    "https://*.crexi.com/*",
+    "https://*.loopnet.com/*",
+    "https://stewardship-crm.netlify.app/*",
+    "http://localhost:3000/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Stewardship CRE Sync"
+  },
+  "options_page": "options.html",
+  "content_scripts": [
+    {
+      "matches": ["https://*.crexi.com/properties/*", "https://*.crexi.com/dashboard/*"],
+      "js": ["content-crexi.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://*.loopnet.com/Listing/*", "https://*.loopnet.com/listing/*", "https://*.loopnet.com/products/*"],
+      "js": ["content-loopnet.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

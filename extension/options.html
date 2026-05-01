@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Stewardship Sync — Options</title>
+  <style>
+    body { font-family: -apple-system, system-ui, sans-serif; background: #0d0d0d; color: #f0ede4; padding: 28px; max-width: 560px; margin: 0 auto; }
+    h1 { font-size: 18px; margin: 0 0 6px; }
+    p, label { font-size: 13px; color: rgba(240,237,228,0.75); line-height: 1.55; }
+    .field { margin-top: 18px; }
+    .field label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: rgba(240,237,228,0.55); font-weight: 600; margin-bottom: 6px; }
+    input[type="text"], input[type="password"] { width: 100%; padding: 10px 12px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); color: #f0ede4; border-radius: 4px; font-size: 13px; box-sizing: border-box; }
+    input:focus { outline: none; border-color: rgba(224,122,95,0.5); }
+    .row { display: flex; gap: 8px; margin-top: 18px; }
+    button { padding: 10px 18px; background: rgba(224,122,95,0.15); border: 1px solid rgba(224,122,95,0.5); color: #E07A5F; font-weight: 600; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; border-radius: 4px; cursor: pointer; }
+    button.secondary { background: transparent; border-color: rgba(255,255,255,0.1); color: rgba(240,237,228,0.75); }
+    .status { margin-top: 14px; font-size: 12px; }
+    .status.ok { color: #6BCB77; }
+    .status.err { color: #E74C3C; }
+    code { font-family: ui-monospace, monospace; font-size: 11.5px; background: rgba(0,0,0,0.4); padding: 2px 5px; border-radius: 3px; }
+    .help { font-size: 11.5px; color: rgba(240,237,228,0.55); margin-top: 6px; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <h1>Stewardship CRE — Listing Sync</h1>
+  <p>Connect this extension to your CRM. Generate an API key in <code>/settings/integrations</code>, then paste it below.</p>
+
+  <div class="field">
+    <label for="crm">CRM URL</label>
+    <input type="text" id="crm" placeholder="https://stewardship-crm.netlify.app" />
+    <div class="help">Where the extension sends metrics. Defaults to the production URL — change only for local dev.</div>
+  </div>
+
+  <div class="field">
+    <label for="key">API Key</label>
+    <input type="password" id="key" placeholder="paste here" />
+    <div class="help">Generated at <code>/settings/integrations</code> → "Generate new API key." Saved locally in this browser only.</div>
+  </div>
+
+  <div class="row">
+    <button id="save">Save</button>
+    <button id="test" class="secondary">Test connection</button>
+  </div>
+
+  <div id="status" class="status"></div>
+
+  <hr style="border-color: rgba(255,255,255,0.06); margin: 28px 0;" />
+
+  <h2 style="font-size: 14px; margin: 0 0 6px;">How it works</h2>
+  <ul style="font-size: 12.5px; color: rgba(240,237,228,0.75); line-height: 1.6; padding-left: 20px;">
+    <li>Open a CREXi listing page → click the extension icon → "Sync this listing."</li>
+    <li>Same for LoopNet.</li>
+    <li>Auto-sync runs every 6 hours when those tabs are open.</li>
+    <li>The CRM matches by listing ID — make sure each property's CREXi/LoopNet URL is saved in the CRM first.</li>
+  </ul>
+
+  <script src="options.js"></script>
+</body>
+</html>

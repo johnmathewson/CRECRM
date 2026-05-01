@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+// note: ChromeExtensionCard reuses C palette from outer scope
 
 interface GmailStatus {
   connected: boolean;
@@ -300,6 +301,9 @@ function IntegrationsContentInner() {
         </div>
       </div>
 
+      {/* Chrome extension card */}
+      <ChromeExtensionCard />
+
       {/* Twilio placeholder */}
       <div className="glass" style={{ padding: 22, marginBottom: 16, opacity: 0.5 }}>
         <div className="flex items-start gap-4">
@@ -321,6 +325,183 @@ function IntegrationsContentInner() {
             </p>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Chrome extension card ──────────────────────────────────────────────────
+
+interface ApiKeyRow {
+  id: string;
+  label: string | null;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+function ChromeExtensionCard() {
+  const [keys, setKeys] = useState<ApiKeyRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [showKey, setShowKey] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/extension/api-keys");
+      const data = await res.json();
+      setKeys(data.keys || []);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function generate() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/extension/api-keys", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to generate");
+      setShowKey(data.api_key);
+      await load();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function revoke(id: string) {
+    if (!confirm("Revoke this key? The extension that uses it will stop working until you generate a new one.")) return;
+    await fetch(`/api/extension/api-keys/${id}`, { method: "DELETE" });
+    await load();
+  }
+
+  const activeKeys = keys.filter(k => !k.revoked_at);
+
+  return (
+    <div className="glass" style={{ padding: 22, marginBottom: 16 }}>
+      <div className="flex items-start gap-4 mb-4">
+        <div className="text-[32px]">🧩</div>
+        <div className="flex-1">
+          <div className="flex items-baseline gap-3 flex-wrap mb-1">
+            <h2 className="text-[16px] font-semibold m-0" style={{ color: C.cream }}>
+              Stewardship Chrome Extension
+            </h2>
+            <span
+              className="text-[10px] font-bold tracking-wider uppercase py-[2px] px-2 rounded"
+              style={{
+                background: activeKeys.length > 0 ? "rgba(107,203,119,0.18)" : "rgba(255,255,255,0.06)",
+                color: activeKeys.length > 0 ? C.green : C.charSubtle,
+              }}
+            >
+              {loading ? "checking…" : activeKeys.length > 0 ? `${activeKeys.length} active key${activeKeys.length > 1 ? "s" : ""}` : "No keys"}
+            </span>
+          </div>
+          <p className="text-[12px]" style={{ color: C.charMuted }}>
+            Pulls listing performance metrics from CREXi + LoopNet so the owner dashboard has real numbers. Generate one key per browser. Auto-syncs every 6 hours when Chrome is open on those tabs.
+          </p>
+        </div>
+      </div>
+
+      {showKey && (
+        <div
+          className="mb-4 p-3 rounded"
+          style={{ background: "rgba(242,201,76,0.07)", border: "1px solid rgba(242,201,76,0.3)" }}
+        >
+          <div className="text-[10px] font-bold tracking-wider uppercase mb-1.5" style={{ color: C.amber }}>
+            Save this key now — it won't be shown again
+          </div>
+          <div
+            className="text-[11px] font-mono p-2.5 rounded mb-2 break-all select-all"
+            style={{ background: "rgba(0,0,0,0.4)", color: C.cream }}
+          >
+            {showKey}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => navigator.clipboard.writeText(showKey)}
+              className="text-[10.5px] py-1 px-2 rounded"
+              style={{ border: "1px solid rgba(78,205,196,0.4)", background: "rgba(78,205,196,0.1)", color: C.teal, cursor: "pointer" }}
+            >
+              Copy to clipboard
+            </button>
+            <button
+              onClick={() => setShowKey(null)}
+              className="text-[10.5px] py-1 px-2 rounded"
+              style={{ border: "1px solid rgba(255,255,255,0.1)", background: "transparent", color: C.charMuted, cursor: "pointer" }}
+            >
+              I've saved it — close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {error && <div className="text-[12px] mb-2" style={{ color: C.red }}>{error}</div>}
+
+      {/* Key list */}
+      {activeKeys.length > 0 && (
+        <div className="space-y-1.5 mb-3">
+          {activeKeys.map(k => (
+            <div
+              key={k.id}
+              className="flex items-center gap-3 px-3 py-2 rounded text-[11.5px]"
+              style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.04)" }}
+            >
+              <div className="flex-1 min-w-0">
+                <div style={{ color: C.cream }}>{k.label || "(unlabeled)"}</div>
+                <div className="text-[10px] mt-0.5" style={{ color: C.charSubtle }}>
+                  Created {new Date(k.created_at).toLocaleDateString()}
+                  {k.last_used_at && (
+                    <> · last used {new Date(k.last_used_at).toLocaleDateString()}</>
+                  )}
+                </div>
+              </div>
+              <button
+                onClick={() => revoke(k.id)}
+                className="text-[10px] py-1 px-2 rounded"
+                style={{ border: "1px solid rgba(231,76,60,0.3)", color: C.red, background: "transparent", cursor: "pointer" }}
+              >
+                Revoke
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={generate}
+          disabled={busy}
+          className="text-[11.5px] font-semibold py-2 px-4 rounded tracking-wider uppercase"
+          style={{
+            border: "1px solid rgba(78,205,196,0.4)",
+            background: "rgba(78,205,196,0.1)",
+            color: C.teal,
+            cursor: busy ? "wait" : "pointer",
+            opacity: busy ? 0.6 : 1,
+          }}
+        >
+          Generate new API key
+        </button>
+        <a
+          href="/extension-setup"
+          className="text-[11.5px] font-semibold py-2 px-4 rounded tracking-wider uppercase no-underline"
+          style={{
+            border: "1px solid rgba(255,255,255,0.1)",
+            background: "transparent",
+            color: C.charMuted,
+          }}
+        >
+          Install instructions →
+        </a>
       </div>
     </div>
   );

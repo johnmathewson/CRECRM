@@ -5,6 +5,7 @@ import Panel, { IconBtn } from "./panel";
 import { createClient } from "@/lib/supabase/client";
 import AddListingWizard from "./add-listing-wizard";
 import CompAnalysisModal from "./comp-analysis-modal";
+import ShareWithOwnerModal from "./share-with-owner-modal";
 
 // ── Types ──────────────────────────────────────────────────
 interface Property {
@@ -103,6 +104,7 @@ export default function PropertiesContent() {
   const [showCompAnalysis, setShowCompAnalysis] = useState(false);
   const [editingProperty, setEditingProperty] = useState<Property | null>(null);
   const [togglingPublish, setTogglingPublish] = useState(false);
+  const [sharingProperty, setSharingProperty] = useState<Property | null>(null);
 
   const load = useCallback(async () => {
       const supabase = createClient();
@@ -250,6 +252,16 @@ export default function PropertiesContent() {
         organizationId="a0000000-0000-0000-0000-000000000001"
         editProperty={editingProperty}
       />
+      {sharingProperty && (
+        <ShareWithOwnerModal
+          open={!!sharingProperty}
+          onClose={() => setSharingProperty(null)}
+          propertyId={sharingProperty.id}
+          propertyName={sharingProperty.headline || sharingProperty.name}
+          ownerContactId={(sharingProperty.owner as any)?.id}
+          ownerName={(sharingProperty.owner as any)?.full_name}
+        />
+      )}
       <CompAnalysisModal
         open={showCompAnalysis}
         onClose={() => setShowCompAnalysis(false)}
@@ -474,21 +486,37 @@ export default function PropertiesContent() {
                 </div>
               </button>
 
-              {/* Edit Listing button */}
-              <button
-                onClick={() => setEditingProperty(selected)}
-                className="w-full flex items-center gap-2.5 px-3.5 py-2.5 mb-4 cursor-pointer border-none transition-all hover:bg-[rgba(224,122,95,0.08)]"
-                style={{
-                  borderRadius: 6,
-                  background: "rgba(224,122,95,0.06)",
-                  border: "1px solid rgba(224,122,95,0.28)",
-                }}
-              >
-                <span className="text-[14px]">✏️</span>
-                <span className="text-xs font-semibold tracking-wider uppercase" style={{ color: C.coral }}>
-                  Edit listing details
-                </span>
-              </button>
+              {/* Edit Listing + Share with Owner row */}
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                <button
+                  onClick={() => setEditingProperty(selected)}
+                  className="flex items-center justify-center gap-2 px-3 py-2.5 cursor-pointer border-none transition-all hover:bg-[rgba(224,122,95,0.08)]"
+                  style={{
+                    borderRadius: 6,
+                    background: "rgba(224,122,95,0.06)",
+                    border: "1px solid rgba(224,122,95,0.28)",
+                  }}
+                >
+                  <span className="text-[13px]">✏️</span>
+                  <span className="text-[11px] font-semibold tracking-wider uppercase" style={{ color: C.coral }}>
+                    Edit
+                  </span>
+                </button>
+                <button
+                  onClick={() => setSharingProperty(selected)}
+                  className="flex items-center justify-center gap-2 px-3 py-2.5 cursor-pointer border-none transition-all hover:bg-[rgba(78,205,196,0.08)]"
+                  style={{
+                    borderRadius: 6,
+                    background: "rgba(78,205,196,0.05)",
+                    border: "1px solid rgba(78,205,196,0.28)",
+                  }}
+                >
+                  <span className="text-[13px]">🔗</span>
+                  <span className="text-[11px] font-semibold tracking-wider uppercase" style={{ color: C.teal }}>
+                    Share with owner
+                  </span>
+                </button>
+              </div>
 
               <div className="grid grid-cols-2 gap-2 mb-4">
                 {[
