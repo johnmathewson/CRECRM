@@ -7,7 +7,7 @@
  * just makes an HTTP request to the Next.js route, which has full access
  * to all helpers, env vars, and the Supabase client.
  *
- * Schedule: "@every 1m" runs once per minute.
+ * Schedule: standard cron — every minute.
  */
 
 import type { Config } from "@netlify/functions";
@@ -34,5 +34,5 @@ export default async function handler() {
 }
 
 export const config: Config = {
-  schedule: "@every 1m",
+  schedule: "* * * * *",
 };
