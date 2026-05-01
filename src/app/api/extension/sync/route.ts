@@ -55,8 +55,10 @@ interface SyncBody {
   metrics: {
     views?: number;
     saves?: number;
-    inquiries?: number;
-    downloads?: number;
+    inquiries?: number;     // Leads
+    downloads?: number;     // Opened OMs
+    nda_executions?: number; // Executed CAs
+    offers?: number;        // Offers received
   };
   period_start?: string;
   scraped_at?: string;
@@ -159,6 +161,8 @@ export async function POST(req: NextRequest) {
     saves: m.saves ?? 0,
     inquiries: m.inquiries ?? 0,
     downloads: m.downloads ?? 0,
+    nda_executions: m.nda_executions ?? 0,
+    offers: m.offers ?? 0,
     raw_payload: body.raw || null,
     scraped_at: scrapedAt,
   };

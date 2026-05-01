@@ -79,7 +79,7 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
       .in("id", propertyIds),
     supabase
       .from("listing_metrics")
-      .select("property_id, source, period_start, period_end, views, saves, inquiries, downloads, scraped_at")
+      .select("property_id, source, period_start, period_end, views, saves, inquiries, downloads, nda_executions, offers, scraped_at")
       .eq("organization_id", ORG_ID)
       .in("property_id", propertyIds)
       .gte("period_start", isoDate(earliestStart))
@@ -119,9 +119,13 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
     crexi_views: number;
     loopnet_views: number;
     site_views: number;
-    inquiries: number;
-    nda_signatures: number;
-    om_downloads: number;
+    inquiries: number;          // own-site leads only (anon CRM rows)
+    nda_signatures: number;     // own-site NDAs (vault flow)
+    om_downloads: number;       // own-site OM downloads (vault flow)
+    crexi_leads: number;        // CREXi "Leads"
+    crexi_opened_oms: number;   // CREXi "Opened OMs"
+    crexi_executed_cas: number; // CREXi "Executed CAs"
+    crexi_offers: number;       // CREXi "Offers"
   };
 
   const propsById = new Map<string, any>();
@@ -132,19 +136,31 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
   function getBucket(p: any, weekStart: string): WeeklyBucket {
     let b = p.weeks.get(weekStart);
     if (!b) {
-      b = { week_start: weekStart, crexi_views: 0, loopnet_views: 0, site_views: 0, inquiries: 0, nda_signatures: 0, om_downloads: 0 };
+      b = {
+        week_start: weekStart,
+        crexi_views: 0, loopnet_views: 0, site_views: 0,
+        inquiries: 0, nda_signatures: 0, om_downloads: 0,
+        crexi_leads: 0, crexi_opened_oms: 0, crexi_executed_cas: 0, crexi_offers: 0,
+      };
       p.weeks.set(weekStart, b);
     }
     return b;
   }
 
-  // Listing metrics → per-source views per week
+  // Listing metrics → per-source signals per week
   for (const m of (metricsRes.data || []) as any[]) {
     const p = propsById.get(m.property_id);
     if (!p) continue;
     const b = getBucket(p, m.period_start);
-    if (m.source === "crexi") b.crexi_views = m.views || 0;
-    else if (m.source === "loopnet") b.loopnet_views = m.views || 0;
+    if (m.source === "crexi") {
+      b.crexi_views = m.views || 0;
+      b.crexi_leads = m.inquiries || 0;
+      b.crexi_opened_oms = m.downloads || 0;
+      b.crexi_executed_cas = m.nda_executions || 0;
+      b.crexi_offers = m.offers || 0;
+    } else if (m.source === "loopnet") {
+      b.loopnet_views = m.views || 0;
+    }
   }
 
   // Page views → site_views per week
@@ -197,10 +213,16 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
         week_start: wkStr,
         crexi_views: 0, loopnet_views: 0, site_views: 0,
         inquiries: 0, nda_signatures: 0, om_downloads: 0,
+        crexi_leads: 0, crexi_opened_oms: 0, crexi_executed_cas: 0, crexi_offers: 0,
       });
       cursor.setUTCDate(cursor.getUTCDate() + 7);
     }
-    const thisWeek = padded[padded.length - 1] || { week_start: isoDate(thisWeekStart), crexi_views: 0, loopnet_views: 0, site_views: 0, inquiries: 0, nda_signatures: 0, om_downloads: 0 };
+    const thisWeek = padded[padded.length - 1] || {
+      week_start: isoDate(thisWeekStart),
+      crexi_views: 0, loopnet_views: 0, site_views: 0,
+      inquiries: 0, nda_signatures: 0, om_downloads: 0,
+      crexi_leads: 0, crexi_opened_oms: 0, crexi_executed_cas: 0, crexi_offers: 0,
+    };
     const lastWeek = padded[padded.length - 2];
 
     function delta(now: number, prev: number | undefined): number | null {
@@ -234,6 +256,10 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
             site_views: delta(thisWeek.site_views, lastWeek.site_views),
             inquiries: delta(thisWeek.inquiries, lastWeek.inquiries),
             om_downloads: delta(thisWeek.om_downloads, lastWeek.om_downloads),
+            crexi_leads: delta(thisWeek.crexi_leads, lastWeek.crexi_leads),
+            crexi_opened_oms: delta(thisWeek.crexi_opened_oms, lastWeek.crexi_opened_oms),
+            crexi_executed_cas: delta(thisWeek.crexi_executed_cas, lastWeek.crexi_executed_cas),
+            crexi_offers: delta(thisWeek.crexi_offers, lastWeek.crexi_offers),
           }
         : null,
       trend: padded,

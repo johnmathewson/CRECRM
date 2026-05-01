@@ -96,7 +96,13 @@
     const id = extractListingId();
     if (!id) return null;
 
-    // Multiple keyword groups so we don't break if CREXi rephrases.
+    // CREXi seller dashboard labels (verified live April 2026):
+    //   "Leads" → inquiries (warm — buyer asked a question)
+    //   "Opened OMs" → downloads (engaged — opened the OM)
+    //   "Executed CAs" → nda_executions (serious — signed NDA)
+    //   "Offers" → offers (real money on the table)
+    // Views/saves typically don't show on this dashboard view — left in
+    // case they appear on other CREXi surfaces (e.g. listing-detail public).
     const views = findMetricNear([
       "views", "page views", "listing views", "total views",
       "30 day views", "30-day views", "impressions",
@@ -105,12 +111,17 @@
       "saves", "saved", "watchlists", "watchlist", "favorites",
     ]);
     const inquiries = findMetricNear([
-      "inquiries", "leads", "messages", "contacts", "lead submissions",
+      "leads", "inquiries", "messages", "contacts", "lead submissions",
     ]);
     const downloads = findMetricNear([
-      "downloads", "om downloads", "documents downloaded",
-      "document downloads", "brochure downloads",
+      "opened oms", "om downloads", "downloads",
+      "documents downloaded", "document downloads", "brochure downloads",
     ]);
+    const ndaExecutions = findMetricNear([
+      "executed cas", "executed ca", "ca executions",
+      "ndas signed", "nda signatures", "executed ndas",
+    ]);
+    const offers = findMetricNear(["offers", "offers received"]);
 
     return {
       external_listing_id: id,
@@ -120,6 +131,8 @@
         saves: saves.value,
         inquiries: inquiries.value,
         downloads: downloads.value,
+        nda_executions: ndaExecutions.value,
+        offers: offers.value,
       },
       raw: {
         title: document.title,
@@ -130,6 +143,8 @@
           saves: saves.foundLabel,
           inquiries: inquiries.foundLabel,
           downloads: downloads.foundLabel,
+          nda_executions: ndaExecutions.foundLabel,
+          offers: offers.foundLabel,
         },
         candidates: collectAllLabeledNumbers(),
       },
