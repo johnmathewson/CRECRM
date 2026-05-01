@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import Modal, { FormField, inputStyle, selectStyle, btnPrimary, btnSecondary } from "./modal";
 import ListingImageUploader, { type ListingImage } from "./listing-image-uploader";
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
@@ -119,14 +119,54 @@ interface Props {
   onClose: () => void;
   onCreated: (property: any) => void;
   organizationId: string;
+  /** When set, the wizard opens in EDIT mode: pre-fills the form, skips the
+   *  Import step, and PATCHes the existing row instead of POSTing new. */
+  editProperty?: any;
 }
 
 type Mode = "crexi" | "om" | "manual";
 
-export default function AddListingWizard({ open, onClose, onCreated, organizationId }: Props) {
-  const [step, setStep] = useState(1);
+// Translates a property row from /api/properties/[id] back into the
+// string-based ListingForm shape the wizard works with.
+function propertyToForm(p: any): ListingForm {
+  if (!p) return emptyForm();
+  return {
+    name: p.name || "",
+    headline: p.headline || "",
+    address: p.address || "",
+    city: p.city || "",
+    state: p.state || "IN",
+    zip: p.zip || "",
+    asset_type: p.asset_type || "retail",
+    transaction_type: p.transaction_type || "sale",
+    status: p.status || "listed",
+    your_role: p.your_role || "listing_broker",
+    asking_price: p.asking_price != null ? String(p.asking_price) : "",
+    lease_rate: p.lease_rate != null ? String(p.lease_rate) : "",
+    sqft: p.sqft != null ? String(p.sqft) : "",
+    acreage: p.acreage != null ? String(p.acreage) : "",
+    year_built: p.year_built != null ? String(p.year_built) : "",
+    parking_spaces: p.parking_spaces != null ? String(p.parking_spaces) : "",
+    parking_ratio: p.parking_ratio || "",
+    zoning: p.zoning || "",
+    noi: p.noi != null ? String(p.noi) : "",
+    cap_rate: p.cap_rate != null ? String(p.cap_rate) : "",
+    price_per_sf: p.price_per_sf != null ? String(p.price_per_sf) : "",
+    occupancy_pct: p.occupancy_pct != null ? String(p.occupancy_pct) : "",
+    description: p.description || "",
+    highlights: Array.isArray(p.highlights) ? p.highlights.join("\n") : (p.highlights || ""),
+    notes: p.notes || "",
+    crexi_url: p.crexi_url || "",
+  };
+}
+
+export default function AddListingWizard({ open, onClose, onCreated, organizationId, editProperty }: Props) {
+  const isEdit = !!editProperty;
+  const [step, setStep] = useState(isEdit ? 2 : 1);
   const [mode, setMode] = useState<Mode>("om");
-  const [form, setForm] = useState<ListingForm>(emptyForm());
+  const [form, setForm] = useState<ListingForm>(() =>
+    isEdit ? propertyToForm(editProperty) : emptyForm()
+  );
   const [crexiUrl, setCrexiUrl] = useState("");
   const [omFile, setOmFile] = useState<File | null>(null);
   const [omDragging, setOmDragging] = useState(false);
@@ -136,10 +176,26 @@ export default function AddListingWizard({ open, onClose, onCreated, organizatio
   const [extractionNotes, setExtractionNotes] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const [publishToWebsite, setPublishToWebsite] = useState(true);
+  const [publishToWebsite, setPublishToWebsite] = useState(
+    isEdit ? !!editProperty.publish_to_website : true
+  );
   const [publishToCrexi, setPublishToCrexi] = useState(false);
-  const [images, setImages] = useState<ListingImage[]>([]);
+  const [images, setImages] = useState<ListingImage[]>(() => {
+    if (isEdit && Array.isArray(editProperty.images)) return editProperty.images;
+    return [];
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // When editProperty changes (or modal reopens), re-sync form state.
+  useEffect(() => {
+    if (open && isEdit && editProperty) {
+      setForm(propertyToForm(editProperty));
+      setImages(Array.isArray(editProperty.images) ? editProperty.images : []);
+      setPublishToWebsite(!!editProperty.publish_to_website);
+      setStep(2);
+      setError("");
+    }
+  }, [open, editProperty, isEdit]);
 
   const set = (k: keyof ListingForm, v: string) => setForm(f => ({ ...f, [k]: v }));
 
@@ -152,11 +208,14 @@ export default function AddListingWizard({ open, onClose, onCreated, organizatio
   };
 
   function reset() {
-    setStep(1); setMode("om"); setForm(emptyForm());
+    setStep(isEdit ? 2 : 1);
+    setMode("om");
+    setForm(isEdit ? propertyToForm(editProperty) : emptyForm());
     setCrexiUrl(""); setOmFile(null); setLoading(false);
     setConfidence(""); setExtractionNotes(""); setError(""); setSaving(false);
-    setPublishToWebsite(true); setPublishToCrexi(false);
-    setImages([]);
+    setPublishToWebsite(isEdit ? !!editProperty?.publish_to_website : true);
+    setPublishToCrexi(false);
+    setImages(isEdit && Array.isArray(editProperty?.images) ? editProperty.images : []);
   }
 
   function handleClose() { reset(); onClose(); }
@@ -372,13 +431,24 @@ export default function AddListingWizard({ open, onClose, onCreated, organizatio
         source_import: mode !== "manual" ? mode : null,
       };
 
-      const res = await fetch("/api/properties", {
-        method: "POST",
+      // Edit mode → PATCH the existing row. Strip fields the PATCH endpoint
+      // doesn't accept (organization_id, source_import — read-only on edit).
+      const url = isEdit ? `/api/properties/${editProperty.id}` : "/api/properties";
+      const method = isEdit ? "PATCH" : "POST";
+      const finalPayload = isEdit
+        ? (() => {
+            const { organization_id: _o, source_import: _s, ...rest } = payload;
+            return rest;
+          })()
+        : payload;
+
+      const res = await fetch(url, {
+        method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(finalPayload),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to create property");
+      if (!res.ok) throw new Error(data.error || `Failed to ${isEdit ? "update" : "create"} property`);
       onCreated(data.property || data);
       reset();
       onClose();
@@ -408,7 +478,9 @@ export default function AddListingWizard({ open, onClose, onCreated, organizatio
       >
         {/* Header */}
         <div className="panel-header">
-          <h3 style={{ fontSize: 13, fontWeight: 600, margin: 0 }}>Add New Listing</h3>
+          <h3 style={{ fontSize: 13, fontWeight: 600, margin: 0 }}>
+            {isEdit ? `Edit Listing: ${editProperty?.name || ""}` : "Add New Listing"}
+          </h3>
           <button onClick={handleClose} className="icon-btn" style={{ fontSize: 14 }}>✕</button>
         </div>
 
@@ -664,7 +736,12 @@ export default function AddListingWizard({ open, onClose, onCreated, organizatio
               {error && <div style={{ fontSize: 12, color: coral, marginBottom: 12, fontWeight: 500 }}>{error}</div>}
 
               <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 8 }}>
-                <button style={btnSecondary} onClick={() => setStep(1)}>← Back</button>
+                <button
+                  style={btnSecondary}
+                  onClick={() => isEdit ? handleClose() : setStep(1)}
+                >
+                  {isEdit ? "Cancel" : "← Back"}
+                </button>
                 <button style={btnPrimary} onClick={() => setStep(3)}>Next: Financials →</button>
               </div>
             </div>
@@ -883,7 +960,7 @@ export default function AddListingWizard({ open, onClose, onCreated, organizatio
                   onClick={handleSave}
                   disabled={saving}
                 >
-                  {saving ? "Saving..." : "✓ Save Listing"}
+                  {saving ? "Saving..." : isEdit ? "✓ Save Changes" : "✓ Save Listing"}
                 </button>
               </div>
             </div>

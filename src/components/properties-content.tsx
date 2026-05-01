@@ -10,19 +10,34 @@ import CompAnalysisModal from "./comp-analysis-modal";
 interface Property {
   id: string;
   name: string;
+  headline?: string | null;
   address: string | null;
   city: string | null;
   state: string | null;
   zip: string | null;
   asset_type: string | null;
+  transaction_type?: string | null;
   status: string | null;
   asking_price: number | null;
   lease_rate: number | null;
   sqft: number | null;
   acreage: number | null;
   year_built: number | null;
+  parking_spaces?: number | null;
+  parking_ratio?: string | null;
+  zoning?: string | null;
+  noi?: number | null;
+  cap_rate?: number | null;
+  price_per_sf?: number | null;
+  occupancy_pct?: number | null;
+  description?: string | null;
+  highlights?: string[] | null;
+  crexi_url?: string | null;
+  publish_to_website?: boolean | null;
   your_role: string | null;
   notes: string | null;
+  images?: any[] | null;
+  slug?: string | null;
   owner?: { full_name: string } | null;
   deals?: { id: string; deal_name: string; deal_type: string; price: number; is_closed: boolean }[];
 }
@@ -86,14 +101,21 @@ export default function PropertiesContent() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [showCompAnalysis, setShowCompAnalysis] = useState(false);
+  const [editingProperty, setEditingProperty] = useState<Property | null>(null);
+  const [togglingPublish, setTogglingPublish] = useState(false);
 
   const load = useCallback(async () => {
       const supabase = createClient();
       const { data } = await supabase
         .from("properties")
         .select(`
-          id, name, address, city, state, zip, asset_type, status,
+          id, name, headline, slug, address, city, state, zip,
+          asset_type, transaction_type, status,
           asking_price, lease_rate, sqft, acreage, year_built,
+          parking_spaces, parking_ratio, zoning,
+          noi, cap_rate, price_per_sf, occupancy_pct,
+          description, highlights, crexi_url, images,
+          publish_to_website,
           your_role, notes,
           owner:contacts!properties_owner_contact_id_fkey(full_name),
           deals(id, deal_name, deal_type, price, is_closed)
@@ -103,6 +125,31 @@ export default function PropertiesContent() {
       setProperties((data as any) || []);
       setLoading(false);
   }, []);
+
+  // Toggle publish_to_website without leaving the detail panel.
+  async function togglePublish(p: Property) {
+    setTogglingPublish(true);
+    try {
+      const next = !p.publish_to_website;
+      const res = await fetch(`/api/properties/${p.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ publish_to_website: next }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(`Toggle failed: ${err.error || res.status}`);
+        return;
+      }
+      // Optimistic local update + sync from response
+      const data = await res.json();
+      const updated = { ...p, publish_to_website: data.property?.publish_to_website ?? next };
+      setProperties(prev => prev.map(x => x.id === p.id ? updated : x));
+      setSelected(updated);
+    } finally {
+      setTogglingPublish(false);
+    }
+  }
 
   useEffect(() => { load(); }, [load]);
 
@@ -187,7 +234,22 @@ export default function PropertiesContent() {
         </div>
       </div>
 
-      <AddListingWizard open={showCreate} onClose={() => setShowCreate(false)} onCreated={load} organizationId="a0000000-0000-0000-0000-000000000001" />
+      <AddListingWizard
+        open={showCreate}
+        onClose={() => setShowCreate(false)}
+        onCreated={load}
+        organizationId="a0000000-0000-0000-0000-000000000001"
+      />
+      <AddListingWizard
+        open={!!editingProperty}
+        onClose={() => setEditingProperty(null)}
+        onCreated={(p) => {
+          load();
+          setSelected(p as Property);
+        }}
+        organizationId="a0000000-0000-0000-0000-000000000001"
+        editProperty={editingProperty}
+      />
       <CompAnalysisModal
         open={showCompAnalysis}
         onClose={() => setShowCompAnalysis(false)}
@@ -332,6 +394,11 @@ export default function PropertiesContent() {
             }>
               <div className="mb-3">
                 <div className="text-lg font-bold">{selected.name}</div>
+                {selected.headline && (
+                  <div className="text-xs italic mt-0.5" style={{ color: C.coral }}>
+                    {selected.headline}
+                  </div>
+                )}
                 <div className="text-xs text-cream-muted mt-0.5">
                   {[selected.address, selected.city, selected.state, selected.zip].filter(Boolean).join(", ")}
                 </div>
@@ -341,6 +408,87 @@ export default function PropertiesContent() {
                 <AssetBadge type={selected.asset_type} />
                 <StatusBadge status={selected.status} />
               </div>
+
+              {/* Publish toggle — prominent. One click flips it on/off. */}
+              <button
+                onClick={() => togglePublish(selected)}
+                disabled={togglingPublish}
+                className="w-full flex items-center gap-3 px-3.5 py-3 mb-4 cursor-pointer border-none transition-all"
+                style={{
+                  borderRadius: 6,
+                  background: selected.publish_to_website
+                    ? "linear-gradient(135deg, rgba(107,203,119,0.18), rgba(107,203,119,0.10))"
+                    : "rgba(255,255,255,0.03)",
+                  border: `1px solid ${selected.publish_to_website ? "rgba(107,203,119,0.45)" : "rgba(255,255,255,0.08)"}`,
+                  opacity: togglingPublish ? 0.5 : 1,
+                }}
+              >
+                <div
+                  className="flex-shrink-0 flex items-center justify-center"
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 6,
+                    background: selected.publish_to_website ? "rgba(107,203,119,0.25)" : "rgba(255,255,255,0.05)",
+                    fontSize: 16,
+                  }}
+                >
+                  {selected.publish_to_website ? "🌐" : "👁️"}
+                </div>
+                <div className="flex-1 text-left">
+                  <div
+                    className="text-[11px] font-bold tracking-wider uppercase"
+                    style={{ color: selected.publish_to_website ? C.green : "rgba(240,237,228,0.55)" }}
+                  >
+                    {selected.publish_to_website ? "Live on Website" : "Hidden from Website"}
+                  </div>
+                  <div className="text-[10.5px] text-cream-subtle mt-0.5">
+                    {selected.publish_to_website
+                      ? "Visible on stewardshipcre.com — click to take down"
+                      : "Not visible publicly — click to publish"}
+                  </div>
+                </div>
+                <div
+                  className="flex-shrink-0 relative"
+                  style={{
+                    width: 36,
+                    height: 20,
+                    borderRadius: 10,
+                    background: selected.publish_to_website ? C.green : "rgba(255,255,255,0.12)",
+                    transition: "background 0.18s",
+                  }}
+                >
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: 2,
+                      left: selected.publish_to_website ? 18 : 2,
+                      width: 16,
+                      height: 16,
+                      borderRadius: "50%",
+                      background: "white",
+                      transition: "left 0.18s",
+                      boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+                    }}
+                  />
+                </div>
+              </button>
+
+              {/* Edit Listing button */}
+              <button
+                onClick={() => setEditingProperty(selected)}
+                className="w-full flex items-center gap-2.5 px-3.5 py-2.5 mb-4 cursor-pointer border-none transition-all hover:bg-[rgba(224,122,95,0.08)]"
+                style={{
+                  borderRadius: 6,
+                  background: "rgba(224,122,95,0.06)",
+                  border: "1px solid rgba(224,122,95,0.28)",
+                }}
+              >
+                <span className="text-[14px]">✏️</span>
+                <span className="text-xs font-semibold tracking-wider uppercase" style={{ color: C.coral }}>
+                  Edit listing details
+                </span>
+              </button>
 
               <div className="grid grid-cols-2 gap-2 mb-4">
                 {[
@@ -407,7 +555,6 @@ export default function PropertiesContent() {
                   { icon: "🔐", label: "Vault docs", desc: "Manage gated documents (public / tenant / buyer)", href: `/admin/vault/${selected.id}` },
                   { icon: "📋", label: "Create OM", desc: "Generate an offering memorandum" },
                   { icon: "📊", label: "Run comps", desc: "Pull sale & lease comparables" },
-                  { icon: "🏷️", label: "Update listing", desc: "Edit property details" },
                   { icon: "🤝", label: "Create deal", desc: "Start a new deal on this property" },
                 ].map((a) => {
                   const inner = (
