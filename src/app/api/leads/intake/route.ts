@@ -27,6 +27,7 @@ import { createClient } from "@supabase/supabase-js";
 import { callAnthropic, parseJsonResponse, MODELS } from "@/lib/anthropic";
 import { checkSpam } from "@/lib/spam-filter";
 import { matchProperty, MATCH_CONFIDENCE_THRESHOLD } from "@/lib/property-match";
+import { gatherIntel, formatIntelForPrompt } from "@/lib/agent-intel";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // Netlify Pro: up to 60s. Two Claude calls can run long.
@@ -94,11 +95,13 @@ Be precise. Don't invent details the message doesn't contain.`;
 
 const DRAFT_SYSTEM_BASE = `You are drafting a reply email on behalf of John Mathewson (Stewardship CRE — Northwest Indiana commercial real estate broker, owner-operator himself, Indianapolis-area focus).
 
-CRITICAL — anti-hallucination rules. Violating these damages John's credibility:
-- DO NOT invent specific numbers, cap rates, prices, square footage, occupancy %, NOI, comp data, or any quantitative detail unless the user message above explicitly provides it OR the property context block lists it. If you don't have a real number, do not state one. Do not estimate.
-- DO NOT invent inventory. Never say "I have several other properties," "I have a couple owners testing the market," "I've got something off-market," or imply availability the agent does not actually know about. If we have a matched property in the CRM, you may reference its facts as listed. Otherwise, do not claim what John has.
-- DO NOT make up market generalizations like "Lake/Porter industrial trades at 6-8% caps" — those are specific market claims that need a real source. General common-sense observations about what kind of space a tenant type usually wants (e.g. "PT clinics typically need ground-floor with parking") are fine, but cap rates, rent levels, and inventory specifics are NOT.
-- If the prospect references a property and the agent has not been told the matched listing details, do NOT deny it exists. Assume the matcher missed it. Ask the prospect to confirm which listing/source they saw to make sure you're talking about the same asset, then promise to send the package once confirmed.
+GROUND TRUTH ONLY — this is what makes John's drafts credible:
+- A "GROUND TRUTH CONTEXT" block will appear in the user message. It contains real CRM facts: matched listing details, sale + lease comp aggregates, active inventory, contact history.
+- You MAY cite anything in that block — specific cap rates, $/SF medians, ranges, recent inventory, prior history. Numbers there are real. Use them.
+- You MAY NOT invent specifics outside that block. No fabricated cap rates, $/SF numbers, inventory, or comps. If the ground truth block doesn't have a number, don't state one.
+- Lease comps may include tenant names from rent rolls — those are CONFIDENTIAL. Never cite a specific tenant name to a prospect. Aggregate ranges and medians are fine.
+- DO NOT invent inventory the agent does not actually have. If the active-inventory line is empty, do not say "I have several other properties." If a matched property exists, you may discuss its facts.
+- If the prospect references a property and there's no matched listing in the CRM, do NOT deny it exists. The matcher may have missed it. Ask the prospect to confirm which source/listing (CREXi link? our website?) they're referring to, and promise to send the right package once confirmed.
 
 Voice guidelines:
 - John reads pro formas like an investor, not a listing agent. Plain language. Confident.
@@ -476,22 +479,34 @@ ${body.raw_body || "(empty)"}`;
     });
   }
 
-  // ── 8. Sonnet drafting ────────────────────────────────────────────────────
-  const propertyContext = matched
-    ? `Matched property in CRM:
-- Name: ${matched.name || "(unnamed)"}
-- Address: ${matched.address || ""}, ${matched.city || ""}, ${matched.state || ""}
-- Asset type: ${matched.asset_type || "n/a"}
-- CRM slug: ${matched.slug || "n/a"}
+  // ── 8. Gather agent intel — comps, active inventory, contact history ─────
+  const intel = await gatherIntel({
+    supabase,
+    organizationId: ORG_ID,
+    matchedPropertyId: matched?.id || null,
+    contactId,
+    qualification,
+    rawSubject: body.raw_subject,
+    rawBody: body.raw_body,
+  });
 
-When referring to this property, use only these facts. Do NOT invent additional details (price, NOI, cap rate, occupancy, tenant names) that aren't listed here.`
-    : qualification.property_label
-    ? `The CRM matcher did NOT find a property matching "${qualification.property_label}" with high confidence. Two possibilities:
-  (a) The matcher missed it — we may actually have this listing.
-  (b) The prospect saw it elsewhere and we never had it.
+  await recordEvent(
+    supabase,
+    leadId,
+    "qualified",
+    "agent",
+    `Pulled intel — ${intel.saleComps?.count || 0} sale comps, ${intel.leaseComps?.count || 0} lease comps, ${intel.activeInventory.length} active listings, contact ${intel.contactHistory?.isNew ? "new" : "returning"}`,
+    {
+      sale_comp_count: intel.saleComps?.count || 0,
+      lease_comp_count: intel.leaseComps?.count || 0,
+      active_inventory_count: intel.activeInventory.length,
+      geo_source: intel.saleComps?.geoSource || intel.leaseComps?.geoSource || "none",
+      notes: intel.notes,
+    }
+  );
 
-DO NOT deny the listing exists. Treat it as "let me confirm I'm pulling the right one." Ask the prospect to confirm which listing/source (CREXi link? LoopNet? our website?) they're referring to, so you can send the right package. If they shared specifics about their criteria, ask 1-2 qualifying questions to round it out.`
-    : `The prospect did not reference a specific property. They are browsing or info-gathering. Acknowledge their interest, focus on understanding their criteria (asset type, size, geography, timeline, budget), and offer to circle back with relevant inventory once you understand their parameters. Do NOT mention specific properties, comps, cap rates, or off-market opportunities the agent has no real source for.`;
+  // ── 9. Sonnet drafting with intel context ───────────────────────────────
+  const intelBlock = formatIntelForPrompt(intel);
 
   const draftMessage = `Inbound message:
 From: ${qualification.sender_name_clean || body.sender_name || "Unknown"} <${qualification.sender_email_clean || body.sender_email || "no email"}>
@@ -502,14 +517,17 @@ Body:
 ${body.raw_body || "(no body)"}
 
 ---
-Context for the reply:
+Quick context:
 - Lead intent: ${qualification.intent || "unclear"}
 - Urgency: ${qualification.urgency}
 - AI summary: ${qualification.qualifier_summary}
-${matched && qualification.notes ? `- Notes: ${qualification.notes}\n` : ""}
-${propertyContext}
+${qualification.notes ? `- Notes: ${qualification.notes}\n` : ""}
+---
 
-Draft John's reply now. Plain text email body only, no subject, signed "— John".`;
+${intelBlock}
+
+---
+Draft John's reply now. Plain text email body only, no subject, signed "— John". Use the GROUND TRUTH facts above when relevant — they're real, recent, and credible. Do NOT invent specifics not in that block.`;
 
   let draftReply: string | null = null;
   let draftTokens: any = null;
@@ -539,7 +557,7 @@ Draft John's reply now. Plain text email body only, no subject, signed "— John
     });
   }
 
-  // ── 9. Save draft + record event ──────────────────────────────────────────
+  // ── 10. Save draft + record event ─────────────────────────────────────────
   await supabase.from("leads").update({ draft_reply: draftReply }).eq("id", leadId);
   await recordEvent(supabase, leadId, "draft_generated", "agent", "Drafted substantive reply", {
     model: MODELS.SONNET,
