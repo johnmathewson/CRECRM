@@ -73,6 +73,9 @@ els.sync.addEventListener("click", async () => {
       els.meta.innerHTML = `<strong>Last ${source} sync:</strong> ${ago}`;
     } else {
       setStatus(result?.error || "Sync failed", "err");
+      if (result?.hint) {
+        els.meta.innerHTML = `<strong>How to fix:</strong> ${result.hint}`;
+      }
     }
   } catch (err) {
     // Content script may not be injected if URL doesn't match patterns.

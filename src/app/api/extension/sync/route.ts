@@ -132,10 +132,12 @@ export async function POST(req: NextRequest) {
   }
 
   if (!property) {
+    const fieldLabel = body.source === "crexi" ? "CREXi URL" : "LoopNet URL";
+    const urlToPaste = body.external_url || `(this listing's URL, ID ${body.external_listing_id})`;
     return NextResponse.json(
       {
         error: "No property in CRM matches this listing.",
-        hint: `Make a property in the CRM and save it with ${body.source === "crexi" ? "the CREXi URL" : "a LoopNet URL"} containing the listing ID ${body.external_listing_id}.`,
+        hint: `Open the matching property in the CRM, paste this into the "${fieldLabel}" field, and save: ${urlToPaste}`,
       },
       { status: 404, headers: corsHeaders(origin) }
     );

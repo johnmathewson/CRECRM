@@ -68,7 +68,7 @@
       body: JSON.stringify({ source: "loopnet", ...payload }),
     });
     const body = await res.json().catch(() => ({}));
-    if (!res.ok) return { ok: false, error: body?.error || `HTTP ${res.status}` };
+    if (!res.ok) return { ok: false, error: body?.error || `HTTP ${res.status}`, hint: body?.hint };
     return { ok: true, ...body };
   }
 
