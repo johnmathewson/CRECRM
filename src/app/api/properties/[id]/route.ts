@@ -22,7 +22,7 @@ const PATCHABLE_FIELDS = new Set([
   "asking_price", "lease_rate", "sqft", "acreage", "year_built",
   "parking_spaces", "parking_ratio", "zoning",
   "noi", "cap_rate", "price_per_sf", "occupancy_pct",
-  "description", "highlights", "notes", "crexi_url",
+  "description", "highlights", "notes", "crexi_url", "loopnet_url",
   "publish_to_website", "crexi_sync_status", "source_import",
   "headline", "images", "slug",
 ]);

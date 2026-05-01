@@ -33,6 +33,7 @@ interface ListingForm {
   highlights: string;
   notes: string;
   crexi_url: string;
+  loopnet_url: string;
 }
 
 const emptyForm = (): ListingForm => ({
@@ -42,7 +43,7 @@ const emptyForm = (): ListingForm => ({
   sqft: "", acreage: "", year_built: "", parking_spaces: "",
   parking_ratio: "", zoning: "", noi: "", cap_rate: "",
   price_per_sf: "", occupancy_pct: "", description: "",
-  highlights: "", notes: "", crexi_url: "",
+  highlights: "", notes: "", crexi_url: "", loopnet_url: "",
 });
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -157,6 +158,7 @@ function propertyToForm(p: any): ListingForm {
     highlights: Array.isArray(p.highlights) ? p.highlights.join("\n") : (p.highlights || ""),
     notes: p.notes || "",
     crexi_url: p.crexi_url || "",
+    loopnet_url: p.loopnet_url || "",
   };
 }
 
@@ -426,6 +428,7 @@ export default function AddListingWizard({ open, onClose, onCreated, organizatio
           : null,
         notes: form.notes || null,
         crexi_url: form.crexi_url || null,
+        loopnet_url: form.loopnet_url || null,
         publish_to_website: publishToWebsite,
         crexi_sync_status: publishToCrexi ? "pending" : "not_synced",
         source_import: mode !== "manual" ? mode : null,
@@ -704,9 +707,15 @@ export default function AddListingWizard({ open, onClose, onCreated, organizatio
                     ))}
                   </select>
                 </FormField>
-                <FormField label="CREXi Listing URL (optional)">
+                <FormField label="CREXi Listing URL">
                   <input style={inputStyle} value={form.crexi_url} onChange={e => set("crexi_url", e.target.value)} placeholder="https://www.crexi.com/properties/..." />
                 </FormField>
+              </div>
+              <div style={grid2}>
+                <FormField label="LoopNet Listing URL">
+                  <input style={inputStyle} value={form.loopnet_url} onChange={e => set("loopnet_url", e.target.value)} placeholder="https://www.loopnet.com/Listing/..." />
+                </FormField>
+                <div></div>
               </div>
 
               <div style={sectionLabel}>Physical Details</div>
