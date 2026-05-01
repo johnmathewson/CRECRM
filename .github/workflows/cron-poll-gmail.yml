@@ -1,13 +1,9 @@
 name: Poll Gmail Inbox
 
 on:
-  schedule:
-    # Every 5 minutes — GitHub Actions' minimum reliable interval.
-    # Means new inbound surfaces in /inbox within 0–5 min of arrival,
-    # and the 2–5 min auto-ack window stretches to ~2–10 min worst case
-    # (still well inside what feels human).
-    - cron: "*/5 * * * *"
-  # Allow manual trigger from the Actions tab for testing.
+  # Manual trigger only — primary scheduling lives in Supabase pg_cron now.
+  # This workflow is kept as a backup / debugging trigger you can fire from
+  # the GitHub UI if pg_cron ever has issues.
   workflow_dispatch:
 
 jobs:
