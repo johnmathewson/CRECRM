@@ -23,33 +23,18 @@
   }
 
   // ── Metric extraction ────────────────────────────────────────────────────
-  // Walks the DOM looking for labeled stat cards. Robust to layout changes
-  // because we match by adjacent label text, not absolute selectors.
-  // Returns { value, foundLabel } so callers can debug.
-  function findMetricNear(labelKeywords) {
-    const allText = Array.from(document.querySelectorAll("body *"))
-      .filter((el) => el.children.length === 0 && el.textContent && el.textContent.trim().length < 60);
-
-    for (const el of allText) {
-      const txt = el.textContent.trim().toLowerCase();
-      if (labelKeywords.some((kw) => txt === kw || txt.includes(kw))) {
-        // Look up the DOM tree for a sibling/parent with a numeric value
-        let cursor = el;
-        for (let i = 0; i < 4; i++) {
-          if (!cursor) break;
-          const numericNode = Array.from(cursor.querySelectorAll("*"))
-            .filter((n) => n.children.length === 0 && /^[\d,]+$/.test((n.textContent || "").trim()))
-            .find((n) => n !== el);
-          if (numericNode) {
-            return {
-              value: parseInt(numericNode.textContent.replace(/,/g, ""), 10) || 0,
-              foundLabel: txt,
-            };
-          }
-          cursor = cursor.parentElement;
-        }
-        // Found a label but no number near it — record that for debugging.
-        return { value: 0, foundLabel: txt + " (no number nearby)" };
+  // Strategy: scan every numeric leaf node, pair it with its nearest
+  // non-numeric text sibling (the label), then look the label up against
+  // each metric's keyword list. This is more reliable than walking UP from
+  // a label and grabbing the first numeric descendant, because CREXi lays
+  // out all stat tiles in one parent container — walking up from "Offers"
+  // would otherwise grab the "50" from the Leads tile (first numeric in
+  // the shared container's DOM order).
+  function findMetricByLabel(candidates, labelKeywords) {
+    for (const c of candidates) {
+      const lower = c.label.toLowerCase();
+      if (labelKeywords.some((kw) => lower === kw || lower.includes(kw))) {
+        return { value: c.value, foundLabel: lower };
       }
     }
     return { value: 0, foundLabel: null };
@@ -103,25 +88,26 @@
     //   "Offers" → offers (real money on the table)
     // Views/saves typically don't show on this dashboard view — left in
     // case they appear on other CREXi surfaces (e.g. listing-detail public).
-    const views = findMetricNear([
+    const candidates = collectAllLabeledNumbers();
+    const views = findMetricByLabel(candidates, [
       "views", "page views", "listing views", "total views",
       "30 day views", "30-day views", "impressions",
     ]);
-    const saves = findMetricNear([
+    const saves = findMetricByLabel(candidates, [
       "saves", "saved", "watchlists", "watchlist", "favorites",
     ]);
-    const inquiries = findMetricNear([
+    const inquiries = findMetricByLabel(candidates, [
       "leads", "inquiries", "messages", "contacts", "lead submissions",
     ]);
-    const downloads = findMetricNear([
+    const downloads = findMetricByLabel(candidates, [
       "opened oms", "om downloads", "downloads",
       "documents downloaded", "document downloads", "brochure downloads",
     ]);
-    const ndaExecutions = findMetricNear([
+    const ndaExecutions = findMetricByLabel(candidates, [
       "executed cas", "executed ca", "ca executions",
       "ndas signed", "nda signatures", "executed ndas",
     ]);
-    const offers = findMetricNear(["offers", "offers received"]);
+    const offers = findMetricByLabel(candidates, ["offers", "offers received"]);
 
     return {
       external_listing_id: id,
@@ -146,7 +132,7 @@
           nda_executions: ndaExecutions.foundLabel,
           offers: offers.foundLabel,
         },
-        candidates: collectAllLabeledNumbers(),
+        candidates,
       },
     };
   }
