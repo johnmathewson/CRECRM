@@ -216,6 +216,36 @@ export default function ListingImageUploader({ value, onChange }: Props) {
                     PRIMARY
                   </span>
                 )}
+                {/* Prominent remove button — top right of thumbnail */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (confirm(`Remove this photo${idx === 0 ? " (the primary)" : ""}?`)) {
+                      removeImage(idx);
+                    }
+                  }}
+                  title="Remove this photo"
+                  aria-label="Remove this photo"
+                  style={{
+                    position: "absolute",
+                    top: 6, right: 6,
+                    width: 28, height: 28,
+                    borderRadius: "50%",
+                    background: "rgba(231,76,60,0.9)",
+                    color: "white",
+                    border: "1px solid rgba(255,255,255,0.2)",
+                    cursor: "pointer",
+                    fontSize: 14,
+                    fontWeight: 700,
+                    lineHeight: 1,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    boxShadow: "0 2px 6px rgba(0,0,0,0.4)",
+                  }}
+                >
+                  ✕
+                </button>
               </div>
               <div style={{ padding: "6px 8px", display: "flex", gap: 4, alignItems: "center" }}>
                 <input
@@ -251,15 +281,6 @@ export default function ListingImageUploader({ value, onChange }: Props) {
                     padding: 2, fontSize: 11,
                   }}
                 >↓</button>
-                <button
-                  onClick={() => removeImage(idx)}
-                  title="Remove"
-                  style={{
-                    border: "none", background: "transparent",
-                    color: coral, cursor: "pointer",
-                    padding: 2, fontSize: 11,
-                  }}
-                >✕</button>
               </div>
             </div>
           ))}
