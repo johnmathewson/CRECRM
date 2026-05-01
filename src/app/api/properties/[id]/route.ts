@@ -59,6 +59,18 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   for (const [k, v] of Object.entries(body)) {
     if (PATCHABLE_FIELDS.has(k)) update[k] = v;
   }
+  // Normalize asset_type if present — same mapping as the create endpoint.
+  if (typeof update.asset_type === "string") {
+    const allowed = new Set(["retail", "office", "industrial", "hospitality", "multifamily", "land", "medical", "mixed_use", "other"]);
+    const v = update.asset_type.toLowerCase().trim().replace(/[\s-]/g, "_");
+    if (allowed.has(v)) update.asset_type = v;
+    else if (["hotel", "motel", "inn", "lodging"].includes(v)) update.asset_type = "hospitality";
+    else if (["flex", "warehouse", "distribution"].includes(v)) update.asset_type = "industrial";
+    else if (["restaurant", "qsr", "fast_food"].includes(v)) update.asset_type = "retail";
+    else if (["apartment", "apartments", "residential"].includes(v)) update.asset_type = "multifamily";
+    else if (["healthcare", "clinic"].includes(v)) update.asset_type = "medical";
+    else update.asset_type = "other";
+  }
   if (Object.keys(update).length === 0) {
     return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
   }

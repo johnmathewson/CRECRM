@@ -10,7 +10,7 @@ Extract these fields (use null if not found):
 - city: string
 - state: string (2-letter abbreviation, e.g. "IN")
 - zip: string
-- asset_type: string — one of: "retail", "office", "industrial", "multifamily", "hotel", "land", "mixed_use", "restaurant", "medical", "flex"
+- asset_type: string — one of EXACTLY these values (case-sensitive): "retail", "office", "industrial", "hospitality", "multifamily", "land", "medical", "mixed_use", "other". Map: hotel/motel/inn → "hospitality"; restaurant → "retail" (or "other" if standalone pad); warehouse/flex/distribution → "industrial".
 - transaction_type: string — one of: "sale", "lease", "sale_or_lease"
 - status: string — one of: "listed", "pre_listing", "under_contract", "off_market" (default "listed")
 - asking_price: number (in dollars, e.g. 5500000)

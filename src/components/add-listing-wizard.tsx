@@ -679,7 +679,7 @@ export default function AddListingWizard({ open, onClose, onCreated, organizatio
               <div style={grid3}>
                 <FormField label="Asset Type">
                   <select style={selectStyle} value={form.asset_type} onChange={e => set("asset_type", e.target.value)}>
-                    {["retail","office","industrial","multifamily","hotel","land","mixed_use","restaurant","medical","flex"].map(t => (
+                    {["retail","office","industrial","hospitality","multifamily","land","medical","mixed_use","other"].map(t => (
                       <option key={t} value={t}>{t.replace(/_/g," ")}</option>
                     ))}
                   </select>

@@ -4,6 +4,27 @@ export const dynamic = "force-dynamic";
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 
+// ── Asset-type normalization ────────────────────────────────────────────────
+// DB check constraint allows exactly these. Anything else (e.g. AI extraction
+// returning "hotel" or "flex") gets mapped to its closest valid sibling so we
+// don't 500 on an otherwise-good listing save.
+const ASSET_TYPE_ALLOWED = new Set([
+  "retail", "office", "industrial", "hospitality",
+  "multifamily", "land", "medical", "mixed_use", "other",
+]);
+function normalizeAssetType(t: string | null | undefined): string | null {
+  if (!t) return null;
+  const v = t.toLowerCase().trim().replace(/[\s-]/g, "_");
+  if (ASSET_TYPE_ALLOWED.has(v)) return v;
+  // Common aliases
+  if (["hotel", "motel", "inn", "lodging"].includes(v)) return "hospitality";
+  if (["flex", "warehouse", "distribution"].includes(v)) return "industrial";
+  if (["restaurant", "qsr", "fast_food"].includes(v)) return "retail";
+  if (["apartment", "apartments", "residential"].includes(v)) return "multifamily";
+  if (["healthcare", "clinic"].includes(v)) return "medical";
+  return "other";
+}
+
 // ── Slug generation ─────────────────────────────────────────────────────────
 function slugify(input: string): string {
   return input
@@ -63,7 +84,7 @@ export async function POST(req: NextRequest) {
       organization_id: orgId,
       name: body.name.trim(),
       status: body.status || "listed",
-      asset_type: body.asset_type || null,
+      asset_type: normalizeAssetType(body.asset_type),
       your_role: body.your_role || "listing_broker",
     };
 
