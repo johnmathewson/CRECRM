@@ -404,26 +404,43 @@ export default function PropertiesContent() {
             <Panel title="Quick Actions" actions={<IconBtn>⋯</IconBtn>}>
               <div className="flex flex-col gap-1.5">
                 {[
+                  { icon: "🔐", label: "Vault docs", desc: "Manage gated documents (public / tenant / buyer)", href: `/admin/vault/${selected.id}` },
                   { icon: "📋", label: "Create OM", desc: "Generate an offering memorandum" },
                   { icon: "📊", label: "Run comps", desc: "Pull sale & lease comparables" },
                   { icon: "🏷️", label: "Update listing", desc: "Edit property details" },
                   { icon: "🤝", label: "Create deal", desc: "Start a new deal on this property" },
-                ].map((a) => (
-                  <button
-                    key={a.label}
-                    onClick={() => {
-                      if (a.label === "Run comps") setShowCompAnalysis(true);
-                    }}
-                    className="glass-inner flex items-center gap-2.5 px-3 py-2.5 text-left w-full cursor-pointer border-none transition-all hover:bg-[rgba(255,255,255,0.05)]"
-                    style={{ background: "rgba(255,255,255,0.02)" }}
-                  >
-                    <span className="text-[13px]">{a.icon}</span>
-                    <div>
-                      <div className="text-xs font-medium text-cream">{a.label}</div>
-                      <div className="text-[10px] text-cream-subtle">{a.desc}</div>
-                    </div>
-                  </button>
-                ))}
+                ].map((a) => {
+                  const inner = (
+                    <>
+                      <span className="text-[13px]">{a.icon}</span>
+                      <div>
+                        <div className="text-xs font-medium text-cream">{a.label}</div>
+                        <div className="text-[10px] text-cream-subtle">{a.desc}</div>
+                      </div>
+                    </>
+                  );
+                  const cls = "glass-inner flex items-center gap-2.5 px-3 py-2.5 text-left w-full cursor-pointer border-none transition-all hover:bg-[rgba(255,255,255,0.05)] no-underline";
+                  const style = { background: "rgba(255,255,255,0.02)" } as const;
+                  if ((a as any).href) {
+                    return (
+                      <a key={a.label} href={(a as any).href} className={cls} style={style}>
+                        {inner}
+                      </a>
+                    );
+                  }
+                  return (
+                    <button
+                      key={a.label}
+                      onClick={() => {
+                        if (a.label === "Run comps") setShowCompAnalysis(true);
+                      }}
+                      className={cls}
+                      style={style}
+                    >
+                      {inner}
+                    </button>
+                  );
+                })}
               </div>
             </Panel>
           </div>

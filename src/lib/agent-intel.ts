@@ -485,6 +485,7 @@ export function formatIntelForPrompt(intel: AgentIntel): string {
     const p = intel.matchedProperty;
     lines.push("Matched property in CRM (use these facts when discussing this listing):");
     lines.push(`  · Name: ${p.headline || p.name || "(unnamed)"}`);
+    if (p.slug) lines.push(`  · Vault link: https://stewardshipcre.com/properties/${p.slug}/inquire`);
     lines.push(`  · Address: ${[p.address, p.city, p.state, p.zip].filter(Boolean).join(", ")}`);
     if (p.asset_type) lines.push(`  · Asset type: ${p.asset_type}${p.transaction_type ? ` · ${p.transaction_type}` : ""}`);
     if (p.sqft) lines.push(`  · Building: ${p.sqft.toLocaleString()} SF${p.year_built ? ` · built ${p.year_built}` : ""}`);
