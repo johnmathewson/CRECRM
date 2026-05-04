@@ -53,12 +53,19 @@ interface SyncBody {
   external_listing_id: string;
   external_url?: string;
   metrics: {
+    // Legacy generic fields (LoopNet + older extension builds)
     views?: number;
     saves?: number;
-    inquiries?: number;     // Leads
-    downloads?: number;     // Opened OMs
-    nda_executions?: number; // Executed CAs
-    offers?: number;        // Offers received
+    inquiries?: number;       // Leads
+    downloads?: number;       // Opened OMs (legacy alias for opened_oms)
+    nda_executions?: number;  // Executed CAs (legacy alias for executed_cas)
+    offers?: number;          // Offers received
+    // CREXi-native funnel fields (May 2026 dashboard surfaces these distinctly)
+    impressions?: number;
+    page_views?: number;
+    unique_visitors?: number;
+    opened_oms?: number;
+    executed_cas?: number;
   };
   period_start?: string;
   scraped_at?: string;
@@ -151,18 +158,32 @@ export async function POST(req: NextRequest) {
   const m = body.metrics || {};
   const scrapedAt = body.scraped_at || new Date().toISOString();
 
-  const upsertPayload = {
+  // Accept the new CREXi-native fields (impressions / page_views /
+  // unique_visitors / opened_oms / executed_cas) and the legacy generic ones
+  // (views / saves / inquiries / downloads / nda_executions / offers) for
+  // backward compatibility with older extension versions and LoopNet.
+  // For CREXi specifically: the legacy `views` field is left null when the
+  // new specific fields are populated, so the dashboard can prefer the new
+  // ones and fall back if absent.
+  const upsertPayload: Record<string, unknown> = {
     organization_id: ORG_ID,
     property_id: property.id,
     source: body.source,
     period_start: isoDate(periodStart),
     period_end: isoDate(periodEnd),
-    views: m.views ?? 0,
-    saves: m.saves ?? 0,
-    inquiries: m.inquiries ?? 0,
-    downloads: m.downloads ?? 0,
-    nda_executions: m.nda_executions ?? 0,
+    // Legacy generic fields (kept for LoopNet + older extension builds)
+    views: m.views ?? null,
+    saves: m.saves ?? null,
+    inquiries: m.inquiries ?? null,
+    downloads: m.downloads ?? null,
+    nda_executions: m.nda_executions ?? null,
     offers: m.offers ?? 0,
+    // New CREXi-native fields (preferred when present)
+    impressions: m.impressions ?? null,
+    page_views: m.page_views ?? null,
+    unique_visitors: m.unique_visitors ?? null,
+    opened_oms: m.opened_oms ?? null,
+    executed_cas: m.executed_cas ?? null,
     raw_payload: body.raw || null,
     scraped_at: scrapedAt,
   };

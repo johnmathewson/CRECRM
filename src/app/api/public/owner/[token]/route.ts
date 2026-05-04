@@ -79,7 +79,7 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
       .in("id", propertyIds),
     supabase
       .from("listing_metrics")
-      .select("property_id, source, period_start, period_end, views, saves, inquiries, downloads, nda_executions, offers, scraped_at")
+      .select("property_id, source, period_start, period_end, views, saves, inquiries, downloads, nda_executions, offers, impressions, page_views, unique_visitors, opened_oms, executed_cas, scraped_at")
       .eq("organization_id", ORG_ID)
       .in("property_id", propertyIds)
       .gte("period_start", isoDate(earliestStart))
@@ -116,16 +116,24 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
   // ── Aggregate + anonymize ──
   type WeeklyBucket = {
     week_start: string;
-    crexi_views: number;
+    // CREXi-specific funnel (matches the labels on the CREXi seller dashboard)
+    crexi_impressions: number;     // CREXi "Impressions" — search-result eyeballs
+    crexi_page_views: number;      // CREXi "Page Views"  — clicked into the listing
+    crexi_unique_visitors: number; // CREXi "Visitors"    — deduped audience
+    crexi_opened_oms: number;      // CREXi "Opened OMs"  — engaged
+    crexi_executed_cas: number;    // CREXi "Executed CAs" — signed NDA
+    crexi_offers: number;          // CREXi "Offers"
+    crexi_leads: number;           // CREXi "Leads" (some surfaces only)
+    // LoopNet (still single-view metric)
     loopnet_views: number;
+    // Own-site signals (anonymized aggregates only)
     site_views: number;
-    inquiries: number;          // own-site leads only (anon CRM rows)
-    nda_signatures: number;     // own-site NDAs (vault flow)
-    om_downloads: number;       // own-site OM downloads (vault flow)
-    crexi_leads: number;        // CREXi "Leads"
-    crexi_opened_oms: number;   // CREXi "Opened OMs"
-    crexi_executed_cas: number; // CREXi "Executed CAs"
-    crexi_offers: number;       // CREXi "Offers"
+    inquiries: number;
+    nda_signatures: number;
+    om_downloads: number;
+    // Legacy generic CREXi views — populated as page_views for backwards
+    // compatibility with any older client code reading the old shape.
+    crexi_views: number;
   };
 
   const propsById = new Map<string, any>();
@@ -138,28 +146,37 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
     if (!b) {
       b = {
         week_start: weekStart,
-        crexi_views: 0, loopnet_views: 0, site_views: 0,
+        crexi_impressions: 0, crexi_page_views: 0, crexi_unique_visitors: 0,
+        crexi_opened_oms: 0, crexi_executed_cas: 0, crexi_offers: 0,
+        crexi_leads: 0, crexi_views: 0,
+        loopnet_views: 0, site_views: 0,
         inquiries: 0, nda_signatures: 0, om_downloads: 0,
-        crexi_leads: 0, crexi_opened_oms: 0, crexi_executed_cas: 0, crexi_offers: 0,
       };
       p.weeks.set(weekStart, b);
     }
     return b;
   }
 
-  // Listing metrics → per-source signals per week
+  // Listing metrics → per-source signals per week.
+  // CREXi: prefer the new specific columns when populated (extension v2+),
+  // fall back to legacy fields for older scrapes.
   for (const m of (metricsRes.data || []) as any[]) {
     const p = propsById.get(m.property_id);
     if (!p) continue;
     const b = getBucket(p, m.period_start);
     if (m.source === "crexi") {
-      b.crexi_views = m.views || 0;
-      b.crexi_leads = m.inquiries || 0;
-      b.crexi_opened_oms = m.downloads || 0;
-      b.crexi_executed_cas = m.nda_executions || 0;
-      b.crexi_offers = m.offers || 0;
+      b.crexi_impressions     = m.impressions     ?? 0;
+      b.crexi_page_views      = m.page_views      ?? 0;
+      b.crexi_unique_visitors = m.unique_visitors ?? 0;
+      b.crexi_opened_oms      = m.opened_oms      ?? m.downloads ?? 0;
+      b.crexi_executed_cas    = m.executed_cas    ?? m.nda_executions ?? 0;
+      b.crexi_offers          = m.offers          ?? 0;
+      b.crexi_leads           = m.inquiries       ?? 0;
+      // Legacy generic — page_views is the most useful single number, fall
+      // back to unique_visitors then impressions then the legacy `views`.
+      b.crexi_views = b.crexi_page_views || b.crexi_unique_visitors || b.crexi_impressions || (m.views ?? 0);
     } else if (m.source === "loopnet") {
-      b.loopnet_views = m.views || 0;
+      b.loopnet_views = m.views ?? 0;
     }
   }
 
@@ -211,17 +228,21 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
       const found = bucketArr.find(b => b.week_start === wkStr);
       padded.push(found || {
         week_start: wkStr,
-        crexi_views: 0, loopnet_views: 0, site_views: 0,
+        crexi_impressions: 0, crexi_page_views: 0, crexi_unique_visitors: 0,
+        crexi_opened_oms: 0, crexi_executed_cas: 0, crexi_offers: 0,
+        crexi_leads: 0, crexi_views: 0,
+        loopnet_views: 0, site_views: 0,
         inquiries: 0, nda_signatures: 0, om_downloads: 0,
-        crexi_leads: 0, crexi_opened_oms: 0, crexi_executed_cas: 0, crexi_offers: 0,
       });
       cursor.setUTCDate(cursor.getUTCDate() + 7);
     }
     const thisWeek = padded[padded.length - 1] || {
       week_start: isoDate(thisWeekStart),
-      crexi_views: 0, loopnet_views: 0, site_views: 0,
+      crexi_impressions: 0, crexi_page_views: 0, crexi_unique_visitors: 0,
+      crexi_opened_oms: 0, crexi_executed_cas: 0, crexi_offers: 0,
+      crexi_leads: 0, crexi_views: 0,
+      loopnet_views: 0, site_views: 0,
       inquiries: 0, nda_signatures: 0, om_downloads: 0,
-      crexi_leads: 0, crexi_opened_oms: 0, crexi_executed_cas: 0, crexi_offers: 0,
     };
     const lastWeek = padded[padded.length - 2];
 
@@ -251,6 +272,9 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
       this_week: thisWeek,
       deltas: lastWeek
         ? {
+            crexi_impressions: delta(thisWeek.crexi_impressions, lastWeek.crexi_impressions),
+            crexi_page_views: delta(thisWeek.crexi_page_views, lastWeek.crexi_page_views),
+            crexi_unique_visitors: delta(thisWeek.crexi_unique_visitors, lastWeek.crexi_unique_visitors),
             crexi_views: delta(thisWeek.crexi_views, lastWeek.crexi_views),
             loopnet_views: delta(thisWeek.loopnet_views, lastWeek.loopnet_views),
             site_views: delta(thisWeek.site_views, lastWeek.site_views),

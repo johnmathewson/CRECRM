@@ -77,21 +77,53 @@
     return out;
   }
 
-  function scrape() {
+  // Wait for the dashboard's async KPI tiles to render before scraping.
+  // CREXi loads metrics via a separate API call; if we scrape immediately on
+  // popup-click, the Impressions/Page Views/Visitors tiles may not be in the
+  // DOM yet. Poll up to 6 seconds for at least 4 candidates with non-zero
+  // numeric labels, which is the steady-state for a populated dashboard.
+  async function waitForKPIs(maxWaitMs = 6000) {
+    const start = Date.now();
+    let lastCount = 0;
+    while (Date.now() - start < maxWaitMs) {
+      const candidates = collectAllLabeledNumbers();
+      // Stop early if we've seen the dashboard "settle" — same count on two
+      // consecutive 250ms ticks AND at least 4 non-zero numbers visible.
+      if (candidates.length >= 4 && candidates.length === lastCount) {
+        return candidates;
+      }
+      lastCount = candidates.length;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return collectAllLabeledNumbers();
+  }
+
+  async function scrape() {
     const id = extractListingId();
     if (!id) return null;
 
-    // CREXi seller dashboard labels (verified live April 2026):
-    //   "Leads" → inquiries (warm — buyer asked a question)
-    //   "Opened OMs" → downloads (engaged — opened the OM)
-    //   "Executed CAs" → nda_executions (serious — signed NDA)
-    //   "Offers" → offers (real money on the table)
-    // Views/saves typically don't show on this dashboard view — left in
-    // case they appear on other CREXi surfaces (e.g. listing-detail public).
-    const candidates = collectAllLabeledNumbers();
-    const views = findMetricByLabel(candidates, [
-      "views", "page views", "listing views", "total views",
-      "30 day views", "30-day views", "impressions",
+    // CREXi seller dashboard labels (verified live May 2026):
+    //   "Impressions"  → impressions      (search-result eyeballs)
+    //   "Page Views"   → page_views       (clicked-into the listing)
+    //   "Visitors"     → unique_visitors  (deduped page-view audience)
+    //   "Opened OMs"   → opened_oms       (engaged — opened the OM)
+    //   "Executed CAs" → executed_cas     (serious — signed NDA)
+    //   "Offers"       → offers           (real money on the table)
+    //   "Leads"        → inquiries        (only present on some listing surfaces)
+    // We send BOTH new CREXi-native fields AND the legacy generic ones for
+    // backward-compat with the CRM's older API contract (LoopNet still uses
+    // the generic shape). Backend prefers the specific fields when present.
+    const candidates = await waitForKPIs();
+
+    const impressions = findMetricByLabel(candidates, [
+      "impressions", "impression", "listing impressions", "search impressions",
+    ]);
+    const pageViews = findMetricByLabel(candidates, [
+      "page views", "page view", "listing views", "total views",
+      "30 day views", "30-day views",
+    ]);
+    const uniqueVisitors = findMetricByLabel(candidates, [
+      "visitors", "unique visitors", "viewers",
     ]);
     const saves = findMetricByLabel(candidates, [
       "saves", "saved", "watchlists", "watchlist", "favorites",
@@ -99,38 +131,52 @@
     const inquiries = findMetricByLabel(candidates, [
       "leads", "inquiries", "messages", "contacts", "lead submissions",
     ]);
-    const downloads = findMetricByLabel(candidates, [
-      "opened oms", "om downloads", "downloads",
+    const openedOms = findMetricByLabel(candidates, [
+      "opened oms", "opened om", "om opens", "om downloads",
       "documents downloaded", "document downloads", "brochure downloads",
     ]);
-    const ndaExecutions = findMetricByLabel(candidates, [
+    const executedCas = findMetricByLabel(candidates, [
       "executed cas", "executed ca", "ca executions",
       "ndas signed", "nda signatures", "executed ndas",
     ]);
     const offers = findMetricByLabel(candidates, ["offers", "offers received"]);
 
+    // Legacy "views" gets the most useful single value: page_views > unique
+    // > impressions. Older dashboard code that hasn't been refactored yet
+    // still has something meaningful to display.
+    const legacyViews = pageViews.value || uniqueVisitors.value || impressions.value || 0;
+
     return {
       external_listing_id: id,
       external_url: window.location.href.split("?")[0],
       metrics: {
-        views: views.value,
+        // CREXi-native (preferred)
+        impressions: impressions.value,
+        page_views: pageViews.value,
+        unique_visitors: uniqueVisitors.value,
+        opened_oms: openedOms.value,
+        executed_cas: executedCas.value,
+        offers: offers.value,
+        // Legacy generic (kept for back-compat)
+        views: legacyViews,
         saves: saves.value,
         inquiries: inquiries.value,
-        downloads: downloads.value,
-        nda_executions: ndaExecutions.value,
-        offers: offers.value,
+        downloads: openedOms.value,
+        nda_executions: executedCas.value,
       },
       raw: {
         title: document.title,
         url: window.location.href,
         scraped_dom_at: new Date().toISOString(),
         matched_labels: {
-          views: views.foundLabel,
+          impressions: impressions.foundLabel,
+          page_views: pageViews.foundLabel,
+          unique_visitors: uniqueVisitors.foundLabel,
+          opened_oms: openedOms.foundLabel,
+          executed_cas: executedCas.foundLabel,
+          offers: offers.foundLabel,
           saves: saves.foundLabel,
           inquiries: inquiries.foundLabel,
-          downloads: downloads.foundLabel,
-          nda_executions: ndaExecutions.foundLabel,
-          offers: offers.foundLabel,
         },
         candidates,
       },
@@ -156,7 +202,7 @@
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg?.action !== "sync") return;
     (async () => {
-      const data = scrape();
+      const data = await scrape();
       if (!data) {
         sendResponse({ ok: false, error: "Couldn't find a CREXi listing ID on this page." });
         return;
@@ -177,9 +223,11 @@
     const last = await chrome.storage.local.get([lastKey]);
     const lastTime = last[lastKey] || 0;
     if (Date.now() - lastTime > AUTO_SYNC_AFTER_MS) {
-      // Wait a couple seconds for SPA hydration before scraping
+      // Wait a couple seconds for SPA hydration before scraping (scrape itself
+      // also polls up to 6s for KPIs to render, but giving it a head start
+      // means manual + auto syncs both land cleanly).
       setTimeout(async () => {
-        const data = scrape();
+        const data = await scrape();
         if (data) {
           const r = await syncToCrm(data);
           if (r.ok) await chrome.storage.local.set({ [lastKey]: Date.now() });
