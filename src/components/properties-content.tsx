@@ -8,6 +8,7 @@ import AddListingWizard from "./add-listing-wizard";
 import CompAnalysisModal from "./comp-analysis-modal";
 import ShareWithOwnerModal from "./share-with-owner-modal";
 import CreateDealModal from "./create-deal-modal";
+import OMExtractModal from "./om-extract-modal";
 
 // ── Types ──────────────────────────────────────────────────
 interface Property {
@@ -133,6 +134,7 @@ export default function PropertiesContent() {
   const [togglingPublish, setTogglingPublish] = useState(false);
   const [sharingProperty, setSharingProperty] = useState<Property | null>(null);
   const [createDealForProperty, setCreateDealForProperty] = useState<string | null>(null);
+  const [omForProperty, setOmForProperty] = useState<Property | null>(null);
 
   // Router refs for cross-page navigation (deals ↔ properties).
   const router = useRouter();
@@ -358,6 +360,21 @@ export default function PropertiesContent() {
           load();
         }}
       />
+
+      {/* OM Extract modal — upload a PDF/DOCX, Claude extracts CRE fields,
+          user reviews diff, applies selected fields back to this property. */}
+      {omForProperty && (
+        <OMExtractModal
+          open={!!omForProperty}
+          onClose={() => setOmForProperty(null)}
+          propertyId={omForProperty.id}
+          propertyName={omForProperty.name}
+          onApplied={() => {
+            // Refresh so the property panel shows the newly-applied OM fields.
+            load();
+          }}
+        />
+      )}
 
       {/* Status tabs + search */}
       <div className="flex items-center gap-2 mb-4 flex-wrap">
@@ -709,6 +726,7 @@ export default function PropertiesContent() {
               <div className="flex flex-col gap-1.5">
                 {[
                   { icon: "🔐", label: "Vault docs", desc: "Manage gated documents (public / tenant / buyer)", href: `/admin/vault/${selected.id}` },
+                  { icon: "📥", label: "Upload OM", desc: "Drop a PDF/DOCX, auto-fill missing fields with cross-reference review" },
                   { icon: "📋", label: "Create OM", desc: "Generate an offering memorandum" },
                   { icon: "📊", label: "Run comps", desc: "Pull sale & lease comparables" },
                   { icon: "🤝", label: "Create deal", desc: "Start a new deal on this property" },
@@ -737,6 +755,7 @@ export default function PropertiesContent() {
                       onClick={() => {
                         if (a.label === "Run comps") setShowCompAnalysis(true);
                         else if (a.label === "Create deal") setCreateDealForProperty(selected.id);
+                        else if (a.label === "Upload OM") setOmForProperty(selected);
                       }}
                       className={cls}
                       style={style}
