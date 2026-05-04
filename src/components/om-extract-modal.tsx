@@ -10,6 +10,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Modal from "./modal";
+import { createClient } from "@/lib/supabase/client";
 
 type MatchKind = "match" | "differs" | "missing-current" | "missing-extracted";
 
@@ -100,16 +101,46 @@ export default function OMExtractModal({ open, onClose, propertyId, propertyName
     setStage("extracting");
     setError(null);
     try {
-      const fd = new FormData();
-      fd.append("file", file);
+      // Step 1: upload the file directly to Supabase Storage from the browser.
+      // We can't POST it through Netlify because Netlify caps synchronous
+      // function bodies at 6MB and OMs are typically 5–15MB; that limit
+      // returns HTTP 400 with empty body before our code runs.
+      const supabase = createClient();
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const path = `om-uploads/${propertyId}/${Date.now()}-${safeName}`;
+      const upload = await supabase.storage
+        .from("listing-documents")
+        .upload(path, file, { contentType: file.type, upsert: false });
+      if (upload.error) {
+        setError(`Upload failed: ${upload.error.message}`);
+        setStage("upload");
+        return;
+      }
+
+      // Step 2: signed URL for the API route to download (1h expiry — plenty
+      // for the synchronous extract flow).
+      const signed = await supabase.storage
+        .from("listing-documents")
+        .createSignedUrl(path, 60 * 60);
+      if (signed.error || !signed.data?.signedUrl) {
+        setError(`Could not create signed URL: ${signed.error?.message || "(no url)"}`);
+        setStage("upload");
+        return;
+      }
+
+      // Step 3: ask the API to download + extract. JSON body, tiny.
       const res = await fetch(`/api/properties/${propertyId}/extract-from-om`, {
         method: "POST",
-        body: fd,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          storage_path: path,
+          signed_url: signed.data.signedUrl,
+          file_name: file.name,
+          file_size: file.size,
+          file_type: file.type,
+        }),
       });
 
-      // Read body as text first so an empty/non-JSON response (Netlify
-      // gateway timeout, function crash, etc.) yields a helpful error
-      // instead of "Failed to execute 'json' on 'Response'".
       const raw = await res.text();
       let json: any = null;
       if (raw) {
@@ -131,8 +162,6 @@ export default function OMExtractModal({ open, onClose, propertyId, propertyName
       }
 
       setExtractResp(json as ExtractResponse);
-      // Auto-select all fields where OM has a value AND we don't already match.
-      // User can deselect anything they want to override.
       const auto = new Set<string>();
       (json.diff as DiffField[]).forEach((d) => {
         if (d.match === "missing-current" || d.match === "differs") auto.add(d.key);

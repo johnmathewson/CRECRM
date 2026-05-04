@@ -240,20 +240,20 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       return NextResponse.json({ error: "Missing property id" }, { status: 400 });
     }
 
-    stage = "read-form-data";
-    let formData: FormData;
+    stage = "read-json-body";
+    let body: { signed_url?: string; storage_path?: string; file_name?: string; file_size?: number; file_type?: string };
     try {
-      formData = await req.formData();
+      body = await req.json();
     } catch {
-      return NextResponse.json({ error: "Expected multipart/form-data" }, { status: 400 });
+      return NextResponse.json({ error: "Expected JSON body" }, { status: 400 });
     }
-    const file = formData.get("file");
-    if (!(file instanceof File)) {
-      return NextResponse.json({ error: "Missing 'file' field" }, { status: 400 });
+    const { signed_url, file_name, file_size, file_type } = body;
+    if (!signed_url) {
+      return NextResponse.json({ error: "Missing 'signed_url'" }, { status: 400 });
     }
 
     const MAX_BYTES = 25 * 1024 * 1024;
-    if (file.size > MAX_BYTES) {
+    if (typeof file_size === "number" && file_size > MAX_BYTES) {
       return NextResponse.json({ error: "File too large (max 25MB)." }, { status: 413 });
     }
 
@@ -268,15 +268,35 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (fetchErr) return NextResponse.json({ error: fetchErr.message }, { status: 500 });
     if (!property) return NextResponse.json({ error: "Property not found" }, { status: 404 });
 
+    stage = "download-storage-file";
+    let buffer: Buffer;
+    try {
+      const dlController = new AbortController();
+      const dlTimeout = setTimeout(() => dlController.abort(), 10_000);
+      const fileRes = await fetch(signed_url, { signal: dlController.signal });
+      clearTimeout(dlTimeout);
+      if (!fileRes.ok) {
+        return NextResponse.json(
+          { error: `Download failed: HTTP ${fileRes.status}` },
+          { status: 502 }
+        );
+      }
+      buffer = Buffer.from(await fileRes.arrayBuffer());
+    } catch (err) {
+      return NextResponse.json(
+        { error: `Could not fetch uploaded file: ${(err as Error).message}` },
+        { status: 502 }
+      );
+    }
+
     stage = "extract-text";
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const lowerName = (file.name || "").toLowerCase();
+    const lowerName = (file_name || "").toLowerCase();
     let text: string;
     try {
-      if (file.type === "application/pdf" || lowerName.endsWith(".pdf")) {
+      if (file_type === "application/pdf" || lowerName.endsWith(".pdf")) {
         text = await pdfToText(buffer);
       } else if (
-        file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+        file_type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
         lowerName.endsWith(".docx")
       ) {
         text = await docxToText(buffer);
@@ -313,7 +333,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     return NextResponse.json({
       property_id: propertyId,
-      file: { name: file.name, size: file.size, type: file.type },
+      file: { name: file_name, size: file_size, type: file_type },
       text_length: text.length,
       extracted: extracted.values,
       confidence: extracted.confidence,
