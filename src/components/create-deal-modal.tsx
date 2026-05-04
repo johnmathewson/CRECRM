@@ -11,9 +11,12 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onCreated: () => void;
+  /** Optional property to pre-select. Used when opening from a property's
+   *  "Create deal" quick-action so the user doesn't have to re-pick. */
+  prefillPropertyId?: string;
 }
 
-export default function CreateDealModal({ open, onClose, onCreated }: Props) {
+export default function CreateDealModal({ open, onClose, onCreated, prefillPropertyId }: Props) {
   const [saving, setSaving] = useState(false);
   const [properties, setProperties] = useState<{ id: string; name: string }[]>([]);
   const [contacts, setContacts] = useState<{ id: string; full_name: string }[]>([]);
@@ -25,13 +28,16 @@ export default function CreateDealModal({ open, onClose, onCreated }: Props) {
 
   const set = (key: string, val: string) => setForm((f) => ({ ...f, [key]: val }));
 
-  // Load properties and contacts for dropdowns
+  // Load properties and contacts for dropdowns; seed property_id from prefill.
   useEffect(() => {
     if (!open) return;
     const supabase = createClient();
     supabase.from("properties").select("id, name").order("name").then(({ data }) => setProperties(data || []));
     supabase.from("contacts").select("id, full_name").order("full_name").then(({ data }) => setContacts(data || []));
-  }, [open]);
+    if (prefillPropertyId) {
+      setForm((f) => ({ ...f, property_id: prefillPropertyId }));
+    }
+  }, [open, prefillPropertyId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

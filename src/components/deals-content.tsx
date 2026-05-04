@@ -871,11 +871,19 @@ export default function DealsContent() {
 
               {/* Property */}
               {(selected.property as any)?.name && (
-                <div className="glass-inner px-3 py-2.5 mb-3">
-                  <div className="text-[9.5px] text-cream-subtle uppercase tracking-wider font-medium mb-1">Property</div>
+                <button
+                  type="button"
+                  className="glass-inner px-3 py-2.5 mb-3 w-full text-left border-none cursor-pointer hover:brightness-125 transition-all"
+                  onClick={() => selected.property_id && router.push(`/properties?focus=${selected.property_id}`)}
+                  title="Open in Properties"
+                >
+                  <div className="text-[9.5px] text-cream-subtle uppercase tracking-wider font-medium mb-1 flex items-center justify-between">
+                    <span>Property</span>
+                    <span className="text-cream-muted text-[9.5px] normal-case tracking-normal">View →</span>
+                  </div>
                   <div className="text-xs font-semibold">{(selected.property as any).name}</div>
                   <div className="text-[10.5px] text-cream-subtle mt-0.5">{(selected.property as any).asset_type} · {(selected.property as any).city}</div>
-                </div>
+                </button>
               )}
 
               {/* Client */}

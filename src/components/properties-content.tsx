@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import Panel, { IconBtn } from "./panel";
 import { createClient } from "@/lib/supabase/client";
 import AddListingWizard from "./add-listing-wizard";
 import CompAnalysisModal from "./comp-analysis-modal";
 import ShareWithOwnerModal from "./share-with-owner-modal";
+import CreateDealModal from "./create-deal-modal";
 
 // ── Types ──────────────────────────────────────────────────
 interface Property {
@@ -105,6 +107,12 @@ export default function PropertiesContent() {
   const [editingProperty, setEditingProperty] = useState<Property | null>(null);
   const [togglingPublish, setTogglingPublish] = useState(false);
   const [sharingProperty, setSharingProperty] = useState<Property | null>(null);
+  const [createDealForProperty, setCreateDealForProperty] = useState<string | null>(null);
+
+  // Router refs for cross-page navigation (deals ↔ properties).
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
 
   const load = useCallback(async () => {
       const supabase = createClient();
@@ -154,6 +162,20 @@ export default function PropertiesContent() {
   }
 
   useEffect(() => { load(); }, [load]);
+
+  // Deep-link focus: open ?focus=<property_id> in the detail panel on load.
+  // Triggered by clicks from /deals when a user wants to see the property
+  // record behind a deal, or from anywhere else that wants a one-click handoff.
+  useEffect(() => {
+    if (loading || properties.length === 0) return;
+    const focusId = searchParams.get("focus");
+    if (!focusId) return;
+    const target = properties.find((p) => p.id === focusId);
+    if (target) {
+      setSelected(target);
+      router.replace(pathname, { scroll: false });
+    }
+  }, [loading, properties, searchParams, router, pathname]);
 
   // Filter + search
   const filtered = properties.filter((p) => {
@@ -266,6 +288,19 @@ export default function PropertiesContent() {
         open={showCompAnalysis}
         onClose={() => setShowCompAnalysis(false)}
         property={selected}
+      />
+
+      {/* Create-deal modal — opened from a property's Quick Actions; prefills
+          the property dropdown so the deal lands on this asset automatically. */}
+      <CreateDealModal
+        open={!!createDealForProperty}
+        onClose={() => setCreateDealForProperty(null)}
+        prefillPropertyId={createDealForProperty || undefined}
+        onCreated={() => {
+          setCreateDealForProperty(null);
+          // Refresh so the new deal appears in this property's deals list.
+          load();
+        }}
       />
 
       {/* Status tabs + search */}
@@ -556,7 +591,13 @@ export default function PropertiesContent() {
               <Panel title="Deals" actions={<IconBtn>↻</IconBtn>}>
                 <div className="flex flex-col gap-1.5">
                   {(selected.deals || []).map((d: any) => (
-                    <div key={d.id} className="glass-inner flex justify-between items-center px-3 py-2">
+                    <button
+                      key={d.id}
+                      type="button"
+                      onClick={() => router.push(`/deals?focus=${d.id}`)}
+                      className="glass-inner flex justify-between items-center px-3 py-2 cursor-pointer hover:brightness-125 transition-all border-none w-full text-left"
+                      title="Open in Deals"
+                    >
                       <div>
                         <span className="text-xs font-medium">{d.deal_name}</span>
                         <span className="ml-2 px-1.5 py-0.5 text-[9.5px] font-semibold" style={{
@@ -570,7 +611,7 @@ export default function PropertiesContent() {
                       <span className="text-xs font-bold tnum" style={{ color: d.is_closed ? C.green : C.coral }}>
                         {d.price > 0 ? fmt(d.price) : "—"}
                       </span>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </Panel>
@@ -608,6 +649,7 @@ export default function PropertiesContent() {
                       key={a.label}
                       onClick={() => {
                         if (a.label === "Run comps") setShowCompAnalysis(true);
+                        else if (a.label === "Create deal") setCreateDealForProperty(selected.id);
                       }}
                       className={cls}
                       style={style}
