@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -136,6 +137,12 @@ function ProgressRing({ percent, size = 145, stroke = 10 }: {
 
 // ── Main Dashboard Content ─────────────────────────────────
 export default function DashboardContent() {
+  const router = useRouter();
+  // Deep-link a dashboard summary row to the editor on /deals.
+  const openDeal = useCallback((dealId: string) => {
+    router.push(`/deals?focus=${dealId}`);
+  }, [router]);
+
   const [activeDeals, setActiveDeals] = useState<Deal[]>([]);
   const [closedDeals, setClosedDeals] = useState<Deal[]>([]);
   const [propertyCount, setPropertyCount] = useState(0);
@@ -371,7 +378,12 @@ export default function DashboardContent() {
                     const prop = d.property as any;
                     const client = d.client as any;
                     return (
-                      <tr key={d.id} className="cursor-pointer">
+                      <tr
+                        key={d.id}
+                        className="cursor-pointer hover:brightness-125 transition-all"
+                        onClick={() => openDeal(d.id)}
+                        title="Open in Deals"
+                      >
                         <td className="px-2.5 py-2.5 text-[12.5px] font-medium" style={{ borderRadius: "4px 0 0 4px", background: "rgba(255,255,255,0.02)" }}>
                           {d.deal_name?.replace(" Sale", "")}
                           <div className="text-[10px] text-cream-subtle mt-0.5">{prop?.asset_type || "—"}</div>
@@ -424,7 +436,12 @@ export default function DashboardContent() {
           }>
             <div className="flex flex-col gap-1">
               {closedDeals.map((d) => (
-                <div key={d.id} className="glass-inner flex justify-between items-center px-3 py-2.5">
+                <div
+                  key={d.id}
+                  className="glass-inner flex justify-between items-center px-3 py-2.5 cursor-pointer hover:brightness-125 transition-all"
+                  onClick={() => openDeal(d.id)}
+                  title="Open in Deals"
+                >
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-medium">{d.deal_name}</span>
                     <span

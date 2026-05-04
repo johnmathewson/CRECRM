@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import {
   DndContext,
   DragOverlay,
@@ -346,6 +347,28 @@ export default function DealsContent() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // ── Deep-link focus: open ?focus=<deal_id> in the editor on load ────────
+  // Triggered from dashboard pipeline / closed-commission rows (and other
+  // surfaces that want a single-click handoff into the deal editor).
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  useEffect(() => {
+    if (loading || deals.length === 0) return;
+    const focusId = searchParams.get("focus");
+    if (!focusId) return;
+    const target = deals.find((d) => d.id === focusId);
+    if (target) {
+      // Make sure dead deals are visible if the focused deal is dead
+      if (target.is_dead) setShowDead(true);
+      // Switch to table view for closed deals (kanban only shows active stages)
+      if (target.is_closed) setView("table");
+      setSelected(target);
+      // Drop the param from the URL so a refresh doesn't re-fire / lock state
+      router.replace(pathname, { scroll: false });
+    }
+  }, [loading, deals, searchParams, router, pathname]);
 
   // ── Stage transition (DB) ───────────────────────────────
   const changeStage = useCallback(async (dealId: string, fromStage: string, toStage: string) => {
