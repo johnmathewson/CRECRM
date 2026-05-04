@@ -126,24 +126,42 @@ async function callClaude(omText: string): Promise<ExtractedPayload> {
     throw new Error("ANTHROPIC_API_KEY not configured");
   }
 
-  // Trim very long OMs to keep the call fast/cheap. 60K chars ≈ 15K tokens
-  // which is well within Haiku's window and covers 95% of OMs.
-  const trimmed = omText.length > 60_000 ? omText.slice(0, 60_000) : omText;
+  // Trim long OMs to keep the call fast (and well under Netlify's 26s
+  // function ceiling). 40K chars ≈ 10K tokens — covers virtually every OM.
+  const trimmed = omText.length > 40_000 ? omText.slice(0, 40_000) : omText;
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "x-api-key": apiKey,
-      "anthropic-version": ANTHROPIC_VERSION,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: ANTHROPIC_MODEL,
-      max_tokens: 2048,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: `OM TEXT:\n\n${trimmed}` }],
-    }),
-  });
+  // Hard timeout via AbortController so a slow Anthropic call returns a
+  // structured error instead of the function silently dying at the gateway.
+  const controller = new AbortController();
+  const TIMEOUT_MS = 22_000;
+  const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": ANTHROPIC_VERSION,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: ANTHROPIC_MODEL,
+        max_tokens: 2048,
+        system: SYSTEM_PROMPT,
+        messages: [{ role: "user", content: `OM TEXT:\n\n${trimmed}` }],
+      }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    const name = (err as Error).name;
+    if (name === "AbortError") {
+      throw new Error(`Anthropic call timed out after ${TIMEOUT_MS / 1000}s`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!response.ok) {
     const errBody = await response.text().catch(() => "");
@@ -211,90 +229,103 @@ function computeDiff(current: Record<string, unknown>, extracted: ExtractedPaylo
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  const propertyId = params.id;
-  if (!propertyId) {
-    return NextResponse.json({ error: "Missing property id" }, { status: 400 });
-  }
-
-  // Read multipart form
-  let formData: FormData;
+  // Top-level try/catch so any unhandled throw returns JSON with an error
+  // message instead of an empty function body (the front-end blows up on
+  // res.json() of an empty Response). Logged stage names make Netlify
+  // function logs useful for debugging.
+  let stage = "init";
   try {
-    formData = await req.formData();
-  } catch {
-    return NextResponse.json({ error: "Expected multipart/form-data" }, { status: 400 });
-  }
-  const file = formData.get("file");
-  if (!(file instanceof File)) {
-    return NextResponse.json({ error: "Missing 'file' field" }, { status: 400 });
-  }
-
-  // Size guard: 25 MB cap. PDFs above that are usually image-heavy and need
-  // OCR — out of scope for this MVP.
-  const MAX_BYTES = 25 * 1024 * 1024;
-  if (file.size > MAX_BYTES) {
-    return NextResponse.json({ error: `File too large (max 25MB).` }, { status: 413 });
-  }
-
-  // Load the property record so we have something to diff against
-  const supabase = svc();
-  const { data: property, error: fetchErr } = await supabase
-    .from("properties")
-    .select("*")
-    .eq("id", propertyId)
-    .eq("organization_id", ORG_ID)
-    .maybeSingle();
-  if (fetchErr) return NextResponse.json({ error: fetchErr.message }, { status: 500 });
-  if (!property) return NextResponse.json({ error: "Property not found" }, { status: 404 });
-
-  // File → text
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const lowerName = (file.name || "").toLowerCase();
-  let text: string;
-  try {
-    if (file.type === "application/pdf" || lowerName.endsWith(".pdf")) {
-      text = await pdfToText(buffer);
-    } else if (
-      file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-      lowerName.endsWith(".docx")
-    ) {
-      text = await docxToText(buffer);
-    } else {
-      return NextResponse.json({ error: "Only PDF or DOCX supported" }, { status: 415 });
+    const propertyId = params.id;
+    if (!propertyId) {
+      return NextResponse.json({ error: "Missing property id" }, { status: 400 });
     }
+
+    stage = "read-form-data";
+    let formData: FormData;
+    try {
+      formData = await req.formData();
+    } catch {
+      return NextResponse.json({ error: "Expected multipart/form-data" }, { status: 400 });
+    }
+    const file = formData.get("file");
+    if (!(file instanceof File)) {
+      return NextResponse.json({ error: "Missing 'file' field" }, { status: 400 });
+    }
+
+    const MAX_BYTES = 25 * 1024 * 1024;
+    if (file.size > MAX_BYTES) {
+      return NextResponse.json({ error: "File too large (max 25MB)." }, { status: 413 });
+    }
+
+    stage = "load-property";
+    const supabase = svc();
+    const { data: property, error: fetchErr } = await supabase
+      .from("properties")
+      .select("*")
+      .eq("id", propertyId)
+      .eq("organization_id", ORG_ID)
+      .maybeSingle();
+    if (fetchErr) return NextResponse.json({ error: fetchErr.message }, { status: 500 });
+    if (!property) return NextResponse.json({ error: "Property not found" }, { status: 404 });
+
+    stage = "extract-text";
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const lowerName = (file.name || "").toLowerCase();
+    let text: string;
+    try {
+      if (file.type === "application/pdf" || lowerName.endsWith(".pdf")) {
+        text = await pdfToText(buffer);
+      } else if (
+        file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+        lowerName.endsWith(".docx")
+      ) {
+        text = await docxToText(buffer);
+      } else {
+        return NextResponse.json({ error: "Only PDF or DOCX supported" }, { status: 415 });
+      }
+    } catch (err) {
+      return NextResponse.json(
+        { error: `Failed to extract text: ${(err as Error).message}` },
+        { status: 500 }
+      );
+    }
+
+    if (!text || text.trim().length < 50) {
+      return NextResponse.json(
+        { error: "Could not extract usable text from the file (probably scanned/image-only PDF)." },
+        { status: 422 }
+      );
+    }
+
+    stage = "claude-extract";
+    let extracted: ExtractedPayload;
+    try {
+      extracted = await callClaude(text);
+    } catch (err) {
+      return NextResponse.json(
+        { error: `Extraction failed: ${(err as Error).message}` },
+        { status: 502 }
+      );
+    }
+
+    stage = "compute-diff";
+    const diff = computeDiff(property as Record<string, unknown>, extracted);
+
+    return NextResponse.json({
+      property_id: propertyId,
+      file: { name: file.name, size: file.size, type: file.type },
+      text_length: text.length,
+      extracted: extracted.values,
+      confidence: extracted.confidence,
+      source_quotes: extracted.source_quotes,
+      diff,
+    });
   } catch (err) {
+    // Any unhandled throw lands here → guaranteed JSON response.
+    console.error(`[extract-from-om] crash at stage=${stage}`, err);
     return NextResponse.json(
-      { error: `Failed to extract text: ${(err as Error).message}` },
+      { error: `Server error at stage "${stage}": ${(err as Error).message}` },
       { status: 500 }
     );
   }
-
-  if (!text || text.trim().length < 50) {
-    return NextResponse.json(
-      { error: "Could not extract usable text from the file (probably scanned/image-only PDF)." },
-      { status: 422 }
-    );
-  }
-
-  // Claude extraction
-  let extracted: ExtractedPayload;
-  try {
-    extracted = await callClaude(text);
-  } catch (err) {
-    return NextResponse.json(
-      { error: `Extraction failed: ${(err as Error).message}` },
-      { status: 502 }
-    );
-  }
-
-  const diff = computeDiff(property as Record<string, unknown>, extracted);
-
-  return NextResponse.json({
-    property_id: propertyId,
-    file: { name: file.name, size: file.size, type: file.type },
-    text_length: text.length,
-    extracted: extracted.values,
-    confidence: extracted.confidence,
-    source_quotes: extracted.source_quotes,
-    diff,
-  });
 }

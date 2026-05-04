@@ -106,12 +106,30 @@ export default function OMExtractModal({ open, onClose, propertyId, propertyName
         method: "POST",
         body: fd,
       });
-      const json = await res.json();
+
+      // Read body as text first so an empty/non-JSON response (Netlify
+      // gateway timeout, function crash, etc.) yields a helpful error
+      // instead of "Failed to execute 'json' on 'Response'".
+      const raw = await res.text();
+      let json: any = null;
+      if (raw) {
+        try { json = JSON.parse(raw); } catch { /* not JSON */ }
+      }
+
       if (!res.ok) {
-        setError(json.error || `HTTP ${res.status}`);
+        const detail =
+          json?.error ||
+          (raw ? raw.slice(0, 200) : "(empty response — function may have timed out)");
+        setError(`HTTP ${res.status}: ${detail}`);
         setStage("upload");
         return;
       }
+      if (!json) {
+        setError("Server returned an empty response. The OM extraction may have timed out — try a smaller PDF or trim the file.");
+        setStage("upload");
+        return;
+      }
+
       setExtractResp(json as ExtractResponse);
       // Auto-select all fields where OM has a value AND we don't already match.
       // User can deselect anything they want to override.
