@@ -314,31 +314,51 @@ export default function DealsContent() {
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   );
 
-  // ── Load deals ──────────────────────────────────────────
+  // ── Load pipeline rows from properties ──────────────────
+  // Post migration 0003, properties is the source of truth. Each property is a
+  // single record carrying both asset details and pipeline financials. The
+  // local Deal interface is kept (less invasive) — populated via PostgREST
+  // column aliasing so internal references like d.deal_name / d.price keep
+  // working. property_id mirrors id so dashboard deep-links continue to land
+  // here via setSelected lookup by id.
   const load = useCallback(async () => {
     const supabase = createClient();
     const { data } = await supabase
-      .from("deals")
+      .from("properties")
       .select(`
-        id, deal_name, deal_type, price, commission_pct,
-        estimated_commission, probability_pct, weighted_commission,
-        expected_close, actual_close, is_closed, is_dead, dead_reason, notes,
-        property_id, client_contact_id,
-        property:properties(name, asset_type, city, address),
-        client:contacts!deals_client_contact_id_fkey(full_name, phone, email)
+        id,
+        deal_name:name,
+        deal_type:transaction_type,
+        price:agreed_price,
+        commission_pct,
+        estimated_commission,
+        probability_pct,
+        weighted_commission,
+        expected_close,
+        actual_close,
+        is_dead,
+        dead_reason,
+        notes,
+        client_contact_id,
+        current_stage:pipeline_stage,
+        asset_type, address, city, state, zip, headline, asking_price, sqft,
+        client:contacts!properties_client_contact_id_fkey(full_name, phone, email)
       `)
-      .order("weighted_commission", { ascending: false });
+      .order("weighted_commission", { ascending: false, nullsFirst: false });
 
+    // Synthesize the legacy `property` block + `is_closed` flag so existing
+    // render code (e.g. selected.property?.name, .is_closed checks) keeps
+    // working without 100s of changes scattered through the file.
     if (data) {
-      for (const deal of data) {
-        const { data: stage } = await supabase
-          .from("deal_stages")
-          .select("stage")
-          .eq("deal_id", deal.id)
-          .is("exited_at", null)
-          .limit(1)
-          .single();
-        (deal as any).current_stage = stage?.stage || "Lead";
+      for (const row of data as any[]) {
+        row.property = {
+          name: row.deal_name,
+          asset_type: row.asset_type,
+          city: row.city,
+          address: row.address,
+        };
+        row.property_id = row.id; // alias for "this is its own property"
+        row.is_closed = row.current_stage === "Closed";
       }
     }
 
@@ -383,42 +403,20 @@ export default function DealsContent() {
   }, [selected]);
 
   // ── Stage transition (DB) ───────────────────────────────
+  // Post migration 0003: pipeline_stage lives directly on the property row.
+  // No more deal_stages history inserts; stage is a single column we PATCH.
   const changeStage = useCallback(async (dealId: string, fromStage: string, toStage: string) => {
     const supabase = createClient();
     const now = new Date().toISOString();
 
-    // Close current stage
-    await supabase
-      .from("deal_stages")
-      .update({ exited_at: now })
-      .eq("deal_id", dealId)
-      .is("exited_at", null);
+    const update: Record<string, unknown> = { pipeline_stage: toStage };
+    // Auto-set/clear actual_close when crossing the Closed boundary
+    if (toStage === "Closed") update.actual_close = now;
+    if (fromStage === "Closed" && toStage !== "Closed") update.actual_close = null;
 
-    // Open new stage
-    await supabase.from("deal_stages").insert({
-      deal_id: dealId,
-      stage: toStage,
-      entered_at: now,
-      entered_by: USER_ID,
-    });
+    await supabase.from("properties").update(update).eq("id", dealId);
 
-    // If moving to Closed, update deal
-    if (toStage === "Closed") {
-      await supabase.from("deals").update({
-        is_closed: true,
-        actual_close: now,
-      }).eq("id", dealId);
-    }
-
-    // If moving away from Closed, un-close
-    if (fromStage === "Closed" && toStage !== "Closed") {
-      await supabase.from("deals").update({
-        is_closed: false,
-        actual_close: null,
-      }).eq("id", dealId);
-    }
-
-    // Optimistic update
+    // Optimistic local update so the kanban repaints instantly
     setDeals((prev) => prev.map((d) =>
       d.id === dealId
         ? { ...d, current_stage: toStage, is_closed: toStage === "Closed", actual_close: toStage === "Closed" ? now : null }
@@ -447,8 +445,9 @@ export default function DealsContent() {
     const estComm = price * commPct;
     const weighted = estComm * prob;
 
+    // Map to property column names: price→agreed_price, deal_name→name.
     const update: any = {
-      price,
+      agreed_price: price,
       commission_pct: commPct,
       estimated_commission: estComm,
       probability_pct: prob,
@@ -456,10 +455,10 @@ export default function DealsContent() {
     };
 
     if (field === "expected_close") update.expected_close = rawVal || null;
-    if (field === "deal_name") update.deal_name = rawVal;
+    if (field === "deal_name") update.name = rawVal;
     if (field === "notes") update.notes = rawVal || null;
 
-    await supabase.from("deals").update(update).eq("id", deal.id);
+    await supabase.from("properties").update(update).eq("id", deal.id);
 
     // Optimistic update
     const updatedDeal = { ...deal, ...update };
@@ -493,7 +492,7 @@ export default function DealsContent() {
   const handleMarkDead = useCallback(async () => {
     if (!deadModal) return;
     const supabase = createClient();
-    await supabase.from("deals").update({
+    await supabase.from("properties").update({
       is_dead: true,
       dead_reason: deadReason || null,
     }).eq("id", deadModal.id);
@@ -507,7 +506,7 @@ export default function DealsContent() {
   // ── Revive dead deal ────────────────────────────────────
   const handleRevive = useCallback(async (deal: Deal) => {
     const supabase = createClient();
-    await supabase.from("deals").update({ is_dead: false, dead_reason: null }).eq("id", deal.id);
+    await supabase.from("properties").update({ is_dead: false, dead_reason: null }).eq("id", deal.id);
     setDeals((prev) => prev.map((d) => d.id === deal.id ? { ...d, is_dead: false, dead_reason: null } : d));
     if (selected?.id === deal.id) setSelected((s) => s ? { ...s, is_dead: false, dead_reason: null } : null);
   }, [selected]);
@@ -546,17 +545,18 @@ export default function DealsContent() {
     const estComm = price * commPct;
     const weighted = estComm * prob;
 
-    const { error } = await supabase.from("deals").update({
-      deal_name: editForm.deal_name,
-      deal_type: editForm.deal_type,
-      price,
+    // Property column mapping: deal_name→name, deal_type→transaction_type,
+    // price→agreed_price. property_id is a no-op now (the row IS the property).
+    const { error } = await supabase.from("properties").update({
+      name: editForm.deal_name,
+      transaction_type: editForm.deal_type,
+      agreed_price: price,
       commission_pct: commPct,
       estimated_commission: estComm,
       probability_pct: prob,
       weighted_commission: weighted,
       expected_close: editForm.expected_close || null,
       notes: editForm.notes || null,
-      property_id: editForm.property_id || null,
       client_contact_id: editForm.client_contact_id || null,
     }).eq("id", editDeal.id);
 
@@ -573,7 +573,7 @@ export default function DealsContent() {
   const handleSaveNotes = useCallback(async () => {
     if (!notesModal) return;
     const supabase = createClient();
-    await supabase.from("deals").update({ notes: notesText || null }).eq("id", notesModal.id);
+    await supabase.from("properties").update({ notes: notesText || null }).eq("id", notesModal.id);
     setDeals((prev) => prev.map((d) => d.id === notesModal.id ? { ...d, notes: notesText || null } : d));
     if (selected?.id === notesModal.id) setSelected((s) => s ? { ...s, notes: notesText || null } : null);
     setNotesModal(null);
@@ -593,8 +593,9 @@ export default function DealsContent() {
   const handleDelete = useCallback(async () => {
     if (!deleteConfirm) return;
     const supabase = createClient();
-    await supabase.from("deal_stages").delete().eq("deal_id", deleteConfirm.id);
-    await supabase.from("deals").delete().eq("id", deleteConfirm.id);
+    // Hard delete: remove the property row entirely (deals table is dormant).
+    // The CASCADE on properties handles related deal_stages/communications/etc.
+    await supabase.from("properties").delete().eq("id", deleteConfirm.id);
     setDeals((prev) => prev.filter((d) => d.id !== deleteConfirm.id));
     if (selected?.id === deleteConfirm.id) setSelected(null);
     setDeleteConfirm(null);
