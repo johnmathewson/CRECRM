@@ -370,6 +370,18 @@ export default function DealsContent() {
     }
   }, [loading, deals, searchParams, router, pathname]);
 
+  // ── Detail modal: ESC to close + body scroll lock ──────
+  useEffect(() => {
+    if (!selected) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setSelected(null); };
+    window.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [selected]);
+
   // ── Stage transition (DB) ───────────────────────────────
   const changeStage = useCallback(async (dealId: string, fromStage: string, toStage: string) => {
     const supabase = createClient();
@@ -661,7 +673,7 @@ export default function DealsContent() {
 
       <CreateDealModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={load} />
 
-      <div className="grid gap-4" style={{ gridTemplateColumns: selected ? "1fr 400px" : "1fr" }}>
+      <div>
         {/* ── Pipeline View ─────────────────────────────── */}
         {view === "pipeline" ? (
           <DndContext sensors={sensors} collisionDetection={closestCorners} onDragStart={onDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd}>
@@ -763,9 +775,18 @@ export default function DealsContent() {
           </Panel>
         )}
 
-        {/* ── Detail Sidebar ───────────────────────────── */}
+        {/* ── Detail Modal (centered overlay) ─────────────── */}
         {selected && (
-          <div className="flex flex-col gap-4">
+          <div
+            className="fixed inset-0 z-[80] flex items-center justify-center p-4"
+            style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+            onClick={(e) => { if (e.target === e.currentTarget) setSelected(null); }}
+          >
+            <div
+              className="flex flex-col gap-4"
+              style={{ width: "min(720px, 92vw)", maxHeight: "88vh", overflow: "auto" }}
+              data-lenis-prevent
+            >
             <Panel title="Deal Detail" actions={
               <div className="flex gap-1">
                 <IconBtn onClick={() => openEditModal(selected)}>✎</IconBtn>
@@ -971,6 +992,7 @@ export default function DealsContent() {
                 </button>
               </div>
             </Panel>
+            </div>
           </div>
         )}
       </div>
