@@ -19,7 +19,11 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
-const ANTHROPIC_MODEL = "claude-haiku-4-5-20251001";
+// Sonnet 4 (not Haiku) for OM extraction. Haiku is fine for rent-roll parse
+// where the structure is rigid; OMs are prose-heavy and Haiku has been
+// observed to hallucinate prices/NOI. Sonnet stays well under the 22s
+// timeout and is ~6¢/extraction — worth it for multi-million-dollar listings.
+const ANTHROPIC_MODEL = "claude-sonnet-4-20250514";
 const ANTHROPIC_VERSION = "2023-06-01";
 
 // Fields we ask Claude to extract from an OM. Subset of the property schema —
@@ -110,15 +114,19 @@ const SYSTEM_PROMPT = `You are a commercial real estate data extractor. Given th
     "<field>": "high|medium|low"
   },
   "source_quotes": {
-    "<field>": "the verbatim phrase from the OM you used to extract this field"
+    "<field>": "the verbatim phrase from the OM that produced this value (50 chars max)"
   }
 }
 
-Rules:
-- Use null for any field NOT clearly stated in the OM. Do not guess.
-- Numbers must be numbers (not strings). Strip currency symbols and commas.
-- cap_rate and occupancy_pct must be decimals (0.065 not 6.5).
-- Return ONLY the JSON object. No prose, no markdown fences.`;
+ABSOLUTE RULES — DO NOT VIOLATE:
+1. Every non-null value in "values" MUST appear verbatim somewhere in the OM text. If you cannot copy-paste the exact phrase that produced the value into source_quotes, return null for that field. NO INFERENCE. NO COMPUTATION.
+2. Do not derive asking_price from cap_rate × NOI, from price-per-SF × sqft, or from any other math. The asking_price must be explicitly stated as the asking/list/offering/sale price of the SUBJECT property — not a comparable, not a reference deal in the appendix.
+3. Do not confuse the SUBJECT property's price with prices of comp/sale-comparable properties shown in the OM's market section or appendix. The asking_price is for the property being offered, not for comps.
+4. If the OM mentions multiple price-like numbers (e.g. price-per-SF, total rent, replacement cost), pick ONLY the one explicitly labelled as asking price / list price / offering price / sale price. If none is explicitly labelled, return null.
+5. Same rule applies to NOI, cap_rate, sqft: must be the SUBJECT property's stated number, not a comp's or a market average.
+6. confidence: "high" only when the value is unambiguous and explicitly labelled. "medium" when it requires interpretation. "low" when you're not sure — and in that case, prefer null.
+7. Numbers are numbers (not strings). Strip currency symbols and commas. cap_rate and occupancy_pct as decimals (0.065 not 6.5).
+8. Return ONLY the JSON object. No prose, no markdown fences.`;
 
 async function callClaude(omText: string): Promise<ExtractedPayload> {
   const apiKey = process.env.ANTHROPIC_API_KEY;

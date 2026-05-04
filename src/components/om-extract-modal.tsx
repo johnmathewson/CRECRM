@@ -276,43 +276,66 @@ export default function OMExtractModal({ open, onClose, propertyId, propertyName
               const checked = accepted.has(d.key);
               const disabled = isMatch || isMissingExtracted;
               return (
-                <label
+                <div
                   key={d.key}
-                  htmlFor={`om-${d.key}`}
-                  className="grid items-center px-3 py-2 cursor-pointer transition-colors"
                   style={{
-                    gridTemplateColumns: "26px 130px 1fr 1fr 60px",
-                    gap: 12,
                     background: checked ? "rgba(224,122,95,0.06)" : "transparent",
                     borderTop: "1px solid rgba(255,255,255,0.04)",
-                    cursor: disabled ? "default" : "pointer",
                     opacity: disabled ? 0.5 : 1,
                   }}
                 >
-                  <input
-                    id={`om-${d.key}`}
-                    type="checkbox"
-                    checked={checked}
-                    disabled={disabled}
-                    onChange={() => !disabled && toggle(d.key)}
-                  />
-                  <span className="text-xs font-medium text-cream">{FIELD_LABELS[d.key] ?? d.key}</span>
-                  <span className="text-[11.5px] text-cream-muted truncate" title={String(d.currentValue ?? "")}>
-                    {fmt(d.currentValue)}
-                  </span>
-                  <span
-                    className="text-[11.5px] truncate"
-                    style={{ color: isMissingExtracted ? "rgba(240,237,228,0.4)" : C.cream }}
-                    title={String(d.extractedValue ?? "")}
+                  <label
+                    htmlFor={`om-${d.key}`}
+                    className="grid items-center px-3 py-2 transition-colors"
+                    style={{
+                      gridTemplateColumns: "26px 130px 1fr 1fr 60px",
+                      gap: 12,
+                      cursor: disabled ? "default" : "pointer",
+                    }}
                   >
-                    {fmt(d.extractedValue)}
-                  </span>
-                  <span className="text-[10px] text-right" style={{
-                    color: d.confidence === "high" ? C.green : d.confidence === "medium" ? C.amber : "rgba(240,237,228,0.4)",
-                  }}>
-                    {isMatch ? "match" : isMissingExtracted ? "—" : (d.confidence ?? "—")}
-                  </span>
-                </label>
+                    <input
+                      id={`om-${d.key}`}
+                      type="checkbox"
+                      checked={checked}
+                      disabled={disabled}
+                      onChange={() => !disabled && toggle(d.key)}
+                    />
+                    <span className="text-xs font-medium text-cream">{FIELD_LABELS[d.key] ?? d.key}</span>
+                    <span className="text-[11.5px] text-cream-muted truncate" title={String(d.currentValue ?? "")}>
+                      {fmt(d.currentValue)}
+                    </span>
+                    <span
+                      className="text-[11.5px] truncate"
+                      style={{ color: isMissingExtracted ? "rgba(240,237,228,0.4)" : C.cream }}
+                      title={String(d.extractedValue ?? "")}
+                    >
+                      {fmt(d.extractedValue)}
+                    </span>
+                    <span className="text-[10px] text-right" style={{
+                      color: d.confidence === "high" ? C.green : d.confidence === "medium" ? C.amber : "rgba(240,237,228,0.4)",
+                    }}>
+                      {isMatch ? "match" : isMissingExtracted ? "—" : (d.confidence ?? "—")}
+                    </span>
+                  </label>
+                  {/* Source quote — shows exactly which OM phrase produced the
+                      extracted value. Lets the broker spot hallucinations
+                      ("OM says $5.5M but Claude returned $7.2M? — let's see
+                      where that came from"). Only shown when extracted has
+                      a value AND we have a quote. */}
+                  {!isMissingExtracted && !isMatch && d.source_quote && (
+                    <div
+                      className="px-3 pb-2 -mt-1"
+                      style={{ paddingLeft: 38 + 130 + 12, fontSize: 10.5 }}
+                    >
+                      <span className="text-cream-subtle font-mono" style={{ letterSpacing: "0.04em" }}>
+                        OM phrase:&nbsp;
+                      </span>
+                      <span style={{ color: "rgba(240,237,228,0.65)", fontStyle: "italic" }}>
+                        &ldquo;{d.source_quote}&rdquo;
+                      </span>
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>
