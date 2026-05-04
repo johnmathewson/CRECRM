@@ -43,7 +43,32 @@ interface Property {
   slug?: string | null;
   owner?: { full_name: string } | null;
   deals?: { id: string; deal_name: string; deal_type: string; price: number; is_closed: boolean }[];
+  // Unified pipeline (migration 0003) — replaces the old `status` field as the
+  // canonical stage. Allowed values: Lead | LOI | Listing | Under Contract | Closed | Dead
+  pipeline_stage?: PipelineStage | null;
+  agreed_price?: number | null;
+  commission_pct?: number | null;
+  estimated_commission?: number | null;
+  probability_pct?: number | null;
+  weighted_commission?: number | null;
+  expected_close?: string | null;
+  actual_close?: string | null;
 }
+
+type PipelineStage = "Lead" | "LOI" | "Listing" | "Under Contract" | "Closed" | "Dead";
+
+const PIPELINE_STAGES: PipelineStage[] = ["Lead", "LOI", "Listing", "Under Contract", "Closed", "Dead"];
+
+// Coral-on-charcoal palette mapped to each stage. Stage colors mirror the
+// /deals kanban so the visual language is consistent across the app.
+const stageColors: Record<PipelineStage, { bg: string; t: string }> = {
+  Lead:             { bg: "rgba(242,201,76,0.20)", t: "#F2C94C" }, // amber
+  LOI:              { bg: "rgba(224,122,95,0.18)", t: "#E07A5F" }, // coral light
+  Listing:          { bg: "rgba(224,122,95,0.30)", t: "#E07A5F" }, // coral active
+  "Under Contract": { bg: "rgba(78,205,196,0.22)", t: "#4ECDC4" }, // teal
+  Closed:           { bg: "rgba(107,203,119,0.22)", t: "#6BCB77" }, // green
+  Dead:             { bg: "rgba(255,255,255,0.06)", t: "rgba(240,237,228,0.45)" }, // muted
+};
 
 // ── Colors ─────────────────────────────────────────────────
 const C = {
@@ -121,9 +146,13 @@ export default function PropertiesContent() {
         .select(`
           id, name, headline, slug, address, city, state, zip,
           asset_type, transaction_type, status,
+          pipeline_stage,
           asking_price, lease_rate, sqft, acreage, year_built,
           parking_spaces, parking_ratio, zoning,
           noi, cap_rate, price_per_sf, occupancy_pct,
+          agreed_price, commission_pct, estimated_commission,
+          probability_pct, weighted_commission,
+          expected_close, actual_close,
           description, highlights, crexi_url, images,
           publish_to_website,
           your_role, notes,
@@ -135,6 +164,33 @@ export default function PropertiesContent() {
       setProperties((data as any) || []);
       setLoading(false);
   }, []);
+
+  // Move a property through the unified pipeline (Lead → LOI → Listing →
+  // Under Contract → Closed | Dead) without leaving the detail panel.
+  // Called from the stage pill bar in the property detail panel.
+  const [updatingStage, setUpdatingStage] = useState(false);
+  async function setPipelineStage(p: Property, next: PipelineStage) {
+    if (p.pipeline_stage === next) return;
+    setUpdatingStage(true);
+    try {
+      const res = await fetch(`/api/properties/${p.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pipeline_stage: next }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(`Stage update failed: ${err.error || res.status}`);
+        return;
+      }
+      const data = await res.json();
+      const updated = { ...p, pipeline_stage: data.property?.pipeline_stage ?? next } as Property;
+      setProperties((prev) => prev.map((x) => (x.id === p.id ? updated : x)));
+      setSelected(updated);
+    } finally {
+      setUpdatingStage(false);
+    }
+  }
 
   // Toggle publish_to_website without leaving the detail panel.
   async function togglePublish(p: Property) {
@@ -253,7 +309,7 @@ export default function PropertiesContent() {
               boxShadow: "0 3px 16px rgba(224,122,95,0.35)",
             }}
           >
-            + New Listing
+            + New Lead
           </button>
         </div>
       </div>
@@ -454,6 +510,37 @@ export default function PropertiesContent() {
               <div className="flex gap-2 mb-4">
                 <AssetBadge type={selected.asset_type} />
                 <StatusBadge status={selected.status} />
+              </div>
+
+              {/* Pipeline stage selector — clickable pills that advance the
+                  property through Lead → LOI → Listing → Under Contract →
+                  Closed | Dead. Single source of truth for stage; matches the
+                  /deals kanban columns visually. */}
+              <div className="mb-4">
+                <div className="text-[9.5px] text-cream-subtle uppercase tracking-wider font-medium mb-1.5">Pipeline Stage</div>
+                <div className="flex gap-1 flex-wrap">
+                  {PIPELINE_STAGES.map((stage) => {
+                    const active = (selected.pipeline_stage || "Lead") === stage;
+                    const sc = stageColors[stage];
+                    return (
+                      <button
+                        key={stage}
+                        onClick={() => setPipelineStage(selected, stage)}
+                        disabled={updatingStage}
+                        className="text-[10.5px] px-2.5 py-1 cursor-pointer border-none transition-all"
+                        style={{
+                          borderRadius: 4,
+                          background: active ? sc.bg : "rgba(255,255,255,0.03)",
+                          color: active ? sc.t : "rgba(240,237,228,0.5)",
+                          fontWeight: active ? 600 : 400,
+                          opacity: updatingStage ? 0.5 : 1,
+                        }}
+                      >
+                        {stage}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* Publish toggle — prominent. One click flips it on/off. */}

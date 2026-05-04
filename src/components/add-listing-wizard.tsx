@@ -38,7 +38,7 @@ interface ListingForm {
 
 const emptyForm = (): ListingForm => ({
   name: "", headline: "", address: "", city: "", state: "IN", zip: "",
-  asset_type: "retail", transaction_type: "sale", status: "listed",
+  asset_type: "retail", transaction_type: "sale", status: "idea",
   your_role: "listing_broker", asking_price: "", lease_rate: "",
   sqft: "", acreage: "", year_built: "", parking_spaces: "",
   parking_ratio: "", zoning: "", noi: "", cap_rate: "",

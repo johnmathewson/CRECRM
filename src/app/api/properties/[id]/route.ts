@@ -25,6 +25,13 @@ const PATCHABLE_FIELDS = new Set([
   "description", "highlights", "notes", "crexi_url", "loopnet_url",
   "publish_to_website", "crexi_sync_status", "source_import",
   "headline", "images", "slug",
+  // Unified pipeline + folded-in deal financials (migration 0003)
+  "pipeline_stage",
+  "agreed_price", "commission_pct", "estimated_commission",
+  "probability_pct", "weighted_commission",
+  "expected_close", "actual_close",
+  "is_dead", "dead_reason",
+  "client_contact_id", "assigned_to",
 ]);
 
 function svc() {
