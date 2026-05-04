@@ -155,38 +155,49 @@ export default function DashboardContent() {
   const load = useCallback(async () => {
       const supabase = createClient();
 
-      // Fetch active deals with property + client + current stage
+      // Active pipeline = properties NOT closed and NOT dead.
+      // Same Deal-shaped output as before via PostgREST column aliasing so the
+      // existing render code (deal.deal_name, deal.price, etc.) keeps working.
       const { data: active } = await supabase
-        .from("deals")
+        .from("properties")
         .select(`
-          id, deal_name, deal_type, price, commission_pct,
-          estimated_commission, probability_pct, weighted_commission,
-          is_closed,
-          property:properties(name, asset_type, city),
-          client:contacts!deals_client_contact_id_fkey(full_name)
+          id,
+          deal_name:name,
+          deal_type:transaction_type,
+          price:agreed_price,
+          commission_pct,
+          estimated_commission,
+          probability_pct,
+          weighted_commission,
+          current_stage:pipeline_stage,
+          asset_type, city,
+          client:contacts!properties_client_contact_id_fkey(full_name)
         `)
-        .eq("is_closed", false)
-        .order("weighted_commission", { ascending: false });
+        .neq("pipeline_stage", "Closed")
+        .neq("pipeline_stage", "Dead")
+        .eq("is_dead", false)
+        .order("weighted_commission", { ascending: false, nullsFirst: false });
 
-      // Get current stage for each deal
+      // Synthesize the legacy `property` block + `is_closed` flag the table
+      // renderer reads. asset_type/city already on the row.
       if (active) {
-        for (const deal of active) {
-          const { data: stage } = await supabase
-            .from("deal_stages")
-            .select("stage")
-            .eq("deal_id", deal.id)
-            .is("exited_at", null)
-            .limit(1)
-            .single();
-          (deal as any).current_stage = stage?.stage || "—";
+        for (const row of active as any[]) {
+          row.property = { name: row.deal_name, asset_type: row.asset_type, city: row.city };
+          row.is_closed = false;
         }
       }
 
-      // Fetch closed deals
+      // Closed Commissions = properties where pipeline_stage='Closed' with a
+      // non-zero estimated_commission. Mirrors the previous filter.
       const { data: closed } = await supabase
-        .from("deals")
-        .select("id, deal_name, deal_type, estimated_commission, is_closed")
-        .eq("is_closed", true)
+        .from("properties")
+        .select(`
+          id,
+          deal_name:name,
+          deal_type:transaction_type,
+          estimated_commission
+        `)
+        .eq("pipeline_stage", "Closed")
         .gt("estimated_commission", 0)
         .order("estimated_commission", { ascending: false });
 
