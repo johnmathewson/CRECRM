@@ -114,18 +114,29 @@ els.openOptions.addEventListener("click", (e) => {
 
 // ── Leads watcher status panel ───────────────────────────────────────────
 async function refreshWatcherStatus() {
+  // Ask background for live status (knows queue depth + heartbeat freshness)
+  let status = null;
+  try {
+    status = await chrome.runtime.sendMessage({ action: "leads-watcher-status" });
+  } catch {}
+
   const data = await chrome.storage.local.get(null);
   const lastRun = data.leads_watcher_last_run;
-  const isRunning = data.leads_watcher_running;
+  const queueRemaining = status?.queue_remaining ?? 0;
+  const heartbeatAge = status?.heartbeat_age_ms ?? null;
+
+  // Per-listing telemetry, last 6 entries
   const perListing = Object.entries(data)
     .filter(([k]) => k.startsWith("leads_watcher_last_"))
     .map(([k, v]) => ({ id: k.replace("leads_watcher_last_", ""), ...v }))
     .sort((a, b) => (b.at || 0) - (a.at || 0))
-    .slice(0, 4);
+    .slice(0, 6);
 
   let html = "";
-  if (isRunning) {
-    html = `<span style="color:#F2C94C">Running now…</span>`;
+  if (queueRemaining > 0 && heartbeatAge !== null && heartbeatAge < 5 * 60 * 1000) {
+    html = `<span style="color:#F2C94C">Running — ${queueRemaining} listing${queueRemaining === 1 ? "" : "s"} left</span>`;
+  } else if (queueRemaining > 0) {
+    html = `<span style="color:#E74C3C">Stuck (${queueRemaining} left, no heartbeat). Click "Run now" to reset.</span>`;
   } else if (!lastRun) {
     html = `Hasn't run yet. Fires every 30 min when Chrome is open, or click below to run on demand.`;
   } else {
@@ -133,11 +144,12 @@ async function refreshWatcherStatus() {
     html = `<strong>Last run:</strong> ${ago < 1 ? "just now" : `${ago}m ago`}`;
   }
   if (perListing.length > 0) {
-    html += `<div style="margin-top:6px; font-size:10.5px; color:rgba(240,237,228,0.5)">`;
+    html += `<div style="margin-top:6px; font-size:10.5px; color:rgba(240,237,228,0.5); max-height:140px; overflow-y:auto">`;
     for (const p of perListing) {
       const ago = Math.round((Date.now() - (p.at || 0)) / 60000);
-      const status = p.ok ? `${p.leads_count} leads` : `failed (${p.error || "?"})`;
-      html += `<div>· #${p.id} — ${status} · ${ago}m ago</div>`;
+      const status = p.ok ? `${p.leads_count} leads` : `failed: ${p.error || "?"}`;
+      const color = p.ok ? "rgba(107,203,119,0.85)" : "rgba(231,76,60,0.85)";
+      html += `<div style="color:${color}">· #${p.id} — ${status} · ${ago}m ago</div>`;
     }
     html += `</div>`;
   }
@@ -147,12 +159,15 @@ async function refreshWatcherStatus() {
 els.runWatcherNow?.addEventListener("click", async () => {
   els.runWatcherNow.disabled = true;
   els.watcherStatus.innerHTML = `<span style="color:#F2C94C">Triggering…</span>`;
-  // Trigger the alarm by setting a one-shot alarm immediately
-  await chrome.alarms.create("stewardship-leads", { when: Date.now() + 1000 });
+  try {
+    await chrome.runtime.sendMessage({ action: "force-run-leads-watcher" });
+  } catch (err) {
+    console.warn("force run failed", err);
+  }
   setTimeout(() => {
     els.runWatcherNow.disabled = false;
     refreshWatcherStatus();
-  }, 3000);
+  }, 1500);
 });
 
 init();
