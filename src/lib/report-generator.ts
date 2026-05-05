@@ -349,12 +349,21 @@ function generateSaleBOV(data: ReportData): jsPDF {
     ? trimmed.reduce((s, c) => s + Number(c.lease_rate!) * (Number(c.square_footage) || 0), 0) / compTotalSF
     : 0;
 
+  // In-place SF-weighted rate across occupied units. If the property is leased above
+  // market, this exceeds compWeightedRate.
+  const occupiedSF = occupiedUnits.reduce((s, u) => s + (Number(u.square_footage) || 0), 0);
+  const intakeWeightedRate = occupiedSF > 0
+    ? occupiedUnits.reduce((s, u) => s + effectiveRate(u) * (Number(u.square_footage) || 0), 0) / occupiedSF
+    : 0;
+  // Stabilized rate = higher of (in-place average, comp-driven market). When the
+  // property's existing leases are above market, stabilization preserves that
+  // achieved rate rather than artificially marking it down to comp average.
+  const stabilizedRate = Math.max(intakeWeightedRate, compWeightedRate);
+
   const totalAnnualRent = units.reduce((s, u) => s + effectiveAnnual(u), 0);
-  // Stabilized PGI: ALL units at market rate (occupied + vacant). The stabilized
-  // value scenario assumes the asset is fully leased at market — vacant units are
-  // included so the valuation reflects full lease-up upside.
-  const marketAnnualRent = compWeightedRate > 0
-    ? units.reduce((s, u) => s + compWeightedRate * (Number(u.square_footage) || 0), 0)
+  // Stabilized PGI: ALL units (occupied + vacant) at the stabilized rate.
+  const marketAnnualRent = stabilizedRate > 0
+    ? units.reduce((s, u) => s + stabilizedRate * (Number(u.square_footage) || 0), 0)
     : 0;
   // NOI = revenue minus expenses. If user typed expenses, use them; otherwise default ratio.
   // Market NOI uses the same expense ratio so the relative spread stays coherent.
@@ -482,15 +491,18 @@ function generateSaleBOV(data: ReportData): jsPDF {
     const avgCompRate = similar.length > 0
       ? similar.reduce((s, c) => s + Number(c.lease_rate!), 0) / similar.length
       : compWeightedRate;
-    const delta = uRate > 0 && avgCompRate > 0 ? ((avgCompRate - uRate) / uRate) * 100 : 0;
-    // Vacant gap = full lease-up (market × sqft). Occupied gap = rate uplift × sqft.
-    const gap = u.is_vacant ? avgCompRate * sf : (uRate > 0 ? (avgCompRate - uRate) * sf : 0);
+    // Occupied: compare to size-matched comps. Vacant: underwrite at the property's
+    // stabilized rate (max of in-place avg, comp avg) — what we'd lease the space at.
+    const unitMarketRate = u.is_vacant ? stabilizedRate : avgCompRate;
+    const delta = uRate > 0 && unitMarketRate > 0 ? ((unitMarketRate - uRate) / uRate) * 100 : 0;
+    // Vacant gap = full lease-up at stabilized rate. Occupied gap = rate uplift × sqft.
+    const gap = u.is_vacant ? stabilizedRate * sf : (uRate > 0 ? (unitMarketRate - uRate) * sf : 0);
     return [
       u.unit_number || u.suite || "—",
       u.is_vacant ? "VACANT" : (u.tenant_name || "—"),
       sf > 0 ? fmtSF(sf) : "—",
       u.is_vacant ? "—" : (uRate > 0 ? fmtRate(uRate) : "—"),
-      fmtRate(avgCompRate),
+      fmtRate(unitMarketRate),
       u.is_vacant ? "Lease-up" : (uRate > 0 ? fmtPct(delta) : "—"),
       fmt(Math.round(gap)),
     ];
@@ -644,11 +656,12 @@ function generateRentalOpinion(data: ReportData): jsPDF {
   const intakeWeightedRate = occupiedSF > 0
     ? occupiedUnits.reduce((s, u) => s + effectiveRate(u) * (Number(u.square_footage) || 0), 0) / occupiedSF
     : 0;
+  // Stabilized rate = higher of (in-place average, comp-driven market). Above-market
+  // leases preserve their achieved rate in the stabilized scenario.
+  const stabilizedRate = Math.max(intakeWeightedRate, compWeightedRate);
   const totalAnnualRent = units.reduce((s, u) => s + effectiveAnnual(u), 0);
-  // Stabilized PGI: ALL units at market rate (occupied + vacant). "Stabilized" assumes
-  // the asset is fully leased at current market rents — vacant units are included so
-  // the valuation reflects full lease-up upside, not just rate uplift on existing tenants.
-  const marketAnnualRent = units.reduce((s, u) => s + compWeightedRate * (Number(u.square_footage) || 0), 0);
+  // Stabilized PGI: ALL units (occupied + vacant) at the stabilized rate.
+  const marketAnnualRent = units.reduce((s, u) => s + stabilizedRate * (Number(u.square_footage) || 0), 0);
   const occupancyRate = totalSF > 0 ? (occupiedSF / totalSF) * 100 : 0;
 
   // ── PAGE 1: Cover ──
@@ -758,15 +771,17 @@ function generateRentalOpinion(data: ReportData): jsPDF {
     const avgCompRate = similar.length > 0
       ? similar.reduce((s, c) => s + Number(c.lease_rate!), 0) / similar.length
       : compWeightedRate;
-    const delta = uRate > 0 && avgCompRate > 0 ? ((avgCompRate - uRate) / uRate) * 100 : 0;
-    // Vacant gap = full lease-up (market × sqft). Occupied gap = rate uplift × sqft.
-    const gapV = u.is_vacant ? avgCompRate * sf : (uRate > 0 ? (avgCompRate - uRate) * sf : 0);
+    // Occupied: compare to size-matched comps. Vacant: underwrite at stabilized rate.
+    const unitMarketRate = u.is_vacant ? stabilizedRate : avgCompRate;
+    const delta = uRate > 0 && unitMarketRate > 0 ? ((unitMarketRate - uRate) / uRate) * 100 : 0;
+    // Vacant gap = full lease-up at stabilized rate. Occupied gap = rate uplift × sqft.
+    const gapV = u.is_vacant ? stabilizedRate * sf : (uRate > 0 ? (unitMarketRate - uRate) * sf : 0);
     return [
       u.unit_number || u.suite || "—",
       u.is_vacant ? "VACANT" : (u.tenant_name || "—"),
       sf > 0 ? fmtSF(sf) : "—",
       u.is_vacant ? "—" : (uRate > 0 ? fmtRate(uRate) : "—"),
-      fmtRate(avgCompRate),
+      fmtRate(unitMarketRate),
       u.is_vacant ? "Lease-up" : (uRate > 0 ? fmtPct(delta) : "—"),
       fmt(Math.round(gapV)),
     ];
@@ -838,12 +853,18 @@ function generateStabilizedValuation(data: ReportData): jsPDF {
   const compWeightedRate = compTotalSF > 0
     ? trimmed.reduce((s, c) => s + Number(c.lease_rate!) * (Number(c.square_footage) || 0), 0) / compTotalSF
     : 0;
+  // In-place SF-weighted rate across occupied units.
+  const occupiedSF = occupiedUnits.reduce((s, u) => s + (Number(u.square_footage) || 0), 0);
+  const intakeWeightedRate = occupiedSF > 0
+    ? occupiedUnits.reduce((s, u) => s + effectiveRate(u) * (Number(u.square_footage) || 0), 0) / occupiedSF
+    : 0;
+  // Stabilized rate = higher of (in-place average, comp-driven market). Above-market
+  // leases preserve their achieved rate in the stabilized scenario.
+  const stabilizedRate = Math.max(intakeWeightedRate, compWeightedRate);
 
   const totalAnnualRent = units.reduce((s, u) => s + effectiveAnnual(u), 0);
-  // Stabilized PGI: ALL units at market rate (occupied + vacant). "Stabilized" assumes
-  // the asset is fully leased at current market rents — vacant units are included so
-  // the valuation reflects full lease-up upside, not just rate uplift on existing tenants.
-  const marketAnnualRent = units.reduce((s, u) => s + compWeightedRate * (Number(u.square_footage) || 0), 0);
+  // Stabilized PGI: ALL units (occupied + vacant) at the stabilized rate.
+  const marketAnnualRent = units.reduce((s, u) => s + stabilizedRate * (Number(u.square_footage) || 0), 0);
   // NOI = revenue - expenses. Use user-supplied annualExpenses if present, else default ratio.
   const currentNOI = computeNOI(totalAnnualRent, data.annualExpenses);
   const expenseRatio = totalAnnualRent > 0 && data.annualExpenses && data.annualExpenses > 0
@@ -898,10 +919,11 @@ function generateStabilizedValuation(data: ReportData): jsPDF {
     ["Current annual revenue", fmt(totalAnnualRent)],
     [expenseLabel, fmt(expenseAmount)],
     ["Current NOI", fmt(Math.round(currentNOI))],
-    ["Current weighted rate", `${fmtRate(totalSF > 0 ? totalAnnualRent / totalSF : 0)} / SF`],
+    ["Current weighted rate (in-place)", `${fmtRate(intakeWeightedRate)} / SF`],
     ["Market annual revenue", fmt(Math.round(marketAnnualRent))],
     ["Market NOI", fmt(Math.round(marketNOI))],
-    ["Market weighted rate", `${fmtRate(compWeightedRate)} / SF`],
+    ["Market weighted rate (comps)", `${fmtRate(compWeightedRate)} / SF`],
+    ["Stabilized rate (higher of the two)", `${fmtRate(stabilizedRate)} / SF`],
     ["Revenue gap", fmt(Math.abs(Math.round(marketAnnualRent - totalAnnualRent)))],
     ["Total SF", fmtSF(totalSF)],
     ["Occupied units", `${occupiedUnits.length} of ${units.length}`],
