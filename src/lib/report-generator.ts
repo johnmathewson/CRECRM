@@ -350,8 +350,11 @@ function generateSaleBOV(data: ReportData): jsPDF {
     : 0;
 
   const totalAnnualRent = units.reduce((s, u) => s + effectiveAnnual(u), 0);
+  // Stabilized PGI: ALL units at market rate (occupied + vacant). The stabilized
+  // value scenario assumes the asset is fully leased at market — vacant units are
+  // included so the valuation reflects full lease-up upside.
   const marketAnnualRent = compWeightedRate > 0
-    ? occupiedUnits.reduce((s, u) => s + compWeightedRate * (Number(u.square_footage) || 0), 0)
+    ? units.reduce((s, u) => s + compWeightedRate * (Number(u.square_footage) || 0), 0)
     : 0;
   // NOI = revenue minus expenses. If user typed expenses, use them; otherwise default ratio.
   // Market NOI uses the same expense ratio so the relative spread stays coherent.
@@ -467,9 +470,11 @@ function generateSaleBOV(data: ReportData): jsPDF {
     MARGIN_X, y, CONTENT_W);
   y += 12;
 
-  const unitRows = occupiedUnits.map((u) => {
+  // Iterate ALL units (occupied + vacant) so the table tells the full stabilization
+  // story. Vacant rows show "—" for in-place rent and market × sqft as the lease-up gap.
+  const unitRows = units.map((u) => {
     const sf = Number(u.square_footage) || 0;
-    const uRate = effectiveRate(u);
+    const uRate = u.is_vacant ? 0 : effectiveRate(u);
     const similar = trimComps(compsWithRate.filter((c) => {
       const csf = Number(c.square_footage) || 0;
       return csf > 0 && sf > 0 && Math.abs(csf - sf) / sf < 0.3;
@@ -478,15 +483,16 @@ function generateSaleBOV(data: ReportData): jsPDF {
       ? similar.reduce((s, c) => s + Number(c.lease_rate!), 0) / similar.length
       : compWeightedRate;
     const delta = uRate > 0 && avgCompRate > 0 ? ((avgCompRate - uRate) / uRate) * 100 : 0;
-    const gap = uRate > 0 ? (avgCompRate - uRate) * sf : 0;
+    // Vacant gap = full lease-up (market × sqft). Occupied gap = rate uplift × sqft.
+    const gap = u.is_vacant ? avgCompRate * sf : (uRate > 0 ? (avgCompRate - uRate) * sf : 0);
     return [
       u.unit_number || u.suite || "—",
-      u.tenant_name || "—",
+      u.is_vacant ? "VACANT" : (u.tenant_name || "—"),
       sf > 0 ? fmtSF(sf) : "—",
-      uRate > 0 ? fmtRate(uRate) : "—",
+      u.is_vacant ? "—" : (uRate > 0 ? fmtRate(uRate) : "—"),
       fmtRate(avgCompRate),
-      uRate > 0 ? fmtPct(delta) : "—",
-      uRate > 0 ? fmt(Math.round(gap)) : "—",
+      u.is_vacant ? "Lease-up" : (uRate > 0 ? fmtPct(delta) : "—"),
+      fmt(Math.round(gap)),
     ];
   });
 
@@ -639,7 +645,10 @@ function generateRentalOpinion(data: ReportData): jsPDF {
     ? occupiedUnits.reduce((s, u) => s + effectiveRate(u) * (Number(u.square_footage) || 0), 0) / occupiedSF
     : 0;
   const totalAnnualRent = units.reduce((s, u) => s + effectiveAnnual(u), 0);
-  const marketAnnualRent = occupiedUnits.reduce((s, u) => s + compWeightedRate * (Number(u.square_footage) || 0), 0);
+  // Stabilized PGI: ALL units at market rate (occupied + vacant). "Stabilized" assumes
+  // the asset is fully leased at current market rents — vacant units are included so
+  // the valuation reflects full lease-up upside, not just rate uplift on existing tenants.
+  const marketAnnualRent = units.reduce((s, u) => s + compWeightedRate * (Number(u.square_footage) || 0), 0);
   const occupancyRate = totalSF > 0 ? (occupiedSF / totalSF) * 100 : 0;
 
   // ── PAGE 1: Cover ──
@@ -737,9 +746,11 @@ function generateRentalOpinion(data: ReportData): jsPDF {
     MARGIN_X, y, CONTENT_W);
   y += 12;
 
-  const unitRows = occupiedUnits.map((u) => {
+  // Iterate ALL units (occupied + vacant) so the table tells the full stabilization
+  // story. Vacant rows show "—" for in-place rent and market × sqft as the lease-up gap.
+  const unitRows = units.map((u) => {
     const sf = Number(u.square_footage) || 0;
-    const uRate = effectiveRate(u);
+    const uRate = u.is_vacant ? 0 : effectiveRate(u);
     const similar = trimComps(compsWithRate.filter((c) => {
       const csf = Number(c.square_footage) || 0;
       return csf > 0 && sf > 0 && Math.abs(csf - sf) / sf < 0.3;
@@ -748,15 +759,16 @@ function generateRentalOpinion(data: ReportData): jsPDF {
       ? similar.reduce((s, c) => s + Number(c.lease_rate!), 0) / similar.length
       : compWeightedRate;
     const delta = uRate > 0 && avgCompRate > 0 ? ((avgCompRate - uRate) / uRate) * 100 : 0;
-    const gapV = uRate > 0 ? (avgCompRate - uRate) * sf : 0;
+    // Vacant gap = full lease-up (market × sqft). Occupied gap = rate uplift × sqft.
+    const gapV = u.is_vacant ? avgCompRate * sf : (uRate > 0 ? (avgCompRate - uRate) * sf : 0);
     return [
       u.unit_number || u.suite || "—",
-      u.tenant_name || "—",
+      u.is_vacant ? "VACANT" : (u.tenant_name || "—"),
       sf > 0 ? fmtSF(sf) : "—",
-      uRate > 0 ? fmtRate(uRate) : "—",
+      u.is_vacant ? "—" : (uRate > 0 ? fmtRate(uRate) : "—"),
       fmtRate(avgCompRate),
-      uRate > 0 ? fmtPct(delta) : "—",
-      uRate > 0 ? fmt(Math.round(gapV)) : "—",
+      u.is_vacant ? "Lease-up" : (uRate > 0 ? fmtPct(delta) : "—"),
+      fmt(Math.round(gapV)),
     ];
   });
 
@@ -828,7 +840,10 @@ function generateStabilizedValuation(data: ReportData): jsPDF {
     : 0;
 
   const totalAnnualRent = units.reduce((s, u) => s + effectiveAnnual(u), 0);
-  const marketAnnualRent = occupiedUnits.reduce((s, u) => s + compWeightedRate * (Number(u.square_footage) || 0), 0);
+  // Stabilized PGI: ALL units at market rate (occupied + vacant). "Stabilized" assumes
+  // the asset is fully leased at current market rents — vacant units are included so
+  // the valuation reflects full lease-up upside, not just rate uplift on existing tenants.
+  const marketAnnualRent = units.reduce((s, u) => s + compWeightedRate * (Number(u.square_footage) || 0), 0);
   // NOI = revenue - expenses. Use user-supplied annualExpenses if present, else default ratio.
   const currentNOI = computeNOI(totalAnnualRent, data.annualExpenses);
   const expenseRatio = totalAnnualRent > 0 && data.annualExpenses && data.annualExpenses > 0
