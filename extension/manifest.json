@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Stewardship CRE — Listing Sync",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "Pulls listing performance metrics + named lead engagement from CREXi/LoopNet into the Stewardship CRM.",
   "permissions": ["storage", "alarms", "activeTab", "tabs", "scripting"],
   "host_permissions": [

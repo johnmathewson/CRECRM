@@ -243,28 +243,151 @@
     };
   }
 
-  function readListView() {
-    // Find all leaf elements whose text is exactly a phone number
-    const phoneRegex = /^\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}$/;
-    const phoneLeaves = Array.from(document.querySelectorAll("body *"))
-      .filter(
-        (n) =>
-          n.children.length === 0 &&
-          n.textContent &&
-          phoneRegex.test(n.textContent.trim())
-      );
+  function isNameShapedText(text) {
+    if (!text || text.length < 3 || text.length > 80) return false;
+    if (/^\d/.test(text)) return false;
+    if (/^[A-Z]{2,3}$/.test(text)) return false;
+    if (/contact lead/i.test(text)) return false;
+    if (/^\d+\s+visits?$/i.test(text)) return false;
+    if (FUNNEL_LABELS.some((l) => text === l)) return false;
+    if (KNOWN_ROLES.some((r) => text.toUpperCase() === r)) return false;
+    if (/^[A-Z][a-z]{2}\s+\d{1,2},\s+\d{4}$/.test(text)) return false;
+    if (/grant access|listing rep|landlord rep|tenant rep|buyer rep/i.test(text)) return false;
+    if (/^(new|unassigned|hot|warm|cold)$/i.test(text)) return false;
+    return text.includes(" ") || /^[A-Z][a-z]/.test(text);
+  }
 
-    // De-dupe by row container
-    const seenRows = new Set();
-    const out = [];
-    for (const phoneEl of phoneLeaves) {
-      const phone = phoneEl.textContent.trim();
-      const rowEl = findRowContainer(phoneEl);
-      if (!rowEl || seenRows.has(rowEl)) continue;
-      seenRows.add(rowEl);
-      const parsed = parseRow(rowEl, phone);
-      if (parsed) out.push(parsed);
+  function readListView() {
+    // CREXi uses Angular Material's sticky-column pattern. The leads table
+    // renders TWO parallel [role="row"] elements per lead: a "name-row" in
+    // the sticky-column layer (avatar + person name) and a "phone-row" in
+    // the scrolling layer (phone, company, role, visits, status). We pair
+    // them by DOM order — the rendering preserves order, so name-rows and
+    // phone-rows interleave or stack predictably.
+
+    const phoneRegex = /^\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}$/;
+    const allRoleRows = Array.from(document.querySelectorAll('[role="row"]'));
+
+    // Helper: extract leaf texts from a row element
+    const leavesOf = (row) =>
+      Array.from(row.querySelectorAll("*"))
+        .filter((n) => n.children.length === 0 && (n.textContent || "").trim().length > 0)
+        .map((n) => n.textContent.trim());
+
+    const nameRows = [];   // rows that have a person-name leaf, no phone
+    const phoneRows = [];  // rows that have a phone leaf
+
+    for (const row of allRoleRows) {
+      const fullText = (row.textContent || "").trim();
+      // Skip header rows
+      if (/number of visits|listing activity/i.test(fullText)) continue;
+      // Skip empty / oversize rows
+      if (fullText.length < 3 || fullText.length > 2000) continue;
+
+      const leaves = leavesOf(row);
+      const hasPhoneLeaf = leaves.some((t) => phoneRegex.test(t));
+
+      if (hasPhoneLeaf) {
+        phoneRows.push({ row, leaves, fullText });
+      } else {
+        // No phone — does it have a person-name leaf?
+        const hasName = leaves.some((t) => isNameShapedText(t));
+        if (hasName) {
+          nameRows.push({ row, leaves, fullText });
+        }
+      }
     }
+
+    // Pair name-rows with phone-rows by index. If counts don't match,
+    // fall back to phone-row-only parsing (we'll have phone but no name
+    // for those — better than nothing).
+    const pairs = [];
+    for (let i = 0; i < phoneRows.length; i++) {
+      pairs.push({
+        phoneRow: phoneRows[i],
+        nameRow: nameRows[i] || null,
+      });
+    }
+
+    const out = [];
+    for (const { phoneRow, nameRow } of pairs) {
+      const phoneLeaf = phoneRow.leaves.find((t) => phoneRegex.test(t));
+      if (!phoneLeaf) continue;
+
+      // Name from name-row (find first/best name-shaped leaf, prefer multi-word)
+      let name = "";
+      if (nameRow) {
+        // Skip avatar initials, prefer first multi-word name
+        const candidates = nameRow.leaves.filter((t) => isNameShapedText(t));
+        // Prefer multi-word (full names) over single-word
+        name = candidates.find((t) => t.includes(" ")) || candidates[0] || "";
+      }
+      if (!name) continue; // skip rows we can't name
+
+      // Visits, funnel, roles from phone-row
+      const visitsMatch = phoneRow.fullText.match(/(\d+)\s+visits?/i);
+      const visits = visitsMatch ? parseInt(visitsMatch[1], 10) : null;
+
+      let levelOfInterest = null;
+      for (const label of FUNNEL_LABELS) {
+        if (phoneRow.fullText.includes(label)) {
+          levelOfInterest = label;
+          break;
+        }
+      }
+
+      // Roles — match against pills found in phone-row text (case-insensitive)
+      const roles = [];
+      const upperText = phoneRow.fullText.toUpperCase();
+      for (const r of KNOWN_ROLES) {
+        if (upperText.includes(r)) roles.push(r);
+      }
+
+      // Company — first company-shaped leaf in phone-row, after phone, before roles/funnel
+      const phoneIdxInPhoneRow = phoneRow.leaves.indexOf(phoneLeaf);
+      const afterPhone = phoneRow.leaves.slice(phoneIdxInPhoneRow + 1);
+      let company = null;
+      for (const t of afterPhone) {
+        if (!t || t.length < 3 || t.length > 80) continue;
+        if (/contact lead/i.test(t)) continue;
+        if (KNOWN_ROLES.some((r) => t.toUpperCase().includes(r))) continue;
+        if (FUNNEL_LABELS.some((l) => t === l || t.includes(l))) continue;
+        if (/^\d+\s+visits?$/i.test(t)) continue;
+        if (/^\d/.test(t)) continue;
+        if (/^[A-Z]{2,3}$/.test(t)) continue;
+        if (/^[A-Z][a-z]{2}\s+\d{1,2},\s+\d{4}$/.test(t)) continue;
+        if (/^(new|unassigned)$/i.test(t)) continue;
+        if (/grant access/i.test(t)) continue;
+        if (t.includes(" ") || /^[A-Z]/.test(t)) {
+          company = t;
+          break;
+        }
+      }
+
+      // Activity date
+      const dateMatch = phoneRow.fullText.match(/([A-Z][a-z]{2}\s+\d{1,2},\s+\d{4})/);
+      let lastActivityAt = null;
+      const lastActivityLabel = dateMatch ? dateMatch[1] : null;
+      if (dateMatch) {
+        const parsed = new Date(dateMatch[1]);
+        if (!Number.isNaN(parsed.getTime())) lastActivityAt = parsed.toISOString();
+      }
+
+      out.push({
+        rowEl: nameRow?.row || phoneRow.row, // for click-to-expand panel
+        nameRowEl: nameRow?.row || null,
+        phoneRowEl: phoneRow.row,
+        name,
+        phone: phoneLeaf,
+        company,
+        role: roles.length > 0 ? roles.join(", ") : null,
+        number_of_visits: visits,
+        level_of_interest: levelOfInterest,
+        last_activity_label: lastActivityLabel,
+        last_activity_at: lastActivityAt,
+      });
+    }
+
     return out;
   }
 
@@ -658,7 +781,15 @@
 
       if (shouldDeepScrape(row, priorCache)) {
         try {
-          const panel = await scrapePanel(row.rowEl);
+          // Try name-row first (typical click target on CREXi), fall back
+          // to phone-row if needed.
+          let panel = null;
+          if (row.nameRowEl) {
+            panel = await scrapePanel(row.nameRowEl);
+          }
+          if (!panel && row.phoneRowEl) {
+            panel = await scrapePanel(row.phoneRowEl);
+          }
           if (panel) {
             baseLead.email = panel.email || baseLead.email;
             baseLead.activity_timeline = panel.activity_timeline;
@@ -667,7 +798,6 @@
         } catch (e) {
           baseLead._panel_error = String(e?.message || e);
         }
-        // Modest pause between panel clicks. Active tab handles these fast.
         await sleep(350);
       }
 
