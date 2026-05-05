@@ -145,6 +145,25 @@ function buildReportData(result: ValuationResult, request: ValuationRequest): Re
         ]
       : [];
 
+  // Honor user override: if request.annualIncome was entered manually and differs from
+  // the per-unit sum (which can be wrong if Haiku confused monthly vs annual), scale
+  // per-unit rents proportionally so the report's "Current Annual Revenue" matches what
+  // the user typed. This is the safety net for parser misclassifications.
+  if (request.annualIncome && request.annualIncome > 0) {
+    const occupied = units.filter((u) => !u.is_vacant);
+    const sumAnnual = occupied.reduce((s, u) => s + (Number(u.annual_rent) || 0), 0);
+    if (sumAnnual > 0 && Math.abs(sumAnnual - request.annualIncome) / request.annualIncome > 0.01) {
+      const scale = request.annualIncome / sumAnnual;
+      for (const u of units) {
+        if (u.is_vacant) continue;
+        if (u.annual_rent) u.annual_rent = Math.round(Number(u.annual_rent) * scale);
+        if (u.monthly_rent) u.monthly_rent = Math.round(Number(u.monthly_rent) * scale * 100) / 100;
+        if (u.lease_rate) u.lease_rate = Math.round(Number(u.lease_rate) * scale * 100) / 100;
+        u.notes = "In-place rent (calibrated to user-entered annual income)";
+      }
+    }
+  }
+
   // Convert LEASE comps to report format. The report's compWeightedRate is a $/SF rent
   // rate (feeds rental opinion + stabilized value via NOI ÷ cap). Sale comps belong in
   // the sales-comparison view, not the rate analysis — mixing them inflates the rate by ~10×.

@@ -13,8 +13,8 @@ For each unit/tenant, extract these fields (use null if not found):
 - lease_type: string ("NNN", "Gross", "Modified Gross", or null)
 - lease_start: string (YYYY-MM-DD format, or null)
 - lease_end: string (YYYY-MM-DD format, or null)
-- monthly_rent: number
-- annual_rent: number
+- monthly_rent: number (REQUIRED if rent is known)
+- annual_rent: number (REQUIRED if rent is known — calculate from monthly if needed)
 - escalation_pct: number (annual escalation %, or null)
 - is_vacant: boolean (REQUIRED on every unit, never omit)
 
@@ -28,27 +28,93 @@ RULES:
    - Set is_vacant=true if the unit has a square footage but no tenant AND no rent / lease dates.
    - When is_vacant=true, also set tenant_name="VACANT" for consistency, and leave lease_start, lease_end, monthly_rent, annual_rent, lease_rate as null.
    - Set is_vacant=false on every occupied unit. NEVER omit the field.
-6. SUMMARY ROWS — do NOT extract: rows that say "Total", "X Units", "Subtotal", "Grand Total", or aggregate sums across units are document totals, not units. Skip them.
-7. Preserve the original document order.
-8. "confidence" = how structured the source data was.
-9. "notes" = any ambiguities or assumptions you made.`;
+6. MONTHLY vs. ANNUAL RENT — critical for downstream calculations:
+   - If a column header contains "Monthly" or "MTM" → those values are MONTHLY. Populate monthly_rent.
+   - If a column header contains "Annual", "Yearly", "Annualized", or "/Yr" → those values are ANNUAL. Populate annual_rent.
+   - If a column is just labeled "Rent", "Current Rent", "Base Rent", "Charges", or unlabeled — DEFAULT TO MONTHLY. Property-management software (Buildium, AppFolio, Yardi, Rent Manager, etc.) and most rent rolls report monthly figures by convention. Do NOT assume annual just because the field name doesn't say "monthly".
+   - ALWAYS populate BOTH monthly_rent AND annual_rent. Calculate the missing one: annual_rent = monthly_rent × 12.
+   - SANITY CHECK before returning: compute (annual_rent ÷ square_footage). For commercial real estate this should fall roughly between $5/SF and $60/SF per year. Outside that range almost always means monthly was mislabeled as annual or vice versa — re-check and correct.
+   - Examples of misclassification to catch: a "Rent" column showing $28,873 for a 15,212 SF retail unit yields $1.90/SF/yr if treated as annual — that's nonsensical for retail; it must be monthly ($22.78/SF/yr).
+7. SUMMARY ROWS — do NOT extract: rows that say "Total", "X Units", "Subtotal", "Grand Total", or aggregate sums across units are document totals, not units. Skip them.
+8. Preserve the original document order.
+9. "confidence" = how structured the source data was.
+10. "notes" = any ambiguities or assumptions you made (especially monthly vs. annual decisions).`;
 
 // Server-side safety net: even if Claude misses vacancy detection, force is_vacant=true
 // when the tenant name matches any common vacant marker. Mirrors prompt rule 5.
 const VACANT_PATTERN = /^(\s*|vacant|vac|available|avail|tbd|empty|-+|—+|n\/?a)\s*$/i;
+
+// Reasonable commercial rent bounds in $/SF/year. Outside these almost always means
+// monthly-vs-annual got crossed somewhere upstream — we re-derive based on $/SF sanity.
+const MIN_PSF_ANNUAL = 3;   // industrial low end ~$4; below $3 → almost certainly monthly mis-labeled as annual
+const MAX_PSF_ANNUAL = 80;  // even prime retail caps around $60-70/SF; above $80 → mis-labeled
+
+function reconcileRent(u: any): { monthly_rent: number | null; annual_rent: number | null; lease_rate: number | null } {
+  const sqft = Number(u.square_footage) || 0;
+  let monthly = Number(u.monthly_rent) || null;
+  let annual = Number(u.annual_rent) || null;
+  let rate = Number(u.lease_rate) || null;
+
+  if (sqft > 0) {
+    // Case A: annual is set but yields impossibly low $/SF → it's actually a monthly figure.
+    if (annual && !monthly && annual / sqft < MIN_PSF_ANNUAL) {
+      monthly = annual;
+      annual = monthly * 12;
+    }
+    // Case B: monthly is set but yields impossibly high $/SF → it's actually an annual figure.
+    if (monthly && !annual && monthly / sqft > MAX_PSF_ANNUAL / 12) {
+      annual = monthly;
+      monthly = +(annual / 12).toFixed(2);
+    }
+    // Case C: both set but inconsistent. Trust the one that yields a sane $/SF.
+    if (monthly && annual && Math.abs(monthly * 12 - annual) > 1) {
+      const annualPsf = annual / sqft;
+      const monthlyAsAnnualPsf = (monthly * 12) / sqft;
+      // Prefer whichever lands in the sane band
+      if (annualPsf >= MIN_PSF_ANNUAL && annualPsf <= MAX_PSF_ANNUAL) {
+        monthly = +(annual / 12).toFixed(2);
+      } else if (monthlyAsAnnualPsf >= MIN_PSF_ANNUAL && monthlyAsAnnualPsf <= MAX_PSF_ANNUAL) {
+        annual = monthly * 12;
+      } else {
+        // Both look weird — default to monthly being authoritative (rent-roll convention)
+        annual = monthly * 12;
+      }
+    }
+  }
+
+  // Always populate both whenever we have one
+  if (monthly && !annual) annual = monthly * 12;
+  if (annual && !monthly) monthly = +(annual / 12).toFixed(2);
+
+  // Recompute lease_rate (annual $/SF) if missing, sanity-check if present
+  if (sqft > 0 && annual) {
+    const computedRate = annual / sqft;
+    if (!rate || (rate / computedRate < 0.5 || rate / computedRate > 2)) {
+      rate = +computedRate.toFixed(2);
+    }
+  }
+
+  return { monthly_rent: monthly, annual_rent: annual, lease_rate: rate };
+}
+
 function normalizeUnits(units: any[]): any[] {
   return units.map((u) => {
     const tenant = (u.tenant_name ?? "").toString().trim();
     const isVacantMarker = !tenant || VACANT_PATTERN.test(tenant);
     const noLeaseEvidence = !u.monthly_rent && !u.annual_rent && !u.lease_start && !u.lease_end;
     const isVacant = !!u.is_vacant || (isVacantMarker && noLeaseEvidence);
+
+    const reconciled = isVacant
+      ? { monthly_rent: null, annual_rent: null, lease_rate: null }
+      : reconcileRent(u);
+
     return {
       ...u,
       is_vacant: isVacant,
       tenant_name: isVacant ? "VACANT" : (tenant || null),
-      lease_rate: isVacant ? null : u.lease_rate,
-      monthly_rent: isVacant ? null : u.monthly_rent,
-      annual_rent: isVacant ? null : u.annual_rent,
+      lease_rate: reconciled.lease_rate,
+      monthly_rent: reconciled.monthly_rent,
+      annual_rent: reconciled.annual_rent,
       lease_start: isVacant ? null : u.lease_start,
       lease_end: isVacant ? null : u.lease_end,
     };
