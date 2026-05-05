@@ -519,7 +519,7 @@ function buildDisclaimers(methodology: string, compCount: number, assetType: str
   const disclaimers = [
     "This is a Broker Opinion of Value (BOV), not a formal appraisal. It is intended for informational purposes only and should not be relied upon as a substitute for an appraisal performed by a licensed appraiser.",
     "The values expressed herein are based on market data available at the time of analysis and are subject to change with market conditions.",
-    "Stewardship Asset Group assumes no liability for decisions made based on this opinion of value.",
+    "No liability is assumed for decisions made based on this opinion of value.",
   ];
 
   if (compCount < 3) {

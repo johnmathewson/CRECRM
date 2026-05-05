@@ -134,8 +134,36 @@ function buildReportData(result: ValuationResult, request: ValuationRequest): Re
         ]
       : [];
 
-  // Convert sale comps to report format
-  const comps = result.comps.saleComps.slice(0, 15).map(compToReportFormat);
+  // Convert LEASE comps to report format. The report's compWeightedRate is a $/SF rent
+  // rate (feeds rental opinion + stabilized value via NOI ÷ cap). Sale comps belong in
+  // the sales-comparison view, not the rate analysis — mixing them inflates the rate by ~10×.
+  let comps = result.comps.leaseComps.slice(0, 15).map(compToReportFormat);
+
+  // Fallback: if no lease comps were found but the engine derived a market rent from
+  // sale comps via cap rate (John's documented methodology), surface that as a single
+  // synthetic comp so the rental opinion / stabilized value have a usable basis instead
+  // of reporting $0. Clearly labeled so the reader knows it's derived, not observed.
+  let derivedRent = false;
+  if (comps.length === 0 && result.incomeApproach?.estimatedMarketRent) {
+    derivedRent = true;
+    comps = [
+      {
+        property_name: "Market estimate (derived from sale comps via market cap rate)",
+        address: "",
+        city: "",
+        state: "",
+        tenant_name: null,
+        suite: null,
+        square_footage: request.sqft ?? null,
+        lease_rate: result.incomeApproach.estimatedMarketRent,
+        lease_type: "Derived",
+        lease_start: null,
+        lease_end: null,
+        monthly_rent: null,
+        annual_rent: null,
+      },
+    ];
+  }
 
   return {
     propertyName: request.address,
@@ -144,6 +172,7 @@ function buildReportData(result: ValuationResult, request: ValuationRequest): Re
     totalSF: request.sqft,
     units,
     comps,
+    derivedRent,
     preparedDate: new Date().toLocaleDateString("en-US", {
       year: "numeric",
       month: "long",
@@ -161,7 +190,7 @@ function compToReportFormat(comp: NearbyComp) {
     tenant_name: comp.tenant_name,
     suite: null,
     square_footage: comp.sqft,
-    lease_rate: comp.rent_per_sqft || (comp.price_per_sqft ? comp.price_per_sqft : null),
+    lease_rate: comp.rent_per_sqft ?? null,
     lease_type: comp.lease_type,
     lease_start: comp.sale_date || comp.lease_date,
     lease_end: null,
