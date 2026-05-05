@@ -37,6 +37,9 @@ interface Property {
   description?: string | null;
   highlights?: string[] | null;
   crexi_url?: string | null;
+  loopnet_url?: string | null;
+  loopnet_share_url?: string | null;
+  loopnet_share_url_set_at?: string | null;
   publish_to_website?: boolean | null;
   your_role: string | null;
   notes: string | null;
@@ -155,7 +158,9 @@ export default function PropertiesContent() {
           agreed_price, commission_pct, estimated_commission,
           probability_pct, weighted_commission,
           expected_close, actual_close,
-          description, highlights, crexi_url, images,
+          description, highlights, crexi_url, loopnet_url,
+          loopnet_share_url, loopnet_share_url_set_at,
+          images,
           publish_to_website,
           your_role, notes,
           owner:contacts!properties_owner_contact_id_fkey(full_name),
@@ -625,6 +630,21 @@ export default function PropertiesContent() {
                 </div>
               </button>
 
+              {/* LoopNet performance-report share URL — token rotates monthly */}
+              <LoopNetShareUrlPanel
+                propertyId={selected.id}
+                shareUrl={selected.loopnet_share_url || null}
+                setAt={selected.loopnet_share_url_set_at || null}
+                onUpdated={(url, ts) => {
+                  setSelected((prev) =>
+                    prev && prev.id === selected.id
+                      ? { ...prev, loopnet_share_url: url, loopnet_share_url_set_at: ts }
+                      : prev
+                  );
+                  load();
+                }}
+              />
+
               {/* Edit Listing + Share with Owner row */}
               <div className="grid grid-cols-2 gap-2 mb-4">
                 <button
@@ -770,5 +790,173 @@ export default function PropertiesContent() {
         )}
       </div>
     </>
+  );
+}
+
+// ── LoopNet share-URL panel ───────────────────────────────────────────────
+// CoStar's "Share Listing Performance Report" link gives us a public URL we
+// can fetch to power the owner dashboard's LoopNet metrics. The token in
+// the URL ROTATES every ~30 days, so this panel surfaces the expiry and
+// makes monthly refreshing a one-paste affair.
+
+function LoopNetShareUrlPanel({
+  propertyId,
+  shareUrl,
+  setAt,
+  onUpdated,
+}: {
+  propertyId: string;
+  shareUrl: string | null;
+  setAt: string | null;
+  onUpdated: (url: string | null, ts: string | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(shareUrl || "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const expiry = setAt ? new Date(new Date(setAt).getTime() + 30 * 24 * 3600 * 1000) : null;
+  const daysLeft = expiry ? Math.floor((expiry.getTime() - Date.now()) / (24 * 3600 * 1000)) : null;
+  const status: "ok" | "warn" | "stale" | "missing" =
+    !shareUrl ? "missing"
+    : daysLeft === null ? "missing"
+    : daysLeft <= 0 ? "stale"
+    : daysLeft <= 7 ? "warn"
+    : "ok";
+
+  const colors = {
+    ok:      { tint: C.green,  label: `${daysLeft}d left` },
+    warn:    { tint: C.amber,  label: `Expires in ${daysLeft}d` },
+    stale:   { tint: C.red,    label: "Expired — refresh" },
+    missing: { tint: "rgba(240,237,228,0.45)", label: "Not set" },
+  }[status];
+
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const trimmed = draft.trim() || null;
+      const res = await fetch(`/api/properties/${propertyId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ loopnet_share_url: trimmed }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(body?.error || `HTTP ${res.status}`);
+        return;
+      }
+      const updated = body.property;
+      onUpdated(updated?.loopnet_share_url || null, updated?.loopnet_share_url_set_at || null);
+      setEditing(false);
+    } catch (e: any) {
+      setError(e?.message || "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className="mb-3 px-3 py-2.5"
+      style={{
+        borderRadius: 6,
+        background: "rgba(255,255,255,0.025)",
+        border: `1px solid ${status === "stale" ? "rgba(231,76,60,0.4)" : status === "warn" ? "rgba(242,201,76,0.35)" : "rgba(255,255,255,0.06)"}`,
+      }}
+    >
+      <div className="flex items-baseline gap-2 mb-1.5">
+        <span className="text-[9.5px] uppercase tracking-wider font-semibold" style={{ color: "rgba(240,237,228,0.55)" }}>
+          LoopNet share report
+        </span>
+        <span className="text-[9.5px] font-bold" style={{ color: colors.tint, marginLeft: "auto" }}>
+          {colors.label}
+        </span>
+      </div>
+
+      {!editing ? (
+        <div className="flex items-center gap-2">
+          <div className="flex-1 min-w-0">
+            {shareUrl ? (
+              <a
+                href={shareUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[10.5px] truncate block underline"
+                style={{ color: "rgba(78,205,196,0.85)" }}
+                title={shareUrl}
+              >
+                {shareUrl.replace(/^https?:\/\//, "").slice(0, 70)}…
+              </a>
+            ) : (
+              <span className="text-[11px]" style={{ color: "rgba(240,237,228,0.5)" }}>
+                Paste a CoStar share link to power LoopNet metrics
+              </span>
+            )}
+          </div>
+          <button
+            onClick={() => {
+              setDraft(shareUrl || "");
+              setEditing(true);
+            }}
+            className="text-[10px] py-1 px-2 rounded font-semibold tracking-wider uppercase"
+            style={{
+              border: `1px solid ${shareUrl ? "rgba(255,255,255,0.12)" : "rgba(78,205,196,0.4)"}`,
+              color: shareUrl ? "rgba(240,237,228,0.7)" : C.teal,
+              background: "transparent",
+            }}
+          >
+            {shareUrl ? "Refresh" : "Add"}
+          </button>
+        </div>
+      ) : (
+        <div>
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="https://listingmanager.costar.com/listingperformancereport/shared/..."
+            rows={3}
+            className="w-full text-[11px] px-2 py-1.5 rounded outline-none mb-2"
+            style={{
+              background: "rgba(0,0,0,0.3)",
+              border: "1px solid rgba(255,255,255,0.1)",
+              color: "rgba(240,237,228,0.95)",
+              resize: "vertical",
+              fontFamily: "monospace",
+            }}
+          />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={save}
+              disabled={busy}
+              className="text-[10px] py-1 px-2.5 rounded font-semibold tracking-wider uppercase"
+              style={{
+                background: "rgba(78,205,196,0.15)",
+                border: `1px solid ${C.teal}`,
+                color: C.teal,
+                opacity: busy ? 0.5 : 1,
+              }}
+            >
+              {busy ? "…" : "Save"}
+            </button>
+            <button
+              onClick={() => {
+                setEditing(false);
+                setError(null);
+              }}
+              className="text-[10px] py-1 px-2 rounded"
+              style={{ color: "rgba(240,237,228,0.55)" }}
+            >
+              Cancel
+            </button>
+            {error && <span className="text-[10px] ml-auto" style={{ color: C.red }}>{error}</span>}
+          </div>
+          <div className="text-[9.5px] mt-1.5" style={{ color: "rgba(240,237,228,0.4)" }}>
+            CoStar Listing Manager → Listing Performance → Share → copy URL.
+            Token rotates ~30 days; we'll auto-stamp the new expiry.
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

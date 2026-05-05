@@ -23,6 +23,10 @@ const PATCHABLE_FIELDS = new Set([
   "parking_spaces", "parking_ratio", "zoning",
   "noi", "cap_rate", "price_per_sf", "occupancy_pct",
   "description", "highlights", "notes", "crexi_url", "loopnet_url",
+  // LoopNet/CoStar shared performance-report URL — token rotates every
+  // ~30 days, so John refreshes it monthly via the property edit form.
+  // loopnet_share_url_set_at is auto-stamped server-side on update below.
+  "loopnet_share_url",
   "publish_to_website", "crexi_sync_status", "source_import",
   "headline", "images", "slug",
   // Unified pipeline + folded-in deal financials (migration 0003)
@@ -80,6 +84,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
   if (Object.keys(update).length === 0) {
     return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
+  }
+  // Auto-stamp loopnet_share_url_set_at when the share URL is being updated.
+  // The token rotates every ~30 days; this is how the UI knows when to
+  // surface a "expires in N days" warning + refresh prompt.
+  if ("loopnet_share_url" in update) {
+    update.loopnet_share_url_set_at = update.loopnet_share_url
+      ? new Date().toISOString()
+      : null;
   }
   update.updated_at = new Date().toISOString();
 
