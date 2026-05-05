@@ -271,13 +271,83 @@
   // Snapshot of what's actually on the page — emitted when readListView
   // returns 0 so we can debug remotely without a real browser session.
   function pageDiagnostic() {
-    // Look for telltale loading / auth states
     const lowerBody = document.body.textContent.toLowerCase();
     const probable_state =
       /sign in|log in|please log/i.test(lowerBody) ? "AUTH_REQUIRED"
       : /loading|please wait/i.test(lowerBody) && lowerBody.length < 400 ? "LOADING_SPINNER"
       : document.querySelectorAll("[role=row]").length === 0 ? "EMPTY_PAGE"
       : "DATA_NEVER_LOADED";
+
+    // For the FIRST 3 phone leaves on the page, walk up and capture the
+    // row container details so we can see what shape CREXi's DOM has.
+    // This is the key debug payload — without it, we're guessing.
+    const phoneLeaves = Array.from(document.querySelectorAll("body *")).filter(
+      (n) =>
+        n.children.length === 0 &&
+        /^\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}$/.test((n.textContent || "").trim())
+    );
+
+    const rowSamples = phoneLeaves.slice(0, 3).map((phoneEl) => {
+      const phoneText = phoneEl.textContent.trim();
+      // Walk up 8 levels and capture each ancestor's signature
+      const ancestors = [];
+      let cursor = phoneEl;
+      for (let i = 0; i < 8; i++) {
+        cursor = cursor.parentElement;
+        if (!cursor || cursor === document.body) break;
+        ancestors.push({
+          depth: i + 1,
+          tag: cursor.tagName?.toLowerCase() || "?",
+          role: cursor.getAttribute?.("role") || null,
+          classes: (cursor.className || "").toString().slice(0, 80),
+          childCount: cursor.children.length,
+          textLen: (cursor.textContent || "").length,
+        });
+      }
+      // Also: try findRowContainer logic and report what it picked
+      let resolvedRow = null;
+      let rcCursor = phoneEl;
+      for (let i = 0; i < 8; i++) {
+        rcCursor = rcCursor.parentElement;
+        if (!rcCursor || rcCursor === document.body) break;
+        const tag = rcCursor.tagName?.toLowerCase() || "";
+        const role = rcCursor.getAttribute?.("role") || "";
+        if (
+          role === "row" ||
+          tag === "tr" ||
+          tag === "mat-row" ||
+          tag === "cdk-row" ||
+          rcCursor.classList?.contains("mat-row") ||
+          rcCursor.classList?.contains("mat-mdc-row") ||
+          rcCursor.classList?.contains("cdk-row")
+        ) {
+          resolvedRow = rcCursor;
+          break;
+        }
+      }
+
+      const rowSig = resolvedRow
+        ? {
+            tag: resolvedRow.tagName?.toLowerCase(),
+            role: resolvedRow.getAttribute?.("role"),
+            classes: (resolvedRow.className || "").toString().slice(0, 80),
+            text: (resolvedRow.textContent || "").trim().slice(0, 250),
+            leafCount: Array.from(resolvedRow.querySelectorAll("*")).filter(
+              (n) => n.children.length === 0 && (n.textContent || "").trim().length > 0
+            ).length,
+            leafTexts: Array.from(resolvedRow.querySelectorAll("*"))
+              .filter((n) => n.children.length === 0 && (n.textContent || "").trim().length > 0)
+              .map((n) => n.textContent.trim().slice(0, 50))
+              .slice(0, 12),
+          }
+        : null;
+
+      return {
+        phone: phoneText,
+        ancestors,
+        resolvedRow: rowSig,
+      };
+    });
 
     return {
       doc_url: window.location.href,
@@ -296,12 +366,12 @@
         all_elements: document.querySelectorAll("*").length,
       },
       phones_detected: (document.body.textContent.match(/\d{3}\.\d{3}\.\d{4}/g) || []).slice(0, 8),
-      phone_leaf_count: Array.from(document.querySelectorAll("body *")).filter(
-        (n) =>
-          n.children.length === 0 &&
-          /^\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}$/.test((n.textContent || "").trim())
-      ).length,
-      body_text_sample: document.body.textContent.replace(/\s+/g, " ").slice(0, 600),
+      phone_leaf_count: phoneLeaves.length,
+      // The actual debug payload: 3 sample phones + their full ancestor
+      // chain + what findRowContainer would resolve them to + the leaf
+      // texts inside that resolved row. This tells us why parseRow returned null.
+      row_samples: rowSamples,
+      body_text_sample: document.body.textContent.replace(/\s+/g, " ").slice(0, 400),
     };
   }
 
