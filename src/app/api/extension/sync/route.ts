@@ -201,12 +201,14 @@ export async function POST(req: NextRequest) {
     source: body.source,
     period_start: isoDate(periodStart),
     period_end: isoDate(periodEnd),
-    // Legacy generic fields (kept for LoopNet + older extension builds)
+    // Legacy generic fields (kept for LoopNet + older extension builds).
+    // nda_executions + offers have NOT NULL constraints (default 0) — never
+    // pass null for those. The other legacy columns are nullable.
     views: m.views ?? null,
     saves: m.saves ?? null,
     inquiries: m.inquiries ?? null,
     downloads: m.downloads ?? null,
-    nda_executions: m.nda_executions ?? null,
+    nda_executions: m.nda_executions ?? 0,
     offers: m.offers ?? 0,
     // New CREXi-native fields (preferred when present)
     impressions: m.impressions ?? null,
