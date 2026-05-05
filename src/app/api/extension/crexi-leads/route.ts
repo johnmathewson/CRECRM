@@ -259,14 +259,23 @@ export async function POST(req: NextRequest) {
         if (byEmail) contactId = byEmail.id;
       }
       if (!contactId && phone) {
-        const { data: byPhone } = await supabase
+        // Phone in the DB is stored as raw "317.617.4900" / "(317) 617-4900"
+        // / etc. depending on what the original entry came in as. SQL ilike
+        // doesn't help across formats, so we pull candidates and compare
+        // normalized digits in JS. For an org's contact list (~hundreds),
+        // this is fast enough.
+        const { data: candidates } = await supabase
           .from("contacts")
-          .select("id, email")
+          .select("id, phone")
           .eq("organization_id", ORG_ID)
-          .filter("phone", "ilike", `%${phone.slice(-10)}%`)
-          .limit(1)
-          .maybeSingle();
-        if (byPhone) contactId = byPhone.id;
+          .not("phone", "is", null);
+        if (candidates) {
+          const found = candidates.find(
+            (c: { id: string; phone: string | null }) =>
+              normalizePhone(c.phone) === phone
+          );
+          if (found) contactId = found.id;
+        }
       }
 
       if (!contactId) {

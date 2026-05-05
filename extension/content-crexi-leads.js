@@ -136,9 +136,12 @@
       return null; // Header
     }
 
-    // Name — first capitalized token-rich text leaf that isn't the phone
-    // and isn't initials/funnel/role/CTA. Walk leaf nodes in DOM order.
-    let name = "";
+    // Get all leaf text nodes IN DOM ORDER. CREXi's row layout is reliably:
+    //   [avatar initials] [name] [phone] [Contact Lead CTA] [company] [roles...] [N visits] [activity]
+    //
+    // So we anchor on the phone's position: name is the LAST name-shaped
+    // leaf BEFORE the phone, company is the first company-shaped leaf
+    // AFTER the phone (skipping the CTA + role pills + visit/activity cells).
     const leafCandidates = Array.from(rowEl.querySelectorAll("*"))
       .filter(
         (n) =>
@@ -148,30 +151,42 @@
       )
       .map((n) => n.textContent.trim());
 
-    for (const text of leafCandidates) {
-      if (!text || text === phone) continue;
-      if (text.length < 3 || text.length > 80) continue;
-      if (/^\d/.test(text)) continue; // skip numbers / phone
-      if (/^[A-Z]{2,3}$/.test(text)) continue; // skip avatar initials like "JG"
-      if (/contact lead/i.test(text)) continue;
-      if (/^\d+\s+visits?$/i.test(text)) continue;
-      if (FUNNEL_LABELS.some((l) => text === l)) continue;
-      if (KNOWN_ROLES.some((r) => text.toUpperCase() === r)) continue;
-      // Skip if it's a date ("May 04, 2026")
-      if (/^[A-Z][a-z]{2}\s+\d{1,2},\s+\d{4}$/.test(text)) continue;
-      // Looks name-shaped: at least one space OR mixed case
-      if (text.includes(" ") || /^[A-Z][a-z]/.test(text)) {
-        name = text;
+    const phoneIdx = leafCandidates.indexOf(phone);
+    if (phoneIdx === -1) {
+      // Fallback: phone leaf not found exactly (maybe formatting differs).
+      // Take last "name-shaped" leaf as a guess.
+      // (Rare path; most rows hit the indexOf branch.)
+    }
+    const beforePhone = phoneIdx >= 0 ? leafCandidates.slice(0, phoneIdx) : leafCandidates;
+    const afterPhone = phoneIdx >= 0 ? leafCandidates.slice(phoneIdx + 1) : [];
+
+    function isNameShaped(text) {
+      if (!text || text.length < 3 || text.length > 80) return false;
+      if (/^\d/.test(text)) return false;
+      if (/^[A-Z]{2,3}$/.test(text)) return false;       // avatar initials
+      if (/contact lead/i.test(text)) return false;
+      if (/^\d+\s+visits?$/i.test(text)) return false;
+      if (FUNNEL_LABELS.some((l) => text === l)) return false;
+      if (KNOWN_ROLES.some((r) => text.toUpperCase() === r)) return false;
+      if (/^[A-Z][a-z]{2}\s+\d{1,2},\s+\d{4}$/.test(text)) return false;
+      // Has to look name-shaped: space OR mixed case starting capital
+      return text.includes(" ") || /^[A-Z][a-z]/.test(text);
+    }
+
+    // NAME = LAST name-shaped leaf before phone (closest to phone wins)
+    let name = "";
+    for (let i = beforePhone.length - 1; i >= 0; i--) {
+      if (isNameShaped(beforePhone[i])) {
+        name = beforePhone[i];
         break;
       }
     }
     if (!name) return null;
 
-    // Visits — "X visits" or "X visit"
     const visitsMatch = fullText.match(/(\d+)\s+visits?/i);
     const visits = visitsMatch ? parseInt(visitsMatch[1], 10) : null;
 
-    // Funnel status — most-advanced label present in row text
+    // Funnel status
     let levelOfInterest = null;
     for (const label of FUNNEL_LABELS) {
       if (fullText.includes(label)) {
@@ -180,29 +195,25 @@
       }
     }
 
-    // Roles — uppercase pills
+    // Roles — uppercase pills present in row text
     const roles = [];
     for (const r of KNOWN_ROLES) {
       if (fullText.toUpperCase().includes(r)) roles.push(r);
     }
 
-    // Company — first leaf that's not name/phone/role/funnel/visits/CTA
+    // COMPANY = first valid leaf in afterPhone that isn't CTA/role/visits/activity
     let company = null;
-    for (const text of leafCandidates) {
+    for (const text of afterPhone) {
       if (!text || text === name || text === phone) continue;
       if (text.length < 3 || text.length > 80) continue;
-      if (text.includes(phone)) continue;
-      if (KNOWN_ROLES.some((r) => text.toUpperCase().includes(r))) continue;
-      if (FUNNEL_LABELS.some((l) => text.includes(l))) continue;
-      if (/^\d+\s+visits?$/i.test(text)) continue;
       if (/contact lead/i.test(text)) continue;
+      if (KNOWN_ROLES.some((r) => text.toUpperCase().includes(r))) continue;
+      if (FUNNEL_LABELS.some((l) => text === l || text.includes(l))) continue;
+      if (/^\d+\s+visits?$/i.test(text)) continue;
       if (/^\d/.test(text)) continue;
       if (/^[A-Z]{2,3}$/.test(text)) continue;
       if (/^[A-Z][a-z]{2}\s+\d{1,2},\s+\d{4}$/.test(text)) continue;
-      // Skip if it's just the name we already captured
-      if (text === name) continue;
-      // Has to look company-like (mixed-case word OR multi-word)
-      if (text.includes(" ") || /^[A-Z][a-z]/.test(text)) {
+      if (text.includes(" ") || /^[A-Z]/.test(text)) {
         company = text;
         break;
       }
@@ -299,40 +310,91 @@
   // contains the lead's full contact info + an activity timeline.
 
   async function scrapePanel(row) {
-    // Find the most likely click target: the avatar circle or the name cell.
-    // Clicking the row's "Contact Lead" link would open the messaging modal,
-    // so we click the name area instead.
-    const clickTargets = [
-      row.querySelector("td:nth-child(2)"),
-      row.querySelector("td:nth-child(3)"),
-      row,
-    ].filter(Boolean);
-
-    const target = clickTargets[0];
-    if (!target) return null;
-
-    target.click();
-
-    // Wait for the panel to populate. We look for an element containing both
-    // "Phone:" or "Email:" labels (those appear in the About tab).
-    const panel = await waitFor(
-      () => {
-        const candidates = document.querySelectorAll("aside, [class*='side-panel'], [class*='detail-panel']");
-        for (const c of candidates) {
-          const text = (c.textContent || "").toLowerCase();
-          if ((text.includes("phone:") || text.includes("email:")) && text.length > 50) {
-            return c;
-          }
-        }
-        const overlays = document.querySelectorAll("[role='dialog'], [class*='drawer'], [class*='overlay']");
-        for (const o of overlays) {
-          const text = o.textContent || "";
-          if (/\b[\w.+-]+@[\w.-]+\.\w{2,}\b/.test(text)) return o;
-        }
-        return null;
-      },
-      { maxMs: 2500 }
+    // Snapshot the page's existing email-shaped strings BEFORE clicking,
+    // so after the click we can detect when a NEW email appears (the
+    // panel that just opened).
+    const emailsBefore = new Set(
+      (document.body.textContent.match(/\b[\w.+-]+@[\w.-]+\.\w{2,}\b/g) || [])
     );
+
+    // Try multiple click targets in order. Many CREXi rows have the click
+    // handler bound to the row itself or to a name-cell child element;
+    // some apps gate behavior on a specific child. We try whichever
+    // reasonably matches.
+    const clickTargets = [];
+    // The element containing the name text is most likely to be the
+    // canonical click target.
+    const allLeaves = Array.from(row.querySelectorAll("*")).filter(
+      (n) => n.children.length === 0 && (n.textContent || "").trim().length > 1
+    );
+    // Find the leaf that holds a person-name-shaped string (capitalized,
+    // contains space, isn't phone/role/funnel)
+    for (const leaf of allLeaves) {
+      const t = (leaf.textContent || "").trim();
+      if (
+        t.length > 3 &&
+        t.length < 60 &&
+        !/^\d/.test(t) &&
+        !/^[A-Z]{2,3}$/.test(t) &&
+        !/contact lead/i.test(t) &&
+        !FUNNEL_LABELS.some((l) => t === l) &&
+        !KNOWN_ROLES.some((r) => t.toUpperCase() === r) &&
+        (t.includes(" ") || /^[A-Z][a-z]/.test(t))
+      ) {
+        clickTargets.push(leaf);
+        if (leaf.parentElement) clickTargets.push(leaf.parentElement);
+        break;
+      }
+    }
+    // Add fallback targets
+    clickTargets.push(row);
+    Array.from(row.children).forEach((c) => clickTargets.push(c));
+
+    let panel = null;
+    for (const target of clickTargets) {
+      if (!target || typeof target.click !== "function") continue;
+      try {
+        target.click();
+      } catch {
+        continue;
+      }
+      // Wait briefly for panel to populate
+      panel = await waitFor(
+        () => {
+          // Strategy 1: explicit panel containers with phone/email labels
+          const labelled = document.querySelectorAll("aside, [class*='side-panel'], [class*='detail-panel'], [class*='lead-detail'], [class*='lead-info']");
+          for (const c of labelled) {
+            const text = (c.textContent || "").toLowerCase();
+            if ((text.includes("phone") && text.includes("email")) && text.length > 80) {
+              return c;
+            }
+          }
+          // Strategy 2: any container with a NEW email (that wasn't on the
+          // page before we clicked)
+          const allEmails = document.body.textContent.match(/\b[\w.+-]+@[\w.-]+\.\w{2,}\b/g) || [];
+          const newEmails = allEmails.filter((e) => !emailsBefore.has(e));
+          if (newEmails.length > 0) {
+            // Find the smallest container holding the new email
+            const targetEmail = newEmails[0];
+            const all = document.querySelectorAll("body *");
+            for (const el of all) {
+              if ((el.textContent || "").includes(targetEmail) && (el.textContent || "").length < 5000) {
+                return el;
+              }
+            }
+          }
+          // Strategy 3: dialog/drawer/overlay roles
+          const overlays = document.querySelectorAll("[role='dialog'], [class*='drawer'], [class*='overlay']");
+          for (const o of overlays) {
+            const text = o.textContent || "";
+            if (/\b[\w.+-]+@[\w.-]+\.\w{2,}\b/.test(text)) return o;
+          }
+          return null;
+        },
+        { maxMs: 2000 }
+      );
+      if (panel) break; // got it on this click target
+    }
 
     if (!panel) return null;
 
