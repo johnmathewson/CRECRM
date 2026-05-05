@@ -56,17 +56,20 @@ export default function InboxSplitView({ selectedLeadId }: Props) {
       .order("created_at", { ascending: false })
       .limit(300);
 
-    if (statusFilter === "active") {
-      query = query.in("status", ["new", "reviewing", "unmatched"]);
-    } else if (statusFilter === "hot") {
-      query = query.eq("urgency", "hot").not("status", "in", '("spam","archived")');
-    } else if (statusFilter === "today") {
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
-      query = query.gte("created_at", todayStart.toISOString()).not("status", "in", '("spam","archived")');
-    } else if (statusFilter !== "all") {
-      query = query.eq("status", statusFilter);
+    // Pill-driven filter behavior:
+    //   "active"   → everything not archived/spam (the daily working view)
+    //   "archived" → only archived
+    //   "spam"     → only spam
+    //   "all"      → everything
+    //   anything else (legacy) → fall back to active
+    if (statusFilter === "active" || statusFilter === "hot" || statusFilter === "today" || statusFilter === "unmatched" || statusFilter === "promoted") {
+      query = query.not("status", "in", '("spam","archived")');
+    } else if (statusFilter === "archived") {
+      query = query.eq("status", "archived");
+    } else if (statusFilter === "spam") {
+      query = query.eq("status", "spam");
     }
+    // "all" — no status filter
 
     if (propertyFilter === "unmatched") {
       query = query.is("property_id", null);
@@ -144,6 +147,7 @@ export default function InboxSplitView({ selectedLeadId }: Props) {
           propertyOptions={propertyOptions}
           onStatusFilterChange={setStatusFilter}
           onPropertyFilterChange={setPropertyFilter}
+          onLeadsChanged={load}
           seedingFixture={seedingFixture}
           seedError={seedError}
           onSeed={seed}
