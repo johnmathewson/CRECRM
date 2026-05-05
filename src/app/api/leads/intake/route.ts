@@ -27,7 +27,7 @@ import { createClient } from "@supabase/supabase-js";
 import { callAnthropic, parseJsonResponse, MODELS } from "@/lib/anthropic";
 import { checkSpam } from "@/lib/spam-filter";
 import { matchProperty, MATCH_CONFIDENCE_THRESHOLD } from "@/lib/property-match";
-import { gatherIntel, formatIntelForPrompt } from "@/lib/agent-intel";
+import { draftLeadReply } from "@/lib/draft-lead-reply";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // Netlify Pro: up to 60s. Two Claude calls can run long.
@@ -93,34 +93,8 @@ Field guidance:
 
 Be precise. Don't invent details the message doesn't contain.`;
 
-const DRAFT_SYSTEM_BASE = `You are drafting a reply email on behalf of John Mathewson (Stewardship CRE — Northwest Indiana commercial real estate broker, owner-operator himself, Indianapolis-area focus).
-
-GROUND TRUTH ONLY — this is what makes John's drafts credible:
-- A "GROUND TRUTH CONTEXT" block will appear in the user message. It contains real CRM facts: matched listing details, sale + lease comp aggregates, active inventory, contact history.
-- You MAY cite anything in that block — specific cap rates, $/SF medians, ranges, recent inventory, prior history. Numbers there are real. Use them.
-- You MAY NOT invent specifics outside that block. No fabricated cap rates, $/SF numbers, inventory, or comps. If the ground truth block doesn't have a number, don't state one.
-- Lease comps may include tenant names from rent rolls — those are CONFIDENTIAL. Never cite a specific tenant name to a prospect. Aggregate ranges and medians are fine.
-- DO NOT invent inventory the agent does not actually have. If the active-inventory line is empty, do not say "I have several other properties." If a matched property exists, you may discuss its facts.
-- If the prospect references a property and there's no matched listing in the CRM, do NOT deny it exists. The matcher may have missed it. Ask the prospect to confirm which source/listing (CREXi link? our website?) they're referring to, and promise to send the right package once confirmed.
-
-VAULT LINK — when there's a matched property, the GROUND TRUTH block will include a "Vault link" line. ALWAYS include that exact link in your draft (typically once, near the close), framed naturally — e.g. "Full package — financials, rent roll, due diligence — is here, quick questionnaire + NDA to access: <link>". Do NOT invent a vault URL when no matched property exists; just say "I'll put the package together and send a link once we've confirmed which listing you're looking at."
-
-Voice guidelines:
-- John reads pro formas like an investor, not a listing agent. Plain language. Confident.
-- NEVER open with "Dear ___" or "Thank you for your inquiry" or "I hope this email finds you well".
-- NEVER close with "Best regards", "Sincerely", "Looking forward to". Sign off with "— John" only.
-- NO broker-speak: skip "premier", "elevate", "luxury", "trophy", "unparalleled". John doesn't talk like that.
-- Direct, warm, concrete. Implies movement and momentum without sounding rushed.
-- Reference something specific from their inbound message. NEVER generic.
-- Keep it tight. 2-3 short paragraphs at most.
-
-Structure:
-- Hook on their specific ask (1 sentence)
-- Brief acknowledgment grounded only in what the prospect said + (if matched) the listing's actual facts. Buyer → financials/value-add framing. Tenant → space functionality, location framing. Unclear → balanced.
-- 2-3 qualifying questions max — the things you would actually need to know to send a package or have a useful next conversation. Phrase as a list only if it reads naturally.
-- Soft mention that you're putting together a full info package (rent roll / financials / due diligence) and will send once they confirm interest. NO link to any vault yet — that ships next.
-
-Output: plain text email body only. No subject line. No signature block other than "— John". No markdown.`;
+// (DRAFT_SYSTEM_BASE + drafting prompt now live in lib/draft-lead-reply.ts
+//  so the questionnaire + CSV-import paths can reuse them.)
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -481,91 +455,26 @@ ${body.raw_body || "(empty)"}`;
     });
   }
 
-  // ── 8. Gather agent intel — comps, active inventory, contact history ─────
-  const intel = await gatherIntel({
+  // ── 8. Hand off to shared drafter (loads intel + Sonnet + saves draft) ───
+  const draftOutcome = await draftLeadReply({
     supabase,
     organizationId: ORG_ID,
-    matchedPropertyId: matched?.id || null,
-    contactId,
-    qualification,
-    rawSubject: body.raw_subject,
-    rawBody: body.raw_body,
+    leadId,
+    tone: "first_touch",
   });
 
-  await recordEvent(
-    supabase,
-    leadId,
-    "qualified",
-    "agent",
-    `Pulled intel — ${intel.saleComps?.count || 0} sale comps, ${intel.leaseComps?.count || 0} lease comps, ${intel.activeInventory.length} active listings, contact ${intel.contactHistory?.isNew ? "new" : "returning"}`,
-    {
-      sale_comp_count: intel.saleComps?.count || 0,
-      lease_comp_count: intel.leaseComps?.count || 0,
-      active_inventory_count: intel.activeInventory.length,
-      geo_source: intel.saleComps?.geoSource || intel.leaseComps?.geoSource || "none",
-      notes: intel.notes,
-    }
-  );
-
-  // ── 9. Sonnet drafting with intel context ───────────────────────────────
-  const intelBlock = formatIntelForPrompt(intel);
-
-  const draftMessage = `Inbound message:
-From: ${qualification.sender_name_clean || body.sender_name || "Unknown"} <${qualification.sender_email_clean || body.sender_email || "no email"}>
-Channel: ${body.source}
-Subject: ${body.raw_subject || "(none)"}
-
-Body:
-${body.raw_body || "(no body)"}
-
----
-Quick context:
-- Lead intent: ${qualification.intent || "unclear"}
-- Urgency: ${qualification.urgency}
-- AI summary: ${qualification.qualifier_summary}
-${qualification.notes ? `- Notes: ${qualification.notes}\n` : ""}
----
-
-${intelBlock}
-
----
-Draft John's reply now. Plain text email body only, no subject, signed "— John". Use the GROUND TRUTH facts above when relevant — they're real, recent, and credible. Do NOT invent specifics not in that block.`;
-
-  let draftReply: string | null = null;
-  let draftTokens: any = null;
-  try {
-    const result = await callAnthropic({
-      model: MODELS.SONNET,
-      system: DRAFT_SYSTEM_BASE,
-      messages: [{ role: "user", content: draftMessage }],
-      maxTokens: 1024,
-      temperature: 0.6,
-    });
-    draftReply = result.text.trim();
-    draftTokens = result.usage;
-  } catch (err: any) {
-    console.error("Draft generation failed:", err);
-    await recordEvent(supabase, leadId, "error", "agent", `Draft failed: ${err.message}`, {
-      stage: "drafting",
-    });
-    // Don't fail the whole pipeline — lead is still saved + qualified.
+  if (!draftOutcome.ok) {
+    // Lead is saved + qualified; drafter just couldn't produce copy.
     return NextResponse.json({
       lead_id: leadId,
       status,
       qualification,
       matched_property: matched ? { id: matched.id, name: matched.name } : null,
       draft_reply: null,
-      draft_error: err.message,
+      draft_error: draftOutcome.error || draftOutcome.skipped || "unknown",
     });
   }
-
-  // ── 10. Save draft + record event ─────────────────────────────────────────
-  await supabase.from("leads").update({ draft_reply: draftReply }).eq("id", leadId);
-  await recordEvent(supabase, leadId, "draft_generated", "agent", "Drafted substantive reply", {
-    model: MODELS.SONNET,
-    tokens: draftTokens,
-    char_count: draftReply.length,
-  });
+  const draftReply = draftOutcome.draft || null;
 
   // ── 11. Schedule auto-acknowledgment (Slice C) ───────────────────────────
   // Conditions per the blueprint:
@@ -577,7 +486,19 @@ Draft John's reply now. Plain text email body only, no subject, signed "— John
   const eligibleSource = body.source !== "manual_test";
   const eligibleStatus = status === "new";
   const hasEmail = !!(qualification.sender_email_clean || body.sender_email);
-  const isFreshContact = intel.contactHistory?.isNew !== false;
+
+  // Fresh-contact check: do they have any other prior leads in the CRM?
+  // (Cheaper than calling gatherIntel a second time just for this signal.)
+  let isFreshContact = true;
+  if (contactId) {
+    const { count } = await supabase
+      .from("leads")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", ORG_ID)
+      .eq("contact_id", contactId)
+      .neq("id", leadId);
+    isFreshContact = (count || 0) === 0;
+  }
 
   if (eligibleSource && eligibleStatus && hasEmail && isFreshContact) {
     // Random delay 2-5 minutes for the humanizing pause

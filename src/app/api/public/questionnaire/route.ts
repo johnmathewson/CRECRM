@@ -13,8 +13,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "@/lib/cors";
+import { draftLeadReply } from "@/lib/draft-lead-reply";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60; // Sonnet drafting can be slow
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 
@@ -192,6 +194,19 @@ export async function POST(req: NextRequest) {
         summary: `Seller inquiry via questionnaire — routed direct (no NDA flow)`,
         metadata: { questionnaire_id: submission.id, property_slug: body.property_slug },
       });
+      // Fire drafter in background — sellers also get a personalized reply.
+      void draftLeadReply({
+        supabase,
+        organizationId: ORG_ID,
+        leadId: lead.id,
+        tone: "first_touch",
+      }).catch((err: unknown) => {
+        console.error(
+          "[questionnaire] seller draftLeadReply failed for lead",
+          lead.id,
+          err instanceof Error ? err.message : err
+        );
+      });
     }
     return NextResponse.json(
       {
@@ -230,6 +245,22 @@ export async function POST(req: NextRequest) {
       actor: "system",
       summary: `Questionnaire submitted (${body.lead_type}) — awaiting NDA signature`,
       metadata: { questionnaire_id: submission.id, property_slug: body.property_slug },
+    });
+
+    // Fire the drafter in the background so the agent has a substantive
+    // reply waiting in /inbox by the time John sees the lead. We don't
+    // await — questionnaire response goes back to the user immediately.
+    void draftLeadReply({
+      supabase,
+      organizationId: ORG_ID,
+      leadId: lead.id,
+      tone: "first_touch",
+    }).catch((err: unknown) => {
+      console.error(
+        "[questionnaire] draftLeadReply failed for lead",
+        lead.id,
+        err instanceof Error ? err.message : err
+      );
     });
   }
 
