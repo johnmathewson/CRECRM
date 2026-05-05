@@ -107,6 +107,18 @@ function rankOf(s: string | null | undefined): number {
   return FUNNEL_RANK[s.toLowerCase().trim()] ?? 0;
 }
 
+// Map CREXi role pills to one of the contact_type enum values
+// (allowed: owner, buyer, tenant, investor, lender, attorney, broker, other).
+function inferContactType(role: string | null | undefined): string {
+  if (!role) return "buyer"; // CREXi is mostly buy-side; safest default
+  const r = role.toLowerCase();
+  if (r.includes("tenant rep")) return "tenant";
+  if (r.includes("listing rep") || r.includes("landlord rep") || r.includes("property manager")) return "broker";
+  if (r.includes("principal investor") || r.includes("private investor") || r.includes("reit")) return "investor";
+  if (r.includes("buyer rep")) return "buyer";
+  return "buyer";
+}
+
 // ── Auth ──────────────────────────────────────────────────────────────────
 
 async function authKey(supabase: any, key: string | null): Promise<{ ok: boolean; error?: string }> {
@@ -258,14 +270,16 @@ export async function POST(req: NextRequest) {
       }
 
       if (!contactId) {
-        // Create new contact
+        // Create new contact. contact_type must be one of the enum values
+        // (no "prospect" — that's relationship_type, not contact_type).
         const insertPayload: Record<string, unknown> = {
           organization_id: ORG_ID,
           full_name: lead.name.trim(),
           role: lead.role || null,
           phone: lead.phone || null,
           email: email,
-          contact_type: "prospect",
+          contact_type: inferContactType(lead.role),
+          relationship_type: "prospect",
           warmth: rankOf(lead.level_of_interest) >= 5 ? "hot" : "warm",
           notes: lead.company ? `CREXi: ${lead.company}` : null,
         };
@@ -312,18 +326,16 @@ export async function POST(req: NextRequest) {
       if (existingLead) {
         leadId = existingLead.id;
       } else {
-        const np = nameParts(lead.name);
-        const sourceLabel =
-          rankOf(lead.level_of_interest) >= 7 ? "crexi_executed_ca"
-          : rankOf(lead.level_of_interest) >= 5 ? "crexi_opened_om"
-          : "crexi_engagement";
+        // source must be one of the leads_source_check enum values.
+        // "crexi" is the canonical source for any CREXi-discovered lead;
+        // funnel stage detail goes into urgency + qualifier_summary.
         const { data: createdLead, error: leadErr } = await supabase
           .from("leads")
           .insert({
             organization_id: ORG_ID,
             contact_id: contactId,
             property_id: propertyId,
-            source: sourceLabel,
+            source: "crexi",
             status: "new",
             sender_name: lead.name.trim(),
             sender_email: email,
@@ -471,6 +483,24 @@ export async function POST(req: NextRequest) {
     } catch (err: any) {
       errors.push({ name: lead.name, reason: err?.message || String(err) });
     }
+  }
+
+  // If we got leads but couldn't process ANY of them, that's a hard failure
+  // (likely a constraint or schema issue). Return 422 so the extension can
+  // show the error rather than silently report success.
+  const totalSent = body.leads.length;
+  if (totalSent > 0 && stats.processed === 0) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: `0 of ${totalSent} leads processed — see errors[] for details`,
+        property_id: propertyId,
+        crexi_listing_id: crexiListingId,
+        ...stats,
+        errors,
+      },
+      { status: 422, headers: corsHeaders() }
+    );
   }
 
   return NextResponse.json(
