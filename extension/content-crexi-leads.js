@@ -503,99 +503,82 @@
   // contains the lead's full contact info + an activity timeline.
 
   async function scrapePanel(row) {
-    // Snapshot the page's existing email-shaped strings BEFORE clicking,
-    // so after the click we can detect when a NEW email appears (the
-    // panel that just opened).
+    // Capture pre-click email set for diff detection
     const emailsBefore = new Set(
       (document.body.textContent.match(/\b[\w.+-]+@[\w.-]+\.\w{2,}\b/g) || [])
     );
 
-    // Try multiple click targets in order. Many CREXi rows have the click
-    // handler bound to the row itself or to a name-cell child element;
-    // some apps gate behavior on a specific child. We try whichever
-    // reasonably matches.
-    const clickTargets = [];
-    // The element containing the name text is most likely to be the
-    // canonical click target.
-    const allLeaves = Array.from(row.querySelectorAll("*")).filter(
-      (n) => n.children.length === 0 && (n.textContent || "").trim().length > 1
-    );
-    // Find the leaf that holds a person-name-shaped string (capitalized,
-    // contains space, isn't phone/role/funnel)
-    for (const leaf of allLeaves) {
-      const t = (leaf.textContent || "").trim();
-      if (
-        t.length > 3 &&
-        t.length < 60 &&
-        !/^\d/.test(t) &&
-        !/^[A-Z]{2,3}$/.test(t) &&
-        !/contact lead/i.test(t) &&
-        !FUNNEL_LABELS.some((l) => t === l) &&
-        !KNOWN_ROLES.some((r) => t.toUpperCase() === r) &&
-        (t.includes(" ") || /^[A-Z][a-z]/.test(t))
-      ) {
-        clickTargets.push(leaf);
-        if (leaf.parentElement) clickTargets.push(leaf.parentElement);
-        break;
-      }
-    }
-    // Add fallback targets
-    clickTargets.push(row);
-    Array.from(row.children).forEach((c) => clickTargets.push(c));
+    // Find the single best click target: the name-leaf if available,
+    // otherwise the row itself. CREXi binds the panel-open handler to
+    // the row's outer container, so a row click works on most layouts.
+    let target = null;
+    const nameLeaf = Array.from(row.querySelectorAll("*"))
+      .filter((n) => n.children.length === 0 && (n.textContent || "").trim().length > 1)
+      .find((leaf) => {
+        const t = (leaf.textContent || "").trim();
+        return (
+          t.length > 3 &&
+          t.length < 60 &&
+          !/^\d/.test(t) &&
+          !/^[A-Z]{2,3}$/.test(t) &&
+          !/contact lead/i.test(t) &&
+          !FUNNEL_LABELS.some((l) => t === l) &&
+          !KNOWN_ROLES.some((r) => t.toUpperCase() === r) &&
+          (t.includes(" ") || /^[A-Z][a-z]/.test(t))
+        );
+      });
+    target = nameLeaf || row;
 
-    let panel = null;
-    for (const target of clickTargets) {
-      if (!target || typeof target.click !== "function") continue;
-      try {
-        target.click();
-      } catch {
-        continue;
-      }
-      // Wait briefly for panel to populate
-      panel = await waitFor(
-        () => {
-          // Strategy 1: explicit panel containers with phone/email labels
-          const labelled = document.querySelectorAll("aside, [class*='side-panel'], [class*='detail-panel'], [class*='lead-detail'], [class*='lead-info']");
-          for (const c of labelled) {
-            const text = (c.textContent || "").toLowerCase();
-            if ((text.includes("phone") && text.includes("email")) && text.length > 80) {
-              return c;
-            }
-          }
-          // Strategy 2: any container with a NEW email (that wasn't on the
-          // page before we clicked)
-          const allEmails = document.body.textContent.match(/\b[\w.+-]+@[\w.-]+\.\w{2,}\b/g) || [];
-          const newEmails = allEmails.filter((e) => !emailsBefore.has(e));
-          if (newEmails.length > 0) {
-            // Find the smallest container holding the new email
-            const targetEmail = newEmails[0];
-            const all = document.querySelectorAll("body *");
-            for (const el of all) {
-              if ((el.textContent || "").includes(targetEmail) && (el.textContent || "").length < 5000) {
-                return el;
-              }
-            }
-          }
-          // Strategy 3: dialog/drawer/overlay roles
-          const overlays = document.querySelectorAll("[role='dialog'], [class*='drawer'], [class*='overlay']");
-          for (const o of overlays) {
-            const text = o.textContent || "";
-            if (/\b[\w.+-]+@[\w.-]+\.\w{2,}\b/.test(text)) return o;
-          }
-          return null;
-        },
-        { maxMs: 2000 }
-      );
-      if (panel) break; // got it on this click target
+    if (!target || typeof target.click !== "function") return null;
+    try {
+      target.click();
+    } catch {
+      return null;
     }
+
+    // Wait for the panel to surface a new email or contact-info label.
+    const panel = await waitFor(
+      () => {
+        // Strategy 1: any new email-shaped text appeared after click
+        const allEmails = document.body.textContent.match(/\b[\w.+-]+@[\w.-]+\.\w{2,}\b/g) || [];
+        const newEmails = allEmails.filter((e) => !emailsBefore.has(e));
+        if (newEmails.length > 0) {
+          // Find the smallest container holding the new email
+          const targetEmail = newEmails[0];
+          const all = document.querySelectorAll("body *");
+          for (const el of all) {
+            if ((el.textContent || "").includes(targetEmail) && (el.textContent || "").length < 6000) {
+              return el;
+            }
+          }
+        }
+        // Strategy 2: explicit Email: label in a container of reasonable size
+        const labeled = document.querySelectorAll("aside, [class*='side-panel'], [class*='detail-panel'], [class*='lead-detail'], [role='dialog'], [class*='drawer']");
+        for (const c of labeled) {
+          const text = c.textContent || "";
+          if (/Email\s*:?\s*[\w.+-]+@[\w.-]+\.\w{2,}/i.test(text) && text.length < 6000) {
+            return c;
+          }
+        }
+        return null;
+      },
+      { maxMs: 1500 }
+    );
 
     if (!panel) return null;
 
     const text = panel.textContent || "";
     const html = panel.innerHTML || "";
 
-    // Email — capture the first email-shaped string
-    const emailMatch = text.match(/\b[\w.+-]+@[\w.-]+\.\w{2,}\b/);
+    // Email — prefer the one labeled "Email:" (avoids accidentally
+    // capturing the user's own logged-in email if it shows in the chrome).
+    let emailMatch = text.match(/Email\s*:?\s*([\w.+-]+@[\w.-]+\.\w{2,})/i);
+    if (!emailMatch) {
+      // Fallback: any email-shaped string anywhere in the panel
+      emailMatch = text.match(/([\w.+-]+@[\w.-]+\.\w{2,})/);
+    } else {
+      emailMatch = [emailMatch[0], emailMatch[1]]; // normalize to [full, captured]
+    }
 
     // Activity timeline — extract action labels with their relative times
     const FUNNEL_LABELS = [
@@ -664,7 +647,7 @@
     }
 
     return {
-      email: emailMatch ? emailMatch[0] : null,
+      email: emailMatch ? emailMatch[1] || emailMatch[0] : null,
       activity_timeline: timeline,
       buyer_evaluation: Object.keys(evalFields).length > 0 ? evalFields : null,
       raw_panel_text_sample: text.slice(0, 400),

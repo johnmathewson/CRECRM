@@ -205,7 +205,7 @@ async function processNextLeadsStep() {
   }
 }
 
-const WATCHER_VERSION = "v0.2.9-stickypair";
+const WATCHER_VERSION = "v0.3.0-stickypair";
 
 // Wait for a tab to reach status: "complete" before sending messages to it
 function waitForTabComplete(tabId, timeoutMs = 30_000) {
