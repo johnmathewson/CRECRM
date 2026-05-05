@@ -558,7 +558,7 @@
         }
         return null;
       },
-      { maxMs: 3000 }
+      { maxMs: 1500 }
     );
 
     // First-attempt diagnostic: capture page state regardless of success.
@@ -766,6 +766,14 @@
 
     const cached = await getCachedState(listingId);
     const enriched = [];
+    // Circuit-breaker: if panel scrape fails 3 times in a row early in
+    // the cycle, give up on panels for the rest of this run. Still
+    // captures list-view data (name + phone + company + role + status);
+    // emails just stay null. Better than a 180s timeout that loses
+    // everything.
+    let consecutivePanelFailures = 0;
+    let panelScrapeAborted = false;
+    const MAX_CONSECUTIVE_PANEL_FAILURES = 3;
 
     for (const row of listRows) {
       const cacheKey = leadCacheKey(row);
@@ -784,25 +792,38 @@
         buyer_evaluation: priorCache?.buyer_evaluation || null,
       };
 
-      if (shouldDeepScrape(row, priorCache)) {
-        const isFirstDeepScrape = enriched.length === 0; // not yet pushed
+      if (shouldDeepScrape(row, priorCache) && !panelScrapeAborted) {
+        const isFirstDeepScrape = enriched.length === 0;
+        let panel = null;
         try {
-          let panel = null;
+          // ONE attempt per lead — name-row first. If it fails, count
+          // toward the circuit-breaker. Don't waste time on phoneRow
+          // fallback (it's the same DOM tree, so it's unlikely to work
+          // if the name-row click didn't).
           if (row.nameRowEl) {
             panel = await scrapePanel(row.nameRowEl, isFirstDeepScrape);
-          }
-          if (!panel && row.phoneRowEl) {
+          } else if (row.phoneRowEl) {
             panel = await scrapePanel(row.phoneRowEl, isFirstDeepScrape);
           }
           if (panel) {
             baseLead.email = panel.email || baseLead.email;
             baseLead.activity_timeline = panel.activity_timeline;
             baseLead.buyer_evaluation = panel.buyer_evaluation;
+            consecutivePanelFailures = 0;
+          } else {
+            consecutivePanelFailures += 1;
+            if (consecutivePanelFailures >= MAX_CONSECUTIVE_PANEL_FAILURES) {
+              panelScrapeAborted = true;
+            }
           }
         } catch (e) {
           baseLead._panel_error = String(e?.message || e);
+          consecutivePanelFailures += 1;
+          if (consecutivePanelFailures >= MAX_CONSECUTIVE_PANEL_FAILURES) {
+            panelScrapeAborted = true;
+          }
         }
-        await sleep(350);
+        await sleep(250);
       }
 
       enriched.push(baseLead);
@@ -867,6 +888,7 @@
       listing_id: listingId,
       leads_count: enriched.length,
       emails_captured: emailsCaptured,
+      panel_scrape_aborted: panelScrapeAborted,
       panel_diagnostic: emailsCaptured === 0 ? _firstPanelDiagnostic : null,
       result,
     };
