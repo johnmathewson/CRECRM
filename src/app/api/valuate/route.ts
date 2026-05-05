@@ -93,27 +93,38 @@ function safeName(address: string): string {
  * Convert valuation result comps into the format expected by report-generator.ts
  */
 function buildReportData(result: ValuationResult, request: ValuationRequest): ReportData {
-  // Build units from request data or create a single-unit placeholder
+  // Build units from request data or create a single-unit placeholder.
+  // Preserve per-unit vacancy + actual lease data when the frontend supplies them
+  // (rent-roll upload path). Fall back to market-rent estimates only for fields the
+  // frontend doesn't have.
   const units = request.units
-    ? request.units.map((u, i) => ({
-        unit_number: u.name || `Unit ${i + 1}`,
-        tenant_name: null,
-        suite: null,
-        square_footage: u.sqft,
-        lease_rate: result.incomeApproach?.estimatedMarketRent || null,
-        lease_type: null,
-        lease_start: null,
-        lease_end: null,
-        monthly_rent: result.incomeApproach?.estimatedMarketRent
-          ? (result.incomeApproach.estimatedMarketRent * u.sqft) / 12
-          : null,
-        annual_rent: result.incomeApproach?.estimatedMarketRent
-          ? result.incomeApproach.estimatedMarketRent * u.sqft
-          : null,
-        escalation_pct: null,
-        is_vacant: false,
-        notes: "Market rent estimate",
-      }))
+    ? request.units.map((u, i) => {
+        const isVacant = !!u.isVacant;
+        const marketRent = result.incomeApproach?.estimatedMarketRent || null;
+        return {
+          unit_number: u.name || `Unit ${i + 1}`,
+          tenant_name: isVacant ? "VACANT" : (u.tenant || null),
+          suite: null,
+          square_footage: u.sqft,
+          // Vacant units have no in-place rent; occupied units use actual rate if
+          // provided, else fall back to the market estimate.
+          lease_rate: isVacant ? null : (u.leaseRate ?? marketRent),
+          lease_type: null,
+          lease_start: null,
+          lease_end: null,
+          monthly_rent: isVacant
+            ? null
+            : (u.monthlyRent ?? (marketRent ? (marketRent * u.sqft) / 12 : null)),
+          annual_rent: isVacant
+            ? null
+            : (u.annualRent ?? (marketRent ? marketRent * u.sqft : null)),
+          escalation_pct: null,
+          is_vacant: isVacant,
+          notes: isVacant
+            ? "Vacant"
+            : (u.leaseRate || u.annualRent || u.monthlyRent ? "In-place rent" : "Market rent estimate"),
+        };
+      })
     : request.sqft
       ? [
           {

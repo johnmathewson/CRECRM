@@ -14,6 +14,7 @@ interface UnitInput {
   leaseType: string;
   monthlyRent: string;
   tenant: string;
+  isVacant: boolean;
 }
 
 interface ValuationResultData {
@@ -82,7 +83,7 @@ function fmtPct(n: number | undefined | null): string {
 }
 
 function emptyUnit(): UnitInput {
-  return { name: "", sqft: "", leaseRate: "", leaseType: "", monthlyRent: "", tenant: "" };
+  return { name: "", sqft: "", leaseRate: "", leaseType: "", monthlyRent: "", tenant: "", isVacant: false };
 }
 
 function fileExt(name: string) {
@@ -290,6 +291,7 @@ export default function ValuateContent() {
       leaseType: u.lease_type || "",
       monthlyRent: u.monthly_rent ? String(u.monthly_rent) : "",
       tenant: u.tenant_name || "",
+      isVacant: !!u.is_vacant,
     }));
 
     setUnits(newUnits);
@@ -336,10 +338,19 @@ export default function ValuateContent() {
 
     const parsedUnits = units
       .filter((u) => u.sqft && parseFloat(u.sqft) > 0)
-      .map((u, i) => ({
-        name: u.name || `Unit ${i + 1}`,
-        sqft: parseFloat(u.sqft),
-      }));
+      .map((u, i) => {
+        const monthlyRent = u.monthlyRent ? parseFloat(u.monthlyRent) : null;
+        const leaseRate = u.leaseRate ? parseFloat(u.leaseRate) : null;
+        return {
+          name: u.name || `Unit ${i + 1}`,
+          sqft: parseFloat(u.sqft),
+          tenant: u.tenant || null,
+          isVacant: u.isVacant,
+          leaseRate,
+          monthlyRent,
+          annualRent: monthlyRent ? monthlyRent * 12 : null,
+        };
+      });
 
     const computedSqft = totalSqft
       ? parseFloat(totalSqft)

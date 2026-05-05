@@ -20,7 +20,15 @@ export interface ValuationRequest {
   assetType?: string;
   sqft?: number;
   yearBuilt?: number;
-  units?: { name: string; sqft: number }[];
+  units?: {
+    name: string;
+    sqft: number;
+    tenant?: string | null;
+    isVacant?: boolean;
+    leaseRate?: number | null;
+    monthlyRent?: number | null;
+    annualRent?: number | null;
+  }[];
   // Optional income data (if owner provides it)
   annualIncome?: number;
   annualExpenses?: number;
