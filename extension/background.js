@@ -25,8 +25,11 @@ const LEADS_CYCLE_START = "stewardship-leads-cycle";
 const LEADS_STEP = "stewardship-leads-step";
 
 const LEADS_STEP_SPACING_MS = 10_000;     // Between properties
-const LEADS_TAB_TIMEOUT_MS = 30_000;      // Per-property scrape ceiling
-const LEADS_HEARTBEAT_STALE_MS = 5 * 60_000;  // Heartbeat older than 5 min = dead
+// Per-property timeout. First-run deep scrape clicks every lead to capture
+// email + activity timeline — for 16 leads at ~3s each that's ~50s, plus
+// table wait. We allow up to 180s so even a long-tail listing finishes.
+const LEADS_TAB_TIMEOUT_MS = 180_000;
+const LEADS_HEARTBEAT_STALE_MS = 10 * 60_000;  // 10 min stale → treat as dead
 
 // Storage keys
 const KEY_QUEUE = "leads_watcher_queue";        // Array of property objects to scrape
@@ -202,7 +205,32 @@ async function processNextLeadsStep() {
   }
 }
 
-const WATCHER_VERSION = "v0.2.5-activetab";
+const WATCHER_VERSION = "v0.2.6-programmatic";
+
+// Wait for a tab to reach status: "complete" before sending messages to it
+function waitForTabComplete(tabId, timeoutMs = 30_000) {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const check = async () => {
+      if (Date.now() - start > timeoutMs) {
+        resolve({ ok: false, reason: "timeout waiting for complete" });
+        return;
+      }
+      try {
+        const tab = await chrome.tabs.get(tabId);
+        if (tab.status === "complete") {
+          resolve({ ok: true });
+          return;
+        }
+      } catch (err) {
+        resolve({ ok: false, reason: `tab gone: ${err?.message || err}` });
+        return;
+      }
+      setTimeout(check, 400);
+    };
+    check();
+  });
+}
 
 async function scrapeOneListing(property) {
   console.log(`[stewardship leads ${WATCHER_VERSION}] start scraping property #${property.crexi_listing_id} (${property.name})`);
@@ -254,7 +282,52 @@ async function scrapeOneListing(property) {
     return;
   }
 
-  // Wait for content script + run scrape, with retries
+  // STEP 1: Wait for the tab to reach "complete" status. This means the
+  // page has finished its initial load (DOMContentLoaded + onLoad). The
+  // Angular SPA may keep doing background work after this, but the JS
+  // runtime is ready for content script injection.
+  console.log(`[stewardship leads] waiting for tab to reach complete status...`);
+  const tabReady = await waitForTabComplete(scrapeTabId, 25_000);
+  if (!tabReady.ok) {
+    console.warn(`[stewardship leads] tab never reached complete: ${tabReady.reason}`);
+    if (originalTabId !== null) {
+      try { await chrome.tabs.update(originalTabId, { active: true }); } catch {}
+    }
+    try { await chrome.tabs.remove(scrapeTabId); } catch {}
+    await writeTelemetry({
+      ok: false,
+      error: `tab_load_${tabReady.reason}`,
+      leads_count: 0,
+    });
+    return;
+  }
+  console.log(`[stewardship leads] tab reached complete status, proceeding`);
+
+  // STEP 2: Programmatically inject the content script. We DON'T rely on
+  // the manifest's content_scripts auto-injection because document_idle
+  // can fail on heavy Angular SPAs. Programmatic injection is explicit
+  // and gives us a clear error if it fails.
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: scrapeTabId },
+      files: ["content-crexi-leads.js"],
+    });
+    console.log(`[stewardship leads] content script injected programmatically`);
+  } catch (err) {
+    const msg = String(err?.message || err);
+    console.warn(`[stewardship leads] injection failed: ${msg}`);
+    if (originalTabId !== null) {
+      try { await chrome.tabs.update(originalTabId, { active: true }); } catch {}
+    }
+    try { await chrome.tabs.remove(scrapeTabId); } catch {}
+    await writeTelemetry({ ok: false, error: `inject_failed: ${msg}`, leads_count: 0 });
+    return;
+  }
+
+  // STEP 3: Wait briefly for the listener to register, then send scrape
+  // request and wait for response.
+  await new Promise((r) => setTimeout(r, 500));
+
   const result = await new Promise((resolve) => {
     let settled = false;
     const finish = (r) => {
@@ -265,7 +338,7 @@ async function scrapeOneListing(property) {
     };
     const timer = setTimeout(() => {
       console.warn(`[stewardship leads] scrape timeout after ${LEADS_TAB_TIMEOUT_MS}ms`);
-      finish({ ok: false, error: "timeout" });
+      finish({ ok: false, error: "scrape_timeout" });
     }, LEADS_TAB_TIMEOUT_MS);
 
     let attemptCount = 0;
@@ -280,14 +353,13 @@ async function scrapeOneListing(property) {
           return;
         }
       } catch (err) {
-        // content script not ready yet — log only every 4th attempt to avoid spam
-        if (attemptCount % 4 === 1) {
-          console.log(`[stewardship leads] content script not yet ready (attempt ${attemptCount}): ${err?.message || err}`);
+        if (attemptCount === 1 || attemptCount % 5 === 0) {
+          console.log(`[stewardship leads] sendMessage attempt ${attemptCount}: ${err?.message || err}`);
         }
       }
-      if (!settled) setTimeout(tryOnce, 2000);
+      if (!settled) setTimeout(tryOnce, 1500);
     };
-    setTimeout(tryOnce, 3500);
+    tryOnce();
   });
 
   // Restore the user's original tab BEFORE closing the scrape tab to

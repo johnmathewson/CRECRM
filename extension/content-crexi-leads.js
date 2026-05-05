@@ -324,7 +324,6 @@
             return c;
           }
         }
-        // Fallback: look for a recently-added overlay containing email-shaped text
         const overlays = document.querySelectorAll("[role='dialog'], [class*='drawer'], [class*='overlay']");
         for (const o of overlays) {
           const text = o.textContent || "";
@@ -332,7 +331,7 @@
         }
         return null;
       },
-      { maxMs: 4500 }
+      { maxMs: 2500 }
     );
 
     if (!panel) return null;
@@ -534,11 +533,10 @@
             baseLead.buyer_evaluation = panel.buyer_evaluation;
           }
         } catch (e) {
-          // Log but keep going
           baseLead._panel_error = String(e?.message || e);
         }
-        // Throttle so CREXi doesn't think we're hammering
-        await sleep(900);
+        // Modest pause between panel clicks. Active tab handles these fast.
+        await sleep(350);
       }
 
       enriched.push(baseLead);
