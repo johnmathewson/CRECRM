@@ -199,7 +199,7 @@ function addValueTile(
 }
 
 function addDerivedBanner(doc: jsPDF, y: number): number {
-  const h = 62;
+  const h = 56;
   doc.setFillColor(C.panel[0], C.panel[1], C.panel[2]);
   doc.rect(MARGIN_X, y, CONTENT_W, h, "F");
   doc.setFillColor(C.coral[0], C.coral[1], C.coral[2]);
@@ -209,9 +209,11 @@ function addDerivedBanner(doc: jsPDF, y: number): number {
   doc.text("MARKET RENT   ·   DERIVED ESTIMATE", MARGIN_X + 16, y + 16);
   clearCharSpace(doc);
 
+  // ASCII-only body — jsPDF's helvetica is WinAnsi-encoded; chars like U+2248 and
+  // U+2212 emit raw bytes that corrupt the line and break layout.
   setBody(doc, 8.5, C.cream);
   const txt =
-    "Direct lease comparables were not available in the subject submarket. Market rent below is derived from comparable sale prices and prevailing market capitalization rates — Rent/SF ≈ Price/SF × Cap ÷ (1 − Expense Ratio) — a modeled estimate, not an observed lease. Treat the resulting NOI and stabilized value with corresponding caution.";
+    "Direct lease comparables were not available in this submarket. Market rent below is modeled from comparable sale prices and prevailing market cap rates -- not directly observed. Treat the resulting NOI and stabilized value with corresponding caution.";
   const lines = doc.splitTextToSize(txt, CONTENT_W - 32);
   doc.text(lines, MARGIN_X + 16, y + 30);
 

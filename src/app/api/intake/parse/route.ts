@@ -16,17 +16,44 @@ For each unit/tenant, extract these fields (use null if not found):
 - monthly_rent: number
 - annual_rent: number
 - escalation_pct: number (annual escalation %, or null)
-- is_vacant: boolean
+- is_vacant: boolean (REQUIRED on every unit, never omit)
 
 RULES:
 1. Return ONLY valid JSON. No markdown, no explanation, no code fences.
 2. Response format: { "units": [...], "confidence": "high"|"medium"|"low", "notes": "string" }
 3. If a value can be calculated (annual_rent = monthly_rent * 12, or annual_rent = sf * rate), calculate it.
 4. If rates are given as monthly per SF, convert to annual per SF.
-5. Vacant units: is_vacant = true, tenant_name = "VACANT".
-6. Preserve the original document order.
-7. "confidence" = how structured the source data was.
-8. "notes" = any ambiguities or assumptions you made.`;
+5. VACANCY DETECTION (critical, do not skip):
+   - Set is_vacant=true if the tenant cell is any of: "VACANT", "Vacant", "VAC", "Available", "AVAIL", "TBD", "Empty", a single dash "-", an em-dash "—", null, blank, or empty string.
+   - Set is_vacant=true if the unit has a square footage but no tenant AND no rent / lease dates.
+   - When is_vacant=true, also set tenant_name="VACANT" for consistency, and leave lease_start, lease_end, monthly_rent, annual_rent, lease_rate as null.
+   - Set is_vacant=false on every occupied unit. NEVER omit the field.
+6. SUMMARY ROWS — do NOT extract: rows that say "Total", "X Units", "Subtotal", "Grand Total", or aggregate sums across units are document totals, not units. Skip them.
+7. Preserve the original document order.
+8. "confidence" = how structured the source data was.
+9. "notes" = any ambiguities or assumptions you made.`;
+
+// Server-side safety net: even if Claude misses vacancy detection, force is_vacant=true
+// when the tenant name matches any common vacant marker. Mirrors prompt rule 5.
+const VACANT_PATTERN = /^(\s*|vacant|vac|available|avail|tbd|empty|-+|—+|n\/?a)\s*$/i;
+function normalizeUnits(units: any[]): any[] {
+  return units.map((u) => {
+    const tenant = (u.tenant_name ?? "").toString().trim();
+    const isVacantMarker = !tenant || VACANT_PATTERN.test(tenant);
+    const noLeaseEvidence = !u.monthly_rent && !u.annual_rent && !u.lease_start && !u.lease_end;
+    const isVacant = !!u.is_vacant || (isVacantMarker && noLeaseEvidence);
+    return {
+      ...u,
+      is_vacant: isVacant,
+      tenant_name: isVacant ? "VACANT" : (tenant || null),
+      lease_rate: isVacant ? null : u.lease_rate,
+      monthly_rent: isVacant ? null : u.monthly_rent,
+      annual_rent: isVacant ? null : u.annual_rent,
+      lease_start: isVacant ? null : u.lease_start,
+      lease_end: isVacant ? null : u.lease_end,
+    };
+  });
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -84,7 +111,7 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({
-      units: parsed.units || [],
+      units: normalizeUnits(parsed.units || []),
       confidence: parsed.confidence || "medium",
       notes: parsed.notes || "",
       rawText: (text || "(image upload)").slice(0, 5000),
