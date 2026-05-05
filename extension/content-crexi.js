@@ -17,6 +17,7 @@
     // CREXi listing URLs come in a few shapes:
     //   /properties/12345/state-city-name      (public listing page)
     //   /property/12345/dashboard              (seller dashboard)
+    //   /property/12345/readonly/<token>       (share-link readonly dashboard)
     //   /property/12345                        (other seller views)
     const m = window.location.pathname.match(/\/(?:properties|property)\/(\d+)/);
     return m ? m[1] : null;
@@ -42,8 +43,41 @@
 
   // Collect every label-ish + number pair on the page so we can tune
   // selectors when CREXi rephrases. Returned as `debug.candidates`.
+  //
+  // Two extraction strategies, in order of reliability:
+  //
+  // 1. ROLE=TAB pattern: CREXi's "Activity Overview" panel renders the 6
+  //    metrics as <button role="tab"> elements with text like
+  //    "4376 Impressions" / "224 Page Views" / "0 Offers". Number and label
+  //    sit in the SAME text content, not as siblings — so the older sibling-
+  //    walker missed them entirely (recording all zeroes). We split on the
+  //    first whitespace run.
+  //
+  // 2. SIBLING-WALKER (legacy): for stat tiles outside the tablist (e.g.
+  //    "Saves", "Watchlists" on public listing pages), walk up from each
+  //    numeric leaf and grab the closest short text label.
+  //
+  // We accept zero-valued tab metrics (a brand-new listing legitimately has
+  // 0 impressions). The legacy walker still skips zeros to avoid false
+  // matches against unrelated counters.
   function collectAllLabeledNumbers() {
     const out = [];
+
+    // Strategy 1: role=tab values ("<NUM> <LABEL>" pattern, May 2026 dashboard)
+    const tabs = document.querySelectorAll('[role="tab"]');
+    for (const tab of tabs) {
+      const text = (tab.textContent || "").trim();
+      // Match "<digits with optional commas/decimals> <rest is label>"
+      const m = text.match(/^([\d,]+(?:\.\d+)?)\s+(.{1,40})$/);
+      if (m) {
+        const value = parseInt(m[1].replace(/,/g, ""), 10);
+        if (!Number.isNaN(value)) {
+          out.push({ label: m[2].trim().slice(0, 50), value, source: "tab" });
+        }
+      }
+    }
+
+    // Strategy 2: legacy sibling-walker for stat-tile layouts
     const numericNodes = Array.from(document.querySelectorAll("body *"))
       .filter(
         (n) =>
@@ -52,7 +86,6 @@
           parseInt(n.textContent.replace(/,/g, ""), 10) > 0
       );
     for (const numNode of numericNodes.slice(0, 60)) {
-      // Walk up looking for a short label sibling
       let cursor = numNode.parentElement;
       let label = null;
       for (let i = 0; i < 3 && cursor && !label; i++) {
@@ -71,7 +104,7 @@
         cursor = cursor.parentElement;
       }
       if (label) {
-        out.push({ label: label.slice(0, 50), value: parseInt(numNode.textContent.replace(/,/g, ""), 10) });
+        out.push({ label: label.slice(0, 50), value: parseInt(numNode.textContent.replace(/,/g, ""), 10), source: "sibling" });
       }
     }
     return out;
@@ -79,21 +112,28 @@
 
   // Wait for the dashboard's async KPI tiles to render before scraping.
   // CREXi loads metrics via a separate API call; if we scrape immediately on
-  // popup-click, the Impressions/Page Views/Visitors tiles may not be in the
-  // DOM yet. Poll up to 6 seconds for at least 4 candidates with non-zero
-  // numeric labels, which is the steady-state for a populated dashboard.
-  async function waitForKPIs(maxWaitMs = 6000) {
+  // popup-click, the Impressions/Page Views/Visitors tabs may not be in the
+  // DOM yet. We poll up to 8 seconds for the role=tab tablist to render at
+  // least 6 entries (the canonical count: Impressions / Page Views /
+  // Visitors / Opened OMs / Executed CAs / Offers).
+  //
+  // Stability check: same tab count on two consecutive 300ms ticks. If the
+  // tablist never reaches 6 (e.g. on a public listing page that lacks the
+  // seller-dashboard panel), we fall through to whatever sibling-walker
+  // candidates are available so the legacy "Saves" / "Watchlist" tiles
+  // still get scraped.
+  async function waitForKPIs(maxWaitMs = 8000) {
     const start = Date.now();
-    let lastCount = 0;
+    let lastTabCount = -1;
     while (Date.now() - start < maxWaitMs) {
       const candidates = collectAllLabeledNumbers();
-      // Stop early if we've seen the dashboard "settle" — same count on two
-      // consecutive 250ms ticks AND at least 4 non-zero numbers visible.
-      if (candidates.length >= 4 && candidates.length === lastCount) {
+      const tabCount = candidates.filter((c) => c.source === "tab").length;
+      // Settled: 6 tabs visible AND count stable across two ticks
+      if (tabCount >= 6 && tabCount === lastTabCount) {
         return candidates;
       }
-      lastCount = candidates.length;
-      await new Promise((r) => setTimeout(r, 250));
+      lastTabCount = tabCount;
+      await new Promise((r) => setTimeout(r, 300));
     }
     return collectAllLabeledNumbers();
   }
