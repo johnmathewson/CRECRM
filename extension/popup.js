@@ -163,7 +163,8 @@ async function refreshWatcherStatus() {
         : isZeroLeads
         ? "rgba(242,201,76,0.85)"
         : "rgba(231,76,60,0.85)";
-      html += `<div style="color:${color}; padding: 2px 0">· #${p.id} — ${status} · ${ago}m ago</div>`;
+      const verTag = p.watcher_version ? ` <span style="opacity:0.5">[${escapeHtml(p.watcher_version)}]</span>` : "";
+      html += `<div style="color:${color}; padding: 2px 0">· #${p.id} — ${status} · ${ago}m ago${verTag}</div>`;
       if (isZeroLeads && p.diagnostic) {
         const d = p.diagnostic;
         const summary = [

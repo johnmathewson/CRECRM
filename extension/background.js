@@ -202,55 +202,59 @@ async function processNextLeadsStep() {
   }
 }
 
+const WATCHER_VERSION = "v0.2.5-activetab";
+
 async function scrapeOneListing(property) {
-  // Open in an OFF-SCREEN normal window. v0.2.2 (background tab) and v0.2.3
-  // (minimized window) both failed: Chrome's tab throttling and macOS's
-  // minimized-window JS handling each prevented Angular's data XHR from
-  // completing within our wait window.
-  //
-  // An off-screen window (positioned at negative coordinates, well outside
-  // any monitor) is treated by Chrome as a fully-normal foreground window
-  // — no throttling, no skipped frontend initialization, no missed XHR —
-  // but the user never sees it because it isn't on any visible display.
-  // This is the standard trick when minimized/background approaches fail.
-  let windowId = null;
-  let tabId = null;
-  try {
-    const win = await chrome.windows.create({
-      url: property.leads_url,
-      state: "normal",
-      focused: false,
-      type: "normal",
-      left: -2000,
-      top: -2000,
-      width: 1280,
-      height: 900,
+  console.log(`[stewardship leads ${WATCHER_VERSION}] start scraping property #${property.crexi_listing_id} (${property.name})`);
+
+  // Always-write telemetry helper. Records what happened to chrome.storage
+  // even on errors, so the popup never silently shows a stale entry.
+  const writeTelemetry = async (entry) => {
+    await chrome.storage.local.set({
+      [`leads_watcher_last_${property.crexi_listing_id}`]: {
+        at: Date.now(),
+        watcher_version: WATCHER_VERSION,
+        ...entry,
+      },
     });
-    windowId = win?.id || null;
-    tabId = win?.tabs?.[0]?.id || null;
-  } catch (err) {
-    return; // window create failed
-  }
-  if (!tabId) {
-    if (windowId) {
-      try { await chrome.windows.remove(windowId); } catch {}
+  };
+
+  // Open as an ACTIVE TAB in the user's currently-focused window.
+  //
+  // Why this approach (after off-screen window failed silently): an active
+  // foreground tab is the ONLY mode that guarantees Chrome runs JS at full
+  // priority and that CREXi's frontend doesn't gate its data fetch on
+  // visibility/focus state. Yes, it briefly takes focus from the user;
+  // we restore their original tab as soon as scraping completes.
+  let originalTabId = null;
+  let scrapeTabId = null;
+
+  try {
+    // Note which tab the user was on, to restore it after
+    const [activeBefore] = await chrome.tabs.query({ active: true, currentWindow: true });
+    originalTabId = activeBefore?.id || null;
+    console.log(`[stewardship leads] originalTabId=${originalTabId}`);
+
+    // Create the scraping tab (becomes active)
+    const tab = await chrome.tabs.create({
+      url: property.leads_url,
+      active: true,
+    });
+    scrapeTabId = tab?.id || null;
+    console.log(`[stewardship leads] opened scrape tab id=${scrapeTabId}`);
+
+    if (!scrapeTabId) {
+      await writeTelemetry({ ok: false, error: "tabs.create returned no tab id", leads_count: 0 });
+      return;
     }
+  } catch (err) {
+    const msg = String(err?.message || err);
+    console.warn(`[stewardship leads] tab create failed:`, msg);
+    await writeTelemetry({ ok: false, error: `create_tab_failed: ${msg}`, leads_count: 0 });
     return;
   }
 
-  // Belt-and-suspenders: re-assert off-screen position 500ms after create.
-  // Some platforms (or extensions like window-managers) snap newly-opened
-  // windows back into the visible area; this corrects them.
-  setTimeout(() => {
-    if (windowId !== null) {
-      chrome.windows.update(windowId, {
-        left: -2000,
-        top: -2000,
-        focused: false,
-      }).catch(() => {});
-    }
-  }, 500);
-
+  // Wait for content script + run scrape, with retries
   const result = await new Promise((resolve) => {
     let settled = false;
     const finish = (r) => {
@@ -259,39 +263,59 @@ async function scrapeOneListing(property) {
       clearTimeout(timer);
       resolve(r);
     };
-    const timer = setTimeout(() => finish({ ok: false, error: "timeout" }), LEADS_TAB_TIMEOUT_MS);
+    const timer = setTimeout(() => {
+      console.warn(`[stewardship leads] scrape timeout after ${LEADS_TAB_TIMEOUT_MS}ms`);
+      finish({ ok: false, error: "timeout" });
+    }, LEADS_TAB_TIMEOUT_MS);
 
+    let attemptCount = 0;
     const tryOnce = async () => {
       if (settled) return;
+      attemptCount += 1;
       try {
-        const r = await chrome.tabs.sendMessage(tabId, { action: "scrape-leads" });
+        const r = await chrome.tabs.sendMessage(scrapeTabId, { action: "scrape-leads" });
         if (r) {
+          console.log(`[stewardship leads] scrape result on attempt ${attemptCount}:`, JSON.stringify({ ok: r.ok, leads_count: r.leads_count, has_diagnostic: !!r.diagnostic }));
           finish(r);
           return;
         }
-      } catch {
-        // content script not ready yet
+      } catch (err) {
+        // content script not ready yet — log only every 4th attempt to avoid spam
+        if (attemptCount % 4 === 1) {
+          console.log(`[stewardship leads] content script not yet ready (attempt ${attemptCount}): ${err?.message || err}`);
+        }
       }
       if (!settled) setTimeout(tryOnce, 2000);
     };
-    setTimeout(tryOnce, 3000);
+    setTimeout(tryOnce, 3500);
   });
 
-  // Close the entire window (which closes the tab inside it)
-  if (windowId !== null) {
-    try { await chrome.windows.remove(windowId); } catch {}
+  // Restore the user's original tab BEFORE closing the scrape tab to
+  // avoid a flash of "no active tab" state
+  if (originalTabId !== null) {
+    try {
+      await chrome.tabs.update(originalTabId, { active: true });
+      console.log(`[stewardship leads] restored original tab id=${originalTabId}`);
+    } catch (err) {
+      console.warn(`[stewardship leads] couldn't restore original tab: ${err?.message || err}`);
+    }
   }
 
-  // Telemetry — last run per property (with diagnostic if 0 leads)
-  await chrome.storage.local.set({
-    [`leads_watcher_last_${property.crexi_listing_id}`]: {
-      at: Date.now(),
-      ok: !!result?.ok,
-      leads_count: result?.leads_count || 0,
-      error: result?.ok ? null : result?.error || null,
-      diagnostic: result?.diagnostic || null,
-    },
+  // Close the scrape tab
+  try {
+    await chrome.tabs.remove(scrapeTabId);
+    console.log(`[stewardship leads] closed scrape tab id=${scrapeTabId}`);
+  } catch (err) {
+    console.warn(`[stewardship leads] couldn't close scrape tab: ${err?.message || err}`);
+  }
+
+  await writeTelemetry({
+    ok: !!result?.ok,
+    leads_count: result?.leads_count || 0,
+    error: result?.ok ? null : result?.error || null,
+    diagnostic: result?.diagnostic || null,
   });
+  console.log(`[stewardship leads] done #${property.crexi_listing_id}: ok=${!!result?.ok} count=${result?.leads_count || 0}`);
 }
 
 // ── Manual triggers (popup → background) ──────────────────────────────────
