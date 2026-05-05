@@ -147,8 +147,8 @@ function buildReportData(result: ValuationResult, request: ValuationRequest): Re
 
   // Honor user override: if request.annualIncome was entered manually and differs from
   // the per-unit sum (which can be wrong if Haiku confused monthly vs annual), scale
-  // per-unit rents proportionally so the report's "Current Annual Revenue" matches what
-  // the user typed. This is the safety net for parser misclassifications.
+  // per-unit annual_rent proportionally and DERIVE monthly_rent + lease_rate from the
+  // scaled annual + sqft so everything stays internally consistent.
   if (request.annualIncome && request.annualIncome > 0) {
     const occupied = units.filter((u) => !u.is_vacant);
     const sumAnnual = occupied.reduce((s, u) => s + (Number(u.annual_rent) || 0), 0);
@@ -156,11 +156,39 @@ function buildReportData(result: ValuationResult, request: ValuationRequest): Re
       const scale = request.annualIncome / sumAnnual;
       for (const u of units) {
         if (u.is_vacant) continue;
-        if (u.annual_rent) u.annual_rent = Math.round(Number(u.annual_rent) * scale);
-        if (u.monthly_rent) u.monthly_rent = Math.round(Number(u.monthly_rent) * scale * 100) / 100;
-        if (u.lease_rate) u.lease_rate = Math.round(Number(u.lease_rate) * scale * 100) / 100;
+        const sqft = Number(u.square_footage) || 0;
+        if (u.annual_rent) {
+          const newAnnual = Math.round(Number(u.annual_rent) * scale);
+          u.annual_rent = newAnnual;
+          u.monthly_rent = Math.round((newAnnual / 12) * 100) / 100;
+          // Always re-derive lease_rate from the scaled annual + sqft. Never just
+          // multiply lease_rate by scale — that would compound any per-SF error.
+          if (sqft > 0) u.lease_rate = Math.round((newAnnual / sqft) * 100) / 100;
+        }
         u.notes = "In-place rent (calibrated to user-entered annual income)";
       }
+    }
+  }
+
+  // FINAL CONSISTENCY PASS — defense in depth. No matter how lease_rate, monthly_rent,
+  // and annual_rent got set upstream (parser, reconcile, scaling, fallback), force them
+  // to be internally consistent: lease_rate = annual_rent / sqft, monthly_rent = annual / 12.
+  // The cover's "Current Annual Revenue" is summed from annual_rent, so anchoring rate
+  // to annual guarantees the cover and per-unit table tell the same story.
+  for (const u of units) {
+    if (u.is_vacant) continue;
+    const sqft = Number(u.square_footage) || 0;
+    const annual = Number(u.annual_rent) || 0;
+    if (sqft > 0 && annual > 0) {
+      u.lease_rate = Math.round((annual / sqft) * 100) / 100;
+      u.monthly_rent = Math.round((annual / 12) * 100) / 100;
+    }
+    // SF typo guard: a commercial unit < 100 SF is almost certainly a rent-roll typo
+    // (e.g., 13.79 instead of 1379). Suppress the bogus $/SF so it doesn't pollute
+    // weighted averages.
+    if (sqft > 0 && sqft < 100) {
+      u.lease_rate = null;
+      u.notes = (u.notes ? u.notes + " · " : "") + "Suspect SF (likely rent-roll typo) — rate suppressed";
     }
   }
 
