@@ -506,29 +506,52 @@
   // when no email captured. Read by the orchestrator and sent up to API.
   let _firstPanelDiagnostic = null;
 
+  // Fire a "real" mouse click with the full event sequence. Pure .click()
+  // produces isTrusted=false events, which most Angular Material apps
+  // accept, but CREXi's row handler appears to require the full sequence.
+  function dispatchRealClick(el) {
+    if (!el || typeof el.dispatchEvent !== "function") return false;
+    try {
+      el.scrollIntoView({ block: "nearest", behavior: "auto" });
+    } catch {}
+    const opts = { bubbles: true, cancelable: true, view: window, button: 0 };
+    const events = ["pointerdown", "mousedown", "pointerup", "mouseup", "click"];
+    for (const type of events) {
+      try {
+        const Ctor = type.startsWith("pointer") ? PointerEvent : MouseEvent;
+        el.dispatchEvent(new Ctor(type, opts));
+      } catch {
+        // Fallback to simple Event if PointerEvent isn't available
+        try {
+          el.dispatchEvent(new Event(type, { bubbles: true, cancelable: true }));
+        } catch {}
+      }
+    }
+    return true;
+  }
+
   async function scrapePanel(row, isFirstAttempt = false) {
     // Capture pre-click email set for diff detection
     const emailsBefore = new Set(
       (document.body.textContent.match(/\b[\w.+-]+@[\w.-]+\.\w{2,}\b/g) || [])
     );
+
+    // Track BOTH <aside> and <mat-sidenav> — CREXi opens lead detail into
+    // the latter, but other surfaces use the former.
     const asideTextBefore = (document.querySelector("aside")?.textContent || "").trim();
+    const sidenavBefore = Array.from(document.querySelectorAll("mat-sidenav, [class*='mat-sidenav']:not([class*='content']):not([class*='container'])"))
+      .map((el) => (el.textContent || "").length)
+      .reduce((a, b) => a + b, 0);
 
-    // Click strategy: the row element itself is the most reliable click
-    // target for Angular Material's mat-row (the (click) binding is on
-    // the row, not a child). Falling back to leaves can hit elements that
-    // stopPropagation the click event.
-    if (!row || typeof row.click !== "function") return null;
-    try {
-      row.click();
-    } catch {
-      return null;
-    }
+    if (!row) return null;
+    dispatchRealClick(row);
 
-    // Wait for the panel to populate. Either a NEW email appears, or
-    // an aside element's text grows substantially.
+    // Wait for the panel to populate. CREXi uses <mat-sidenav> for the
+    // lead-detail slide-out; other apps use <aside>. We watch both.
     const panel = await waitFor(
       () => {
-        // Strategy 1: any new email-shaped text on the page
+        // Strategy 1: a NEW email-shaped text appears on the page (the
+        // lead's email rendering inside the panel that just opened)
         const allEmails = document.body.textContent.match(/\b[\w.+-]+@[\w.-]+\.\w{2,}\b/g) || [];
         const newEmails = allEmails.filter((e) => !emailsBefore.has(e));
         if (newEmails.length > 0) {
@@ -540,7 +563,19 @@
             }
           }
         }
-        // Strategy 2: aside element's content grew (panel populated)
+        // Strategy 2: <mat-sidenav> grew significantly (CREXi's panel)
+        const sidenavs = Array.from(document.querySelectorAll("mat-sidenav, [class*='mat-sidenav']:not([class*='content']):not([class*='container'])"));
+        const sidenavNow = sidenavs.map((el) => (el.textContent || "").length).reduce((a, b) => a + b, 0);
+        if (sidenavNow > sidenavBefore + 200) {
+          // Find the specific sidenav that grew
+          for (const el of sidenavs) {
+            const text = el.textContent || "";
+            if (text.length > 500 && /\d{3}\.\d{3}\.\d{4}|@/.test(text)) {
+              return el;
+            }
+          }
+        }
+        // Strategy 3: <aside> grew
         const aside = document.querySelector("aside");
         if (aside) {
           const text = aside.textContent || "";
@@ -548,8 +583,8 @@
             return aside;
           }
         }
-        // Strategy 3: explicit Email: label in any reasonably-sized container
-        const labeled = document.querySelectorAll("aside, [class*='side-panel'], [class*='detail-panel'], [class*='lead-detail'], [role='dialog'], [class*='drawer']");
+        // Strategy 4: explicit Email: label in any container of reasonable size
+        const labeled = document.querySelectorAll("mat-sidenav, aside, [class*='side-panel'], [class*='detail-panel'], [class*='lead-detail'], [role='dialog'], [class*='drawer']");
         for (const c of labeled) {
           const text = c.textContent || "";
           if (/Email\s*:?\s*[\w.+-]+@[\w.-]+\.\w{2,}/i.test(text) && text.length < 6000) {
@@ -558,15 +593,16 @@
         }
         return null;
       },
-      { maxMs: 1500 }
+      { maxMs: 2000 }
     );
 
     // First-attempt diagnostic: capture page state regardless of success.
-    // The orchestrator picks this up to send back if no email was found.
     if (isFirstAttempt && !_firstPanelDiagnostic) {
       const aside = document.querySelector("aside");
+      const sidenavs = Array.from(document.querySelectorAll("mat-sidenav"));
+      const sidenavTextNow = sidenavs.map((el) => (el.textContent || "").length).reduce((a, b) => a + b, 0);
       const allPanels = Array.from(
-        document.querySelectorAll("aside, [class*='side-panel'], [class*='detail-panel'], [class*='lead-detail'], [role='dialog'], [class*='drawer']")
+        document.querySelectorAll("mat-sidenav, aside, [class*='side-panel'], [class*='detail-panel'], [class*='lead-detail'], [role='dialog'], [class*='drawer']")
       );
       _firstPanelDiagnostic = {
         clicked_tag: row.tagName?.toLowerCase(),
@@ -576,7 +612,8 @@
         panel_class: (panel?.className || "").toString().slice(0, 80),
         aside_text_before_len: asideTextBefore.length,
         aside_text_after_len: aside?.textContent?.length || 0,
-        aside_text_sample: aside?.textContent?.replace(/\s+/g, " ").slice(0, 600) || null,
+        sidenav_text_before_len: sidenavBefore,
+        sidenav_text_after_len: sidenavTextNow,
         emails_on_page_after: (document.body.textContent.match(/\b[\w.+-]+@[\w.-]+\.\w{2,}\b/g) || []).slice(0, 8),
         candidate_panels: allPanels.slice(0, 5).map((p) => ({
           tag: p.tagName?.toLowerCase(),

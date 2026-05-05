@@ -205,7 +205,7 @@ async function processNextLeadsStep() {
   }
 }
 
-const WATCHER_VERSION = "v0.3.2-circuit";
+const WATCHER_VERSION = "v0.3.3-realclick";
 
 // Wait for a tab to reach status: "complete" before sending messages to it
 function waitForTabComplete(tabId, timeoutMs = 30_000) {

@@ -175,7 +175,7 @@ async function refreshWatcherStatus() {
         if (pd.panel_found && pd.panel_tag) {
           html += `<div style="color:rgba(240,237,228,0.5); font-size:10px; padding-left:10px">    panel: &lt;${escapeHtml(pd.panel_tag)}&gt; class="${escapeHtml((pd.panel_class || "").slice(0,40))}"</div>`;
         }
-        html += `<div style="color:rgba(240,237,228,0.45); font-size:10px; padding-left:10px">    aside text: ${pd.aside_text_before_len} → ${pd.aside_text_after_len} chars</div>`;
+        html += `<div style="color:rgba(240,237,228,0.45); font-size:10px; padding-left:10px">    aside text: ${pd.aside_text_before_len} → ${pd.aside_text_after_len} chars · mat-sidenav: ${pd.sidenav_text_before_len ?? "?"} → ${pd.sidenav_text_after_len ?? "?"} chars</div>`;
         if (Array.isArray(pd.emails_on_page_after) && pd.emails_on_page_after.length > 0) {
           html += `<div style="color:rgba(78,205,196,0.7); font-size:10px; padding-left:10px">    emails on page: [${pd.emails_on_page_after.map((e) => escapeHtml(e)).join(", ")}]</div>`;
         } else {
