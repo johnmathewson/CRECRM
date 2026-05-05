@@ -167,12 +167,18 @@ async function refreshWatcherStatus() {
       if (isZeroLeads && p.diagnostic) {
         const d = p.diagnostic;
         const summary = [
-          `phones found: ${d.phone_leaf_count ?? 0}`,
-          `tr=${d.counts?.tr ?? 0}`,
+          d.probable_state ? `state: ${d.probable_state}` : null,
+          `phones: ${d.phone_leaf_count ?? 0}`,
           `[role=row]=${d.counts?.role_row ?? 0}`,
-          `mat-row=${d.counts?.mat_row ?? 0}`,
-        ].join(" · ");
-        html += `<div style="color:rgba(240,237,228,0.4); font-size:10px; padding-left:10px">  ${summary}</div>`;
+          d.counts?.all_elements ? `dom=${d.counts.all_elements}` : null,
+        ].filter(Boolean).join(" · ");
+        html += `<div style="color:rgba(240,237,228,0.45); font-size:10px; padding-left:10px">  ${summary}</div>`;
+        if (d.doc_title) {
+          html += `<div style="color:rgba(240,237,228,0.4); font-size:10px; padding-left:10px">  title: ${escapeHtml(d.doc_title)}</div>`;
+        }
+        if (d.doc_path) {
+          html += `<div style="color:rgba(240,237,228,0.4); font-size:9.5px; padding-left:10px">  path: ${escapeHtml(d.doc_path)}</div>`;
+        }
         if (d.body_text_sample) {
           html += `<div style="color:rgba(240,237,228,0.35); font-size:9.5px; padding-left:10px; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" title="${escapeHtml(d.body_text_sample)}">  body: ${escapeHtml(d.body_text_sample.slice(0, 60))}…</div>`;
         }

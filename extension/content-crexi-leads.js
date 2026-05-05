@@ -260,9 +260,20 @@
   // Snapshot of what's actually on the page — emitted when readListView
   // returns 0 so we can debug remotely without a real browser session.
   function pageDiagnostic() {
+    // Look for telltale loading / auth states
+    const lowerBody = document.body.textContent.toLowerCase();
+    const probable_state =
+      /sign in|log in|please log/i.test(lowerBody) ? "AUTH_REQUIRED"
+      : /loading|please wait/i.test(lowerBody) && lowerBody.length < 400 ? "LOADING_SPINNER"
+      : document.querySelectorAll("[role=row]").length === 0 ? "EMPTY_PAGE"
+      : "DATA_NEVER_LOADED";
+
     return {
-      url: window.location.href.split("?")[0],
+      doc_url: window.location.href,
+      doc_path: window.location.pathname,
+      doc_title: document.title,
       doc_state: document.readyState,
+      probable_state,
       counts: {
         tr: document.querySelectorAll("tr").length,
         td: document.querySelectorAll("td").length,
@@ -271,6 +282,7 @@
         mat_row: document.querySelectorAll("mat-row, .mat-row, .mat-mdc-row, cdk-row").length,
         mat_table: document.querySelectorAll("mat-table, .mat-table, .mat-mdc-table, cdk-table").length,
         any_table: document.querySelectorAll("table").length,
+        all_elements: document.querySelectorAll("*").length,
       },
       phones_detected: (document.body.textContent.match(/\d{3}\.\d{3}\.\d{4}/g) || []).slice(0, 8),
       phone_leaf_count: Array.from(document.querySelectorAll("body *")).filter(
@@ -278,7 +290,7 @@
           n.children.length === 0 &&
           /^\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}$/.test((n.textContent || "").trim())
       ).length,
-      body_text_sample: document.body.textContent.replace(/\s+/g, " ").slice(0, 500),
+      body_text_sample: document.body.textContent.replace(/\s+/g, " ").slice(0, 600),
     };
   }
 

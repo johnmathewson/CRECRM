@@ -203,25 +203,28 @@ async function processNextLeadsStep() {
 }
 
 async function scrapeOneListing(property) {
-  // Open in a MINIMIZED window, not a background tab in the user's window.
+  // Open in an OFF-SCREEN normal window. v0.2.2 (background tab) and v0.2.3
+  // (minimized window) both failed: Chrome's tab throttling and macOS's
+  // minimized-window JS handling each prevented Angular's data XHR from
+  // completing within our wait window.
   //
-  // Why: chrome.tabs.create({ active: false }) puts the tab in the user's
-  // current window, which means Chrome throttles its JS as a "background
-  // tab." Angular Material data tables fetch via XHR after mount; under
-  // throttling the fetch can take 30+ seconds or never complete within
-  // our wait window.
-  //
-  // A minimized window is treated by Chrome as a real foreground window
-  // (no throttling) but isn't drawn on screen and doesn't steal focus.
-  // Best of both worlds: full JS speed, zero UX intrusion.
+  // An off-screen window (positioned at negative coordinates, well outside
+  // any monitor) is treated by Chrome as a fully-normal foreground window
+  // — no throttling, no skipped frontend initialization, no missed XHR —
+  // but the user never sees it because it isn't on any visible display.
+  // This is the standard trick when minimized/background approaches fail.
   let windowId = null;
   let tabId = null;
   try {
     const win = await chrome.windows.create({
       url: property.leads_url,
-      state: "minimized",
+      state: "normal",
       focused: false,
       type: "normal",
+      left: -2000,
+      top: -2000,
+      width: 1280,
+      height: 900,
     });
     windowId = win?.id || null;
     tabId = win?.tabs?.[0]?.id || null;
@@ -235,11 +238,16 @@ async function scrapeOneListing(property) {
     return;
   }
 
-  // Some platforms briefly un-minimize the window when you create it minimized.
-  // Re-assert minimized after a short delay so it stays out of John's way.
+  // Belt-and-suspenders: re-assert off-screen position 500ms after create.
+  // Some platforms (or extensions like window-managers) snap newly-opened
+  // windows back into the visible area; this corrects them.
   setTimeout(() => {
     if (windowId !== null) {
-      chrome.windows.update(windowId, { state: "minimized", focused: false }).catch(() => {});
+      chrome.windows.update(windowId, {
+        left: -2000,
+        top: -2000,
+        focused: false,
+      }).catch(() => {});
     }
   }, 500);
 
