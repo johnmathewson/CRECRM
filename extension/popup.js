@@ -125,9 +125,14 @@ async function refreshWatcherStatus() {
   const queueRemaining = status?.queue_remaining ?? 0;
   const heartbeatAge = status?.heartbeat_age_ms ?? null;
 
-  // Per-listing telemetry, last 6 entries
+  // Per-listing telemetry, last 6 entries. Filter excludes the singleton
+  // "leads_watcher_last_run" timestamp (a number, not a per-listing object).
   const perListing = Object.entries(data)
-    .filter(([k]) => k.startsWith("leads_watcher_last_"))
+    .filter(([k, v]) =>
+      k.startsWith("leads_watcher_last_") &&
+      k !== "leads_watcher_last_run" &&
+      v && typeof v === "object"
+    )
     .map(([k, v]) => ({ id: k.replace("leads_watcher_last_", ""), ...v }))
     .sort((a, b) => (b.at || 0) - (a.at || 0))
     .slice(0, 6);
@@ -144,16 +149,46 @@ async function refreshWatcherStatus() {
     html = `<strong>Last run:</strong> ${ago < 1 ? "just now" : `${ago}m ago`}`;
   }
   if (perListing.length > 0) {
-    html += `<div style="margin-top:6px; font-size:10.5px; color:rgba(240,237,228,0.5); max-height:140px; overflow-y:auto">`;
+    html += `<div style="margin-top:6px; font-size:10.5px; color:rgba(240,237,228,0.5); max-height:200px; overflow-y:auto">`;
     for (const p of perListing) {
       const ago = Math.round((Date.now() - (p.at || 0)) / 60000);
-      const status = p.ok ? `${p.leads_count} leads` : `failed: ${p.error || "?"}`;
-      const color = p.ok ? "rgba(107,203,119,0.85)" : "rgba(231,76,60,0.85)";
-      html += `<div style="color:${color}">· #${p.id} — ${status} · ${ago}m ago</div>`;
+      const isZeroLeads = p.ok && p.leads_count === 0;
+      const status = !p.ok
+        ? `failed: ${p.error || "?"}`
+        : p.leads_count === 0
+        ? `0 leads (page diagnostic ↓)`
+        : `${p.leads_count} leads`;
+      const color = p.ok && p.leads_count > 0
+        ? "rgba(107,203,119,0.85)"
+        : isZeroLeads
+        ? "rgba(242,201,76,0.85)"
+        : "rgba(231,76,60,0.85)";
+      html += `<div style="color:${color}; padding: 2px 0">· #${p.id} — ${status} · ${ago}m ago</div>`;
+      if (isZeroLeads && p.diagnostic) {
+        const d = p.diagnostic;
+        const summary = [
+          `phones found: ${d.phone_leaf_count ?? 0}`,
+          `tr=${d.counts?.tr ?? 0}`,
+          `[role=row]=${d.counts?.role_row ?? 0}`,
+          `mat-row=${d.counts?.mat_row ?? 0}`,
+        ].join(" · ");
+        html += `<div style="color:rgba(240,237,228,0.4); font-size:10px; padding-left:10px">  ${summary}</div>`;
+        if (d.body_text_sample) {
+          html += `<div style="color:rgba(240,237,228,0.35); font-size:9.5px; padding-left:10px; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" title="${escapeHtml(d.body_text_sample)}">  body: ${escapeHtml(d.body_text_sample.slice(0, 60))}…</div>`;
+        }
+      }
     }
     html += `</div>`;
   }
   els.watcherStatus.innerHTML = html;
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 els.runWatcherNow?.addEventListener("click", async () => {

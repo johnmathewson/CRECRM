@@ -49,133 +49,237 @@
   }
 
   // ── Table row scraping ─────────────────────────────────────────────────
-  // Strategy: each lead row is a <tr> in the leads table. We find rows that
-  // contain a phone-shaped cell + a "Contact Lead" message link. CREXi's
-  // markup is Material-Angular flavored; we don't rely on specific class
-  // names because they're hashed.
+  // Strategy: anchor on PHONE NUMBERS, not table tags. CREXi's leads page
+  // uses Angular Material's mat-table which renders <mat-row> / [role=row]
+  // instead of plain <tr>, so a tr-based scraper finds nothing. But every
+  // lead row contains exactly one phone in "###.###.####" format. We:
+  //
+  //   1. Find every leaf element whose trimmed text exactly matches that
+  //      phone format (these are the phone cells).
+  //   2. Walk UP from each phone cell to find the row container — defined
+  //      as the nearest ancestor that's either a [role=row], <tr>, <mat-row>,
+  //      <cdk-row>, OR an ancestor whose textContent length jumps by >50%
+  //      compared to its child (heuristic for "this is the row, not the cell").
+  //   3. Extract name, company, role, visits, status, date FROM the row's
+  //      textContent + any clickable child elements (for the click target).
+  //
+  // This works regardless of whether CREXi uses <table>, <mat-table>, or
+  // pure-div layout.
+
+  const FUNNEL_LABELS = [
+    "Executed CA",
+    "Downloaded DD",
+    "Opened OM",
+    "Opened Flyer",
+    "Requested Info",
+    "Calculated Valuation",
+    "Clicked Phone",
+    "Clicked Email",
+    "Printed Page",
+    "Saved Property",
+    "Visited Page",
+  ];
+
+  const KNOWN_ROLES = [
+    "BUYER REP",
+    "TENANT REP",
+    "LISTING REP",
+    "LANDLORD REP",
+    "PRINCIPAL INVESTOR",
+    "PRIVATE INVESTOR",
+    "PROPERTY MANAGER",
+    "REIT",
+    "COORDINATOR/ADMIN",
+  ];
+
+  function findRowContainer(phoneEl) {
+    // Walk up to find a "row-like" ancestor. Stop at body.
+    let cursor = phoneEl;
+    for (let i = 0; i < 8; i++) {
+      cursor = cursor.parentElement;
+      if (!cursor || cursor === document.body) return null;
+      const tag = cursor.tagName?.toLowerCase() || "";
+      const role = cursor.getAttribute?.("role") || "";
+      if (
+        role === "row" ||
+        tag === "tr" ||
+        tag === "mat-row" ||
+        tag === "cdk-row" ||
+        cursor.classList?.contains("mat-row") ||
+        cursor.classList?.contains("mat-mdc-row") ||
+        cursor.classList?.contains("cdk-row")
+      ) {
+        return cursor;
+      }
+    }
+    // No semantic row found — fall back to a "stable container" heuristic:
+    // walk up until we find an ancestor whose textContent contains the
+    // phone AND is short enough to be a row (< 600 chars), preferring the
+    // most-direct ancestor.
+    cursor = phoneEl.parentElement;
+    let best = null;
+    for (let i = 0; i < 8 && cursor; i++) {
+      const text = (cursor.textContent || "").trim();
+      if (text.length > 30 && text.length < 600) {
+        best = cursor;
+      } else if (best && text.length >= 600) {
+        break;
+      }
+      cursor = cursor.parentElement;
+    }
+    return best;
+  }
+
+  function parseRow(rowEl, phone) {
+    const fullText = (rowEl.textContent || "").trim();
+    if (!fullText || fullText.toLowerCase().includes("number of visits")) {
+      return null; // Header
+    }
+
+    // Name — first capitalized token-rich text leaf that isn't the phone
+    // and isn't initials/funnel/role/CTA. Walk leaf nodes in DOM order.
+    let name = "";
+    const leafCandidates = Array.from(rowEl.querySelectorAll("*"))
+      .filter(
+        (n) =>
+          n.children.length === 0 &&
+          n.textContent &&
+          n.textContent.trim().length > 0
+      )
+      .map((n) => n.textContent.trim());
+
+    for (const text of leafCandidates) {
+      if (!text || text === phone) continue;
+      if (text.length < 3 || text.length > 80) continue;
+      if (/^\d/.test(text)) continue; // skip numbers / phone
+      if (/^[A-Z]{2,3}$/.test(text)) continue; // skip avatar initials like "JG"
+      if (/contact lead/i.test(text)) continue;
+      if (/^\d+\s+visits?$/i.test(text)) continue;
+      if (FUNNEL_LABELS.some((l) => text === l)) continue;
+      if (KNOWN_ROLES.some((r) => text.toUpperCase() === r)) continue;
+      // Skip if it's a date ("May 04, 2026")
+      if (/^[A-Z][a-z]{2}\s+\d{1,2},\s+\d{4}$/.test(text)) continue;
+      // Looks name-shaped: at least one space OR mixed case
+      if (text.includes(" ") || /^[A-Z][a-z]/.test(text)) {
+        name = text;
+        break;
+      }
+    }
+    if (!name) return null;
+
+    // Visits — "X visits" or "X visit"
+    const visitsMatch = fullText.match(/(\d+)\s+visits?/i);
+    const visits = visitsMatch ? parseInt(visitsMatch[1], 10) : null;
+
+    // Funnel status — most-advanced label present in row text
+    let levelOfInterest = null;
+    for (const label of FUNNEL_LABELS) {
+      if (fullText.includes(label)) {
+        levelOfInterest = label;
+        break;
+      }
+    }
+
+    // Roles — uppercase pills
+    const roles = [];
+    for (const r of KNOWN_ROLES) {
+      if (fullText.toUpperCase().includes(r)) roles.push(r);
+    }
+
+    // Company — first leaf that's not name/phone/role/funnel/visits/CTA
+    let company = null;
+    for (const text of leafCandidates) {
+      if (!text || text === name || text === phone) continue;
+      if (text.length < 3 || text.length > 80) continue;
+      if (text.includes(phone)) continue;
+      if (KNOWN_ROLES.some((r) => text.toUpperCase().includes(r))) continue;
+      if (FUNNEL_LABELS.some((l) => text.includes(l))) continue;
+      if (/^\d+\s+visits?$/i.test(text)) continue;
+      if (/contact lead/i.test(text)) continue;
+      if (/^\d/.test(text)) continue;
+      if (/^[A-Z]{2,3}$/.test(text)) continue;
+      if (/^[A-Z][a-z]{2}\s+\d{1,2},\s+\d{4}$/.test(text)) continue;
+      // Skip if it's just the name we already captured
+      if (text === name) continue;
+      // Has to look company-like (mixed-case word OR multi-word)
+      if (text.includes(" ") || /^[A-Z][a-z]/.test(text)) {
+        company = text;
+        break;
+      }
+    }
+
+    // Date — "May 04, 2026" pattern
+    const dateMatch = fullText.match(/([A-Z][a-z]{2}\s+\d{1,2},\s+\d{4})/);
+    let lastActivityAt = null;
+    const lastActivityLabel = dateMatch ? dateMatch[1] : null;
+    if (dateMatch) {
+      const parsed = new Date(dateMatch[1]);
+      if (!Number.isNaN(parsed.getTime())) {
+        lastActivityAt = parsed.toISOString();
+      }
+    }
+
+    return {
+      rowEl,
+      name,
+      phone,
+      company,
+      role: roles.length > 0 ? roles.join(", ") : null,
+      number_of_visits: visits,
+      level_of_interest: levelOfInterest,
+      last_activity_label: lastActivityLabel,
+      last_activity_at: lastActivityAt,
+    };
+  }
 
   function readListView() {
-    const rows = Array.from(document.querySelectorAll("tr"));
+    // Find all leaf elements whose text is exactly a phone number
+    const phoneRegex = /^\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}$/;
+    const phoneLeaves = Array.from(document.querySelectorAll("body *"))
+      .filter(
+        (n) =>
+          n.children.length === 0 &&
+          n.textContent &&
+          phoneRegex.test(n.textContent.trim())
+      );
+
+    // De-dupe by row container
+    const seenRows = new Set();
     const out = [];
-    for (const row of rows) {
-      const cells = Array.from(row.querySelectorAll("td"));
-      if (cells.length < 4) continue;
-
-      const fullText = (row.textContent || "").trim();
-      // Skip header rows / non-data rows
-      if (!fullText || fullText.toLowerCase().includes("number of visits")) continue;
-
-      // Look for a phone-shaped cell. CREXi uses "###.###.####" format.
-      const phoneMatch = fullText.match(/(\d{3}\.\d{3}\.\d{4})/);
-      if (!phoneMatch) continue;
-
-      // Name is the first cell with a meaningful capitalized text (after the avatar/pin column)
-      let name = "";
-      for (const cell of cells) {
-        const text = (cell.textContent || "").trim();
-        // Skip cells that are just the avatar initials (2 chars), phone, or the "Contact Lead" CTA
-        if (
-          text &&
-          text.length > 2 &&
-          text.length < 80 &&
-          !/^\d/.test(text) &&
-          !/contact lead/i.test(text) &&
-          !/visits$/i.test(text) &&
-          !text.match(/^[A-Z]{2,3}$/)
-        ) {
-          name = text;
-          break;
-        }
-      }
-      if (!name) continue;
-
-      // Visits — usually "X visits" or "X visit"
-      const visitsMatch = fullText.match(/(\d+)\s+visits?/i);
-      const visits = visitsMatch ? parseInt(visitsMatch[1], 10) : null;
-
-      // Listing activity status — last column. Look for the known funnel labels.
-      const FUNNEL_LABELS = [
-        "Executed CA",
-        "Downloaded DD",
-        "Opened OM",
-        "Opened Flyer",
-        "Requested Info",
-        "Calculated Valuation",
-        "Clicked Phone",
-        "Clicked Email",
-        "Printed Page",
-        "Saved Property",
-        "Visited Page",
-      ];
-      let levelOfInterest = null;
-      for (const label of FUNNEL_LABELS) {
-        if (fullText.includes(label)) {
-          levelOfInterest = label;
-          break;
-        }
-      }
-
-      // Company is the cell containing text but not matching name/phone/role/funnel
-      let company = null;
-      const KNOWN_ROLES = [
-        "BUYER REP",
-        "TENANT REP",
-        "LISTING REP",
-        "LANDLORD REP",
-        "PRINCIPAL INVESTOR",
-        "PRIVATE INVESTOR",
-        "PROPERTY MANAGER",
-        "REIT",
-        "COORDINATOR/ADMIN",
-      ];
-      for (const cell of cells) {
-        const text = (cell.textContent || "").trim();
-        if (
-          text &&
-          text !== name &&
-          text.length > 2 &&
-          text.length < 80 &&
-          !text.includes(phoneMatch[1]) &&
-          !KNOWN_ROLES.some((r) => text.toUpperCase().includes(r)) &&
-          !FUNNEL_LABELS.some((l) => text.includes(l)) &&
-          !/^\d+\s+visits?$/i.test(text) &&
-          !/contact lead/i.test(text)
-        ) {
-          company = text;
-          break;
-        }
-      }
-
-      // Roles — uppercase pills inside the row
-      const roles = [];
-      for (const r of KNOWN_ROLES) {
-        if (fullText.toUpperCase().includes(r)) roles.push(r);
-      }
-
-      // Last activity date — "May 04, 2026" pattern
-      const dateMatch = fullText.match(/([A-Z][a-z]{2}\s+\d{1,2},\s+\d{4})/);
-      let lastActivityAt = null;
-      let lastActivityLabel = dateMatch ? dateMatch[1] : null;
-      if (dateMatch) {
-        const parsed = new Date(dateMatch[1]);
-        if (!Number.isNaN(parsed.getTime())) {
-          lastActivityAt = parsed.toISOString();
-        }
-      }
-
-      out.push({
-        rowEl: row,
-        name,
-        phone: phoneMatch[1],
-        company,
-        role: roles.length > 0 ? roles.join(", ") : null,
-        number_of_visits: visits,
-        level_of_interest: levelOfInterest,
-        last_activity_label: lastActivityLabel,
-        last_activity_at: lastActivityAt,
-      });
+    for (const phoneEl of phoneLeaves) {
+      const phone = phoneEl.textContent.trim();
+      const rowEl = findRowContainer(phoneEl);
+      if (!rowEl || seenRows.has(rowEl)) continue;
+      seenRows.add(rowEl);
+      const parsed = parseRow(rowEl, phone);
+      if (parsed) out.push(parsed);
     }
     return out;
+  }
+
+  // Snapshot of what's actually on the page — emitted when readListView
+  // returns 0 so we can debug remotely without a real browser session.
+  function pageDiagnostic() {
+    return {
+      url: window.location.href.split("?")[0],
+      doc_state: document.readyState,
+      counts: {
+        tr: document.querySelectorAll("tr").length,
+        td: document.querySelectorAll("td").length,
+        role_row: document.querySelectorAll("[role=row]").length,
+        role_gridcell: document.querySelectorAll("[role=gridcell]").length,
+        mat_row: document.querySelectorAll("mat-row, .mat-row, .mat-mdc-row, cdk-row").length,
+        mat_table: document.querySelectorAll("mat-table, .mat-table, .mat-mdc-table, cdk-table").length,
+        any_table: document.querySelectorAll("table").length,
+      },
+      phones_detected: (document.body.textContent.match(/\d{3}\.\d{3}\.\d{4}/g) || []).slice(0, 8),
+      phone_leaf_count: Array.from(document.querySelectorAll("body *")).filter(
+        (n) =>
+          n.children.length === 0 &&
+          /^\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}$/.test((n.textContent || "").trim())
+      ).length,
+      body_text_sample: document.body.textContent.replace(/\s+/g, " ").slice(0, 500),
+    };
   }
 
   // ── Side-panel scraping ────────────────────────────────────────────────
@@ -367,15 +471,27 @@
       return { ok: false, error: "Not on a CREXi leads-dashboard URL" };
     }
 
-    // Wait for the table to render
+    // Wait for the table to render. We're patient — Angular Material data
+    // tables sometimes take 8–15s to populate in a backgrounded tab where
+    // Chrome throttles JS execution.
     await waitFor(
       () => readListView().length > 0,
-      { maxMs: 10000 }
+      { maxMs: 15000 }
     );
 
     const listRows = readListView();
     if (listRows.length === 0) {
-      return { ok: true, listing_id: listingId, leads: [], note: "No leads visible on this listing." };
+      // Return a diagnostic dump so the popup/server can see what was
+      // actually on the page — almost always means selectors need tuning.
+      const diag = pageDiagnostic();
+      return {
+        ok: true,
+        listing_id: listingId,
+        leads: [],
+        leads_count: 0,
+        note: "No leads detected — page diagnostic attached.",
+        diagnostic: diag,
+      };
     }
 
     const cached = await getCachedState(listingId);
@@ -448,6 +564,7 @@
           crexi_listing_id: listingId,
           scraped_at: new Date().toISOString(),
           leads: enriched.map(({ rowEl, ...rest }) => rest),
+          raw: enriched.length === 0 ? { diagnostic: pageDiagnostic() } : undefined,
         }),
       });
       result = await res.json().catch(() => ({}));

@@ -245,13 +245,14 @@ async function scrapeOneListing(property) {
     await chrome.tabs.remove(tabId);
   } catch {}
 
-  // Telemetry — last run per property
+  // Telemetry — last run per property (with diagnostic if 0 leads)
   await chrome.storage.local.set({
     [`leads_watcher_last_${property.crexi_listing_id}`]: {
       at: Date.now(),
       ok: !!result?.ok,
       leads_count: result?.leads_count || 0,
       error: result?.ok ? null : result?.error || null,
+      diagnostic: result?.diagnostic || null,
     },
   });
 }
