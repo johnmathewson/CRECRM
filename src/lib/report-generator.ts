@@ -30,6 +30,22 @@ interface ReportData {
   // True when the comp basis is a single derived rent estimate (sale comps × cap rate),
   // not observed leases. Triggers a banner so the reader knows the rate is modeled.
   derivedRent?: boolean;
+  // User-entered annual expenses. NOI = revenue - expenses. If absent, falls back to
+  // a 35% expense ratio (industry default for NWI commercial).
+  annualExpenses?: number;
+}
+
+// Default expense ratio when user doesn't supply annualExpenses. Mirrors valuation-engine.
+const DEFAULT_EXPENSE_RATIO = 0.35;
+
+// Compute NOI from gross revenue. If explicit expenses given, subtract them;
+// otherwise fall back to the default expense ratio.
+function computeNOI(grossRevenue: number, annualExpenses?: number): number {
+  if (grossRevenue <= 0) return 0;
+  if (annualExpenses && annualExpenses > 0) {
+    return Math.max(0, grossRevenue - annualExpenses);
+  }
+  return grossRevenue * (1 - DEFAULT_EXPENSE_RATIO);
 }
 
 type ReportType = "sale-bov" | "rental-opinion" | "stabilized-valuation";
@@ -337,9 +353,16 @@ function generateSaleBOV(data: ReportData): jsPDF {
   const marketAnnualRent = compWeightedRate > 0
     ? occupiedUnits.reduce((s, u) => s + compWeightedRate * (Number(u.square_footage) || 0), 0)
     : 0;
+  // NOI = revenue minus expenses. If user typed expenses, use them; otherwise default ratio.
+  // Market NOI uses the same expense ratio so the relative spread stays coherent.
+  const currentNOI = computeNOI(totalAnnualRent, data.annualExpenses);
+  const expenseRatio = totalAnnualRent > 0 && data.annualExpenses && data.annualExpenses > 0
+    ? data.annualExpenses / totalAnnualRent
+    : DEFAULT_EXPENSE_RATIO;
+  const marketNOI = marketAnnualRent * (1 - expenseRatio);
   const capRates = { conservative: 0.085, market: 0.075, aggressive: 0.065 };
-  const asIsValue = totalAnnualRent > 0 ? Math.round(totalAnnualRent / capRates.market) : 0;
-  const stabilizedValue = marketAnnualRent > 0 ? Math.round(marketAnnualRent / capRates.market) : 0;
+  const asIsValue = currentNOI > 0 ? Math.round(currentNOI / capRates.market) : 0;
+  const stabilizedValue = marketNOI > 0 ? Math.round(marketNOI / capRates.market) : 0;
 
   // ── PAGE 1: Cover ──
   addPageBg(doc);
@@ -519,8 +542,8 @@ function generateSaleBOV(data: ReportData): jsPDF {
     { label: "Aggressive", cap: capRates.aggressive },
   ];
   const asIsRows = scenarios.map((s) => {
-    const val = totalAnnualRent > 0 ? Math.round(totalAnnualRent / s.cap) : 0;
-    return [s.label, `${(s.cap * 100).toFixed(1)}%`, fmt(totalAnnualRent), fmt(val), fmtRate(val / (totalSF || 1))];
+    const val = currentNOI > 0 ? Math.round(currentNOI / s.cap) : 0;
+    return [s.label, `${(s.cap * 100).toFixed(1)}%`, fmt(Math.round(currentNOI)), fmt(val), fmtRate(val / (totalSF || 1))];
   });
 
   autoTable(doc, {
@@ -546,8 +569,8 @@ function generateSaleBOV(data: ReportData): jsPDF {
   y += 14;
 
   const stabRows = scenarios.map((s) => {
-    const val = marketAnnualRent > 0 ? Math.round(marketAnnualRent / s.cap) : 0;
-    return [s.label, `${(s.cap * 100).toFixed(1)}%`, fmt(Math.round(marketAnnualRent)), fmt(val), fmtRate(val / (totalSF || 1))];
+    const val = marketNOI > 0 ? Math.round(marketNOI / s.cap) : 0;
+    return [s.label, `${(s.cap * 100).toFixed(1)}%`, fmt(Math.round(marketNOI)), fmt(val), fmtRate(val / (totalSF || 1))];
   });
 
   autoTable(doc, {
@@ -806,6 +829,12 @@ function generateStabilizedValuation(data: ReportData): jsPDF {
 
   const totalAnnualRent = units.reduce((s, u) => s + effectiveAnnual(u), 0);
   const marketAnnualRent = occupiedUnits.reduce((s, u) => s + compWeightedRate * (Number(u.square_footage) || 0), 0);
+  // NOI = revenue - expenses. Use user-supplied annualExpenses if present, else default ratio.
+  const currentNOI = computeNOI(totalAnnualRent, data.annualExpenses);
+  const expenseRatio = totalAnnualRent > 0 && data.annualExpenses && data.annualExpenses > 0
+    ? data.annualExpenses / totalAnnualRent
+    : DEFAULT_EXPENSE_RATIO;
+  const marketNOI = marketAnnualRent * (1 - expenseRatio);
 
   const capRates = [
     { label: "Conservative", rate: 0.09,  desc: "Higher risk · older asset · secondary market" },
@@ -825,10 +854,10 @@ function generateStabilizedValuation(data: ReportData): jsPDF {
     y = addDerivedBanner(doc, y);
   }
 
-  // Three tiles: Conservative, Market, Aggressive
-  const consVal = marketAnnualRent > 0 ? Math.round(marketAnnualRent / 0.09) : 0;
-  const marketVal = marketAnnualRent > 0 ? Math.round(marketAnnualRent / 0.075) : 0;
-  const aggVal = marketAnnualRent > 0 ? Math.round(marketAnnualRent / 0.065) : 0;
+  // Three tiles: Conservative, Market, Aggressive (driven by stabilized market NOI)
+  const consVal = marketNOI > 0 ? Math.round(marketNOI / 0.09) : 0;
+  const marketVal = marketNOI > 0 ? Math.round(marketNOI / 0.075) : 0;
+  const aggVal = marketNOI > 0 ? Math.round(marketNOI / 0.065) : 0;
 
   const tileW = (CONTENT_W - 32) / 3;
   addValueTile(doc, MARGIN_X, y, tileW, "Conservative · 9.0% Cap",
@@ -844,10 +873,19 @@ function generateStabilizedValuation(data: ReportData): jsPDF {
   y += 86;
 
   y = addSectionEyebrow(doc, 0, "Income summary", y);
+  const expenseLabel = data.annualExpenses && data.annualExpenses > 0
+    ? `Annual expenses (entered)`
+    : `Annual expenses (${(DEFAULT_EXPENSE_RATIO * 100).toFixed(0)}% default ratio)`;
+  const expenseAmount = data.annualExpenses && data.annualExpenses > 0
+    ? data.annualExpenses
+    : Math.round(totalAnnualRent * DEFAULT_EXPENSE_RATIO);
   const incomeSummary = [
     ["Current annual revenue", fmt(totalAnnualRent)],
+    [expenseLabel, fmt(expenseAmount)],
+    ["Current NOI", fmt(Math.round(currentNOI))],
     ["Current weighted rate", `${fmtRate(totalSF > 0 ? totalAnnualRent / totalSF : 0)} / SF`],
     ["Market annual revenue", fmt(Math.round(marketAnnualRent))],
+    ["Market NOI", fmt(Math.round(marketNOI))],
     ["Market weighted rate", `${fmtRate(compWeightedRate)} / SF`],
     ["Revenue gap", fmt(Math.abs(Math.round(marketAnnualRent - totalAnnualRent)))],
     ["Total SF", fmtSF(totalSF)],
@@ -880,8 +918,8 @@ function generateStabilizedValuation(data: ReportData): jsPDF {
   y += 12;
 
   const asIsRows = capRates.map((s) => {
-    const val = totalAnnualRent > 0 ? Math.round(totalAnnualRent / s.rate) : 0;
-    return [s.label, `${(s.rate * 100).toFixed(1)}%`, fmt(totalAnnualRent), fmt(val), fmtRate(val / (totalSF || 1)), s.desc];
+    const val = currentNOI > 0 ? Math.round(currentNOI / s.rate) : 0;
+    return [s.label, `${(s.rate * 100).toFixed(1)}%`, fmt(Math.round(currentNOI)), fmt(val), fmtRate(val / (totalSF || 1)), s.desc];
   });
 
   autoTable(doc, {
@@ -909,8 +947,8 @@ function generateStabilizedValuation(data: ReportData): jsPDF {
   y += 12;
 
   const stabRows = capRates.map((s) => {
-    const val = marketAnnualRent > 0 ? Math.round(marketAnnualRent / s.rate) : 0;
-    return [s.label, `${(s.rate * 100).toFixed(1)}%`, fmt(Math.round(marketAnnualRent)), fmt(val), fmtRate(val / (totalSF || 1)), s.desc];
+    const val = marketNOI > 0 ? Math.round(marketNOI / s.rate) : 0;
+    return [s.label, `${(s.rate * 100).toFixed(1)}%`, fmt(Math.round(marketNOI)), fmt(val), fmtRate(val / (totalSF || 1)), s.desc];
   });
 
   autoTable(doc, {
@@ -941,12 +979,12 @@ function generateStabilizedValuation(data: ReportData): jsPDF {
   y += 12;
 
   const summaryRows = [
-    ["As-Is · Conservative", fmt(Math.round(totalAnnualRent / 0.09)),  "Current income at 9.0% cap"],
-    ["As-Is · Market",       fmt(Math.round(totalAnnualRent / 0.075)), "Current income at 7.5% cap"],
-    ["As-Is · Aggressive",   fmt(Math.round(totalAnnualRent / 0.065)), "Current income at 6.5% cap"],
-    ["Stabilized · Conservative", fmt(Math.round(marketAnnualRent / 0.09)),  "Market rates at 9.0% cap"],
-    ["Stabilized · Market",       fmt(Math.round(marketAnnualRent / 0.075)), "Market rates at 7.5% cap"],
-    ["Stabilized · Aggressive",   fmt(Math.round(marketAnnualRent / 0.065)), "Market rates at 6.5% cap"],
+    ["As-Is · Conservative", fmt(Math.round(currentNOI / 0.09)),  "Current NOI at 9.0% cap"],
+    ["As-Is · Market",       fmt(Math.round(currentNOI / 0.075)), "Current NOI at 7.5% cap"],
+    ["As-Is · Aggressive",   fmt(Math.round(currentNOI / 0.065)), "Current NOI at 6.5% cap"],
+    ["Stabilized · Conservative", fmt(Math.round(marketNOI / 0.09)),  "Market NOI at 9.0% cap"],
+    ["Stabilized · Market",       fmt(Math.round(marketNOI / 0.075)), "Market NOI at 7.5% cap"],
+    ["Stabilized · Aggressive",   fmt(Math.round(marketNOI / 0.065)), "Market NOI at 6.5% cap"],
   ];
 
   autoTable(doc, {

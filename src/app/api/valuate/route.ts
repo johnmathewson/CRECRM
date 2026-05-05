@@ -231,6 +231,7 @@ function buildReportData(result: ValuationResult, request: ValuationRequest): Re
     units,
     comps,
     derivedRent,
+    annualExpenses: request.annualExpenses,
     preparedDate: new Date().toLocaleDateString("en-US", {
       year: "numeric",
       month: "long",
