@@ -203,17 +203,46 @@ async function processNextLeadsStep() {
 }
 
 async function scrapeOneListing(property) {
-  // Open hidden tab
-  const tab = await chrome.tabs.create({
-    url: property.leads_url,
-    active: false,
-  });
-  if (!tab?.id) return;
+  // Open in a MINIMIZED window, not a background tab in the user's window.
+  //
+  // Why: chrome.tabs.create({ active: false }) puts the tab in the user's
+  // current window, which means Chrome throttles its JS as a "background
+  // tab." Angular Material data tables fetch via XHR after mount; under
+  // throttling the fetch can take 30+ seconds or never complete within
+  // our wait window.
+  //
+  // A minimized window is treated by Chrome as a real foreground window
+  // (no throttling) but isn't drawn on screen and doesn't steal focus.
+  // Best of both worlds: full JS speed, zero UX intrusion.
+  let windowId = null;
+  let tabId = null;
+  try {
+    const win = await chrome.windows.create({
+      url: property.leads_url,
+      state: "minimized",
+      focused: false,
+      type: "normal",
+    });
+    windowId = win?.id || null;
+    tabId = win?.tabs?.[0]?.id || null;
+  } catch (err) {
+    return; // window create failed
+  }
+  if (!tabId) {
+    if (windowId) {
+      try { await chrome.windows.remove(windowId); } catch {}
+    }
+    return;
+  }
 
-  const tabId = tab.id;
+  // Some platforms briefly un-minimize the window when you create it minimized.
+  // Re-assert minimized after a short delay so it stays out of John's way.
+  setTimeout(() => {
+    if (windowId !== null) {
+      chrome.windows.update(windowId, { state: "minimized", focused: false }).catch(() => {});
+    }
+  }, 500);
 
-  // Wait for content script + ask it to scrape. Chained retries every 2s
-  // until the script responds OR we hit the per-tab timeout.
   const result = await new Promise((resolve) => {
     let settled = false;
     const finish = (r) => {
@@ -240,10 +269,10 @@ async function scrapeOneListing(property) {
     setTimeout(tryOnce, 3000);
   });
 
-  // Always close the tab
-  try {
-    await chrome.tabs.remove(tabId);
-  } catch {}
+  // Close the entire window (which closes the tab inside it)
+  if (windowId !== null) {
+    try { await chrome.windows.remove(windowId); } catch {}
+  }
 
   // Telemetry — last run per property (with diagnostic if 0 leads)
   await chrome.storage.local.set({

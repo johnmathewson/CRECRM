@@ -471,12 +471,11 @@
       return { ok: false, error: "Not on a CREXi leads-dashboard URL" };
     }
 
-    // Wait for the table to render. We're patient — Angular Material data
-    // tables sometimes take 8–15s to populate in a backgrounded tab where
-    // Chrome throttles JS execution.
+    // Wait for the table to render. With minimized-window JS unthrottled,
+    // 8s is usually plenty, but we allow up to 20s for slow data loads.
     await waitFor(
       () => readListView().length > 0,
-      { maxMs: 15000 }
+      { maxMs: 20000 }
     );
 
     const listRows = readListView();
