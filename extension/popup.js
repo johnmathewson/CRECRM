@@ -164,7 +164,33 @@ async function refreshWatcherStatus() {
         ? "rgba(242,201,76,0.85)"
         : "rgba(231,76,60,0.85)";
       const verTag = p.watcher_version ? ` <span style="opacity:0.5">[${escapeHtml(p.watcher_version)}]</span>` : "";
-      html += `<div style="color:${color}; padding: 2px 0">· #${p.id} — ${status} · ${ago}m ago${verTag}</div>`;
+      const emailNote = p.ok && p.leads_count > 0 && p.emails_captured !== undefined && p.emails_captured !== null
+        ? ` · ${p.emails_captured}/${p.leads_count} emails`
+        : "";
+      html += `<div style="color:${color}; padding: 2px 0">· #${p.id} — ${status}${emailNote} · ${ago}m ago${verTag}</div>`;
+      // Panel diagnostic when emails were missing
+      if (p.ok && p.leads_count > 0 && p.emails_captured === 0 && p.panel_diagnostic) {
+        const pd = p.panel_diagnostic;
+        html += `<div style="color:rgba(242,201,76,0.8); font-size:10px; padding-left:10px; margin-top:3px">  panel scrape (lead 1): clicked &lt;${escapeHtml(pd.clicked_tag || "?")}${pd.clicked_role ? ` role=${escapeHtml(pd.clicked_role)}` : ""}&gt;, found=${pd.panel_found ? "✓" : "✗"}</div>`;
+        if (pd.panel_found && pd.panel_tag) {
+          html += `<div style="color:rgba(240,237,228,0.5); font-size:10px; padding-left:10px">    panel: &lt;${escapeHtml(pd.panel_tag)}&gt; class="${escapeHtml((pd.panel_class || "").slice(0,40))}"</div>`;
+        }
+        html += `<div style="color:rgba(240,237,228,0.45); font-size:10px; padding-left:10px">    aside text: ${pd.aside_text_before_len} → ${pd.aside_text_after_len} chars</div>`;
+        if (Array.isArray(pd.emails_on_page_after) && pd.emails_on_page_after.length > 0) {
+          html += `<div style="color:rgba(78,205,196,0.7); font-size:10px; padding-left:10px">    emails on page: [${pd.emails_on_page_after.map((e) => escapeHtml(e)).join(", ")}]</div>`;
+        } else {
+          html += `<div style="color:rgba(231,76,60,0.7); font-size:10px; padding-left:10px">    NO emails on page anywhere — panel didn't load lead detail</div>`;
+        }
+        if (pd.aside_text_sample) {
+          html += `<div style="color:rgba(240,237,228,0.4); font-size:9.5px; padding-left:10px; max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" title="${escapeHtml(pd.aside_text_sample)}">    aside: ${escapeHtml(pd.aside_text_sample.slice(0, 80))}…</div>`;
+        }
+        if (Array.isArray(pd.candidate_panels) && pd.candidate_panels.length > 0) {
+          html += `<div style="color:rgba(240,237,228,0.5); font-size:10px; padding-left:10px; margin-top:3px">    candidates:</div>`;
+          for (const cp of pd.candidate_panels) {
+            html += `<div style="color:rgba(240,237,228,0.4); font-size:9.5px; padding-left:18px">      &lt;${escapeHtml(cp.tag)}&gt; cls="${escapeHtml((cp.classes || "").slice(0,30))}" len=${cp.textLen}</div>`;
+          }
+        }
+      }
       if (isZeroLeads && p.diagnostic) {
         const d = p.diagnostic;
         const summary = [

@@ -205,7 +205,7 @@ async function processNextLeadsStep() {
   }
 }
 
-const WATCHER_VERSION = "v0.3.0-stickypair";
+const WATCHER_VERSION = "v0.3.1-paneldiag";
 
 // Wait for a tab to reach status: "complete" before sending messages to it
 function waitForTabComplete(tabId, timeoutMs = 30_000) {
@@ -384,8 +384,10 @@ async function scrapeOneListing(property) {
   await writeTelemetry({
     ok: !!result?.ok,
     leads_count: result?.leads_count || 0,
+    emails_captured: result?.emails_captured ?? null,
     error: result?.ok ? null : result?.error || null,
     diagnostic: result?.diagnostic || null,
+    panel_diagnostic: result?.panel_diagnostic || null,
   });
   console.log(`[stewardship leads] done #${property.crexi_listing_id}: ok=${!!result?.ok} count=${result?.leads_count || 0}`);
 }

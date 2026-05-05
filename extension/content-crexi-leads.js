@@ -502,48 +502,36 @@
   // After clicking a row, CREXi slides in a panel from the right. It
   // contains the lead's full contact info + an activity timeline.
 
-  async function scrapePanel(row) {
+  // Surface for one-time panel diagnostic — populated on first attempt
+  // when no email captured. Read by the orchestrator and sent up to API.
+  let _firstPanelDiagnostic = null;
+
+  async function scrapePanel(row, isFirstAttempt = false) {
     // Capture pre-click email set for diff detection
     const emailsBefore = new Set(
       (document.body.textContent.match(/\b[\w.+-]+@[\w.-]+\.\w{2,}\b/g) || [])
     );
+    const asideTextBefore = (document.querySelector("aside")?.textContent || "").trim();
 
-    // Find the single best click target: the name-leaf if available,
-    // otherwise the row itself. CREXi binds the panel-open handler to
-    // the row's outer container, so a row click works on most layouts.
-    let target = null;
-    const nameLeaf = Array.from(row.querySelectorAll("*"))
-      .filter((n) => n.children.length === 0 && (n.textContent || "").trim().length > 1)
-      .find((leaf) => {
-        const t = (leaf.textContent || "").trim();
-        return (
-          t.length > 3 &&
-          t.length < 60 &&
-          !/^\d/.test(t) &&
-          !/^[A-Z]{2,3}$/.test(t) &&
-          !/contact lead/i.test(t) &&
-          !FUNNEL_LABELS.some((l) => t === l) &&
-          !KNOWN_ROLES.some((r) => t.toUpperCase() === r) &&
-          (t.includes(" ") || /^[A-Z][a-z]/.test(t))
-        );
-      });
-    target = nameLeaf || row;
-
-    if (!target || typeof target.click !== "function") return null;
+    // Click strategy: the row element itself is the most reliable click
+    // target for Angular Material's mat-row (the (click) binding is on
+    // the row, not a child). Falling back to leaves can hit elements that
+    // stopPropagation the click event.
+    if (!row || typeof row.click !== "function") return null;
     try {
-      target.click();
+      row.click();
     } catch {
       return null;
     }
 
-    // Wait for the panel to surface a new email or contact-info label.
+    // Wait for the panel to populate. Either a NEW email appears, or
+    // an aside element's text grows substantially.
     const panel = await waitFor(
       () => {
-        // Strategy 1: any new email-shaped text appeared after click
+        // Strategy 1: any new email-shaped text on the page
         const allEmails = document.body.textContent.match(/\b[\w.+-]+@[\w.-]+\.\w{2,}\b/g) || [];
         const newEmails = allEmails.filter((e) => !emailsBefore.has(e));
         if (newEmails.length > 0) {
-          // Find the smallest container holding the new email
           const targetEmail = newEmails[0];
           const all = document.querySelectorAll("body *");
           for (const el of all) {
@@ -552,7 +540,15 @@
             }
           }
         }
-        // Strategy 2: explicit Email: label in a container of reasonable size
+        // Strategy 2: aside element's content grew (panel populated)
+        const aside = document.querySelector("aside");
+        if (aside) {
+          const text = aside.textContent || "";
+          if (text.length > asideTextBefore.length + 100 && /\d{3}\.\d{3}\.\d{4}|@/.test(text)) {
+            return aside;
+          }
+        }
+        // Strategy 3: explicit Email: label in any reasonably-sized container
         const labeled = document.querySelectorAll("aside, [class*='side-panel'], [class*='detail-panel'], [class*='lead-detail'], [role='dialog'], [class*='drawer']");
         for (const c of labeled) {
           const text = c.textContent || "";
@@ -562,8 +558,34 @@
         }
         return null;
       },
-      { maxMs: 1500 }
+      { maxMs: 3000 }
     );
+
+    // First-attempt diagnostic: capture page state regardless of success.
+    // The orchestrator picks this up to send back if no email was found.
+    if (isFirstAttempt && !_firstPanelDiagnostic) {
+      const aside = document.querySelector("aside");
+      const allPanels = Array.from(
+        document.querySelectorAll("aside, [class*='side-panel'], [class*='detail-panel'], [class*='lead-detail'], [role='dialog'], [class*='drawer']")
+      );
+      _firstPanelDiagnostic = {
+        clicked_tag: row.tagName?.toLowerCase(),
+        clicked_role: row.getAttribute?.("role"),
+        panel_found: !!panel,
+        panel_tag: panel?.tagName?.toLowerCase() || null,
+        panel_class: (panel?.className || "").toString().slice(0, 80),
+        aside_text_before_len: asideTextBefore.length,
+        aside_text_after_len: aside?.textContent?.length || 0,
+        aside_text_sample: aside?.textContent?.replace(/\s+/g, " ").slice(0, 600) || null,
+        emails_on_page_after: (document.body.textContent.match(/\b[\w.+-]+@[\w.-]+\.\w{2,}\b/g) || []).slice(0, 8),
+        candidate_panels: allPanels.slice(0, 5).map((p) => ({
+          tag: p.tagName?.toLowerCase(),
+          classes: (p.className || "").toString().slice(0, 60),
+          textLen: (p.textContent || "").length,
+          textSample: (p.textContent || "").replace(/\s+/g, " ").slice(0, 200),
+        })),
+      };
+    }
 
     if (!panel) return null;
 
@@ -763,15 +785,14 @@
       };
 
       if (shouldDeepScrape(row, priorCache)) {
+        const isFirstDeepScrape = enriched.length === 0; // not yet pushed
         try {
-          // Try name-row first (typical click target on CREXi), fall back
-          // to phone-row if needed.
           let panel = null;
           if (row.nameRowEl) {
-            panel = await scrapePanel(row.nameRowEl);
+            panel = await scrapePanel(row.nameRowEl, isFirstDeepScrape);
           }
           if (!panel && row.phoneRowEl) {
-            panel = await scrapePanel(row.phoneRowEl);
+            panel = await scrapePanel(row.phoneRowEl, isFirstDeepScrape);
           }
           if (panel) {
             baseLead.email = panel.email || baseLead.email;
@@ -839,10 +860,14 @@
       };
     }
 
+    // Compose return — include panel diagnostic when emails are missing
+    const emailsCaptured = enriched.filter((l) => l.email).length;
     return {
       ok: true,
       listing_id: listingId,
       leads_count: enriched.length,
+      emails_captured: emailsCaptured,
+      panel_diagnostic: emailsCaptured === 0 ? _firstPanelDiagnostic : null,
       result,
     };
   }
