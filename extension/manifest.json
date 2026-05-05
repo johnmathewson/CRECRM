@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Stewardship CRE — Listing Sync",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "description": "Pulls listing performance metrics + named lead engagement from CREXi/LoopNet into the Stewardship CRM.",
   "permissions": ["storage", "alarms", "activeTab", "tabs", "scripting"],
   "host_permissions": [
     "https://*.crexi.com/*",
     "https://*.loopnet.com/*",
+    "https://listingmanager.costar.com/*",
     "https://stewardship-crm.netlify.app/*",
     "http://localhost:3000/*"
   ],
@@ -42,6 +43,14 @@
     {
       "matches": ["https://*.loopnet.com/Listing/*", "https://*.loopnet.com/listing/*", "https://*.loopnet.com/products/*"],
       "js": ["content-loopnet.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://listingmanager.costar.com/listingperformancereport/*",
+        "https://listingmanager.costar.com/listing/*"
+      ],
+      "js": ["content-loopnet-share.js"],
       "run_at": "document_idle"
     }
   ]

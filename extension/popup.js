@@ -28,6 +28,9 @@ function detectSource(url) {
     url.includes("crexi.com/dashboard")
   ) return "crexi";
   if (/loopnet\.com\/(Listing|listing|products)\//.test(url)) return "loopnet";
+  // CoStar Listing Manager — share-report + listing edit pages, both
+  // backed by the LoopNet metrics flow
+  if (/listingmanager\.costar\.com\/(listingperformancereport|listing)\//.test(url)) return "loopnet";
   return null;
 }
 

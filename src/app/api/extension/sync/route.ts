@@ -116,32 +116,62 @@ export async function POST(req: NextRequest) {
   const idColumn = body.source === "crexi" ? "crexi_listing_id" : "loopnet_listing_id";
   const urlColumn = body.source === "crexi" ? "crexi_url" : "loopnet_url";
 
+  // Strategy 1: exact match on the listing_id column
   const { data: byId } = await supabase
     .from("properties")
-    .select("id, name, " + idColumn + ", " + urlColumn)
+    .select(`id, name, ${idColumn}, ${urlColumn}, loopnet_share_url`)
     .eq("organization_id", ORG_ID)
     .eq(idColumn, body.external_listing_id)
     .maybeSingle();
 
   let property: any = byId;
 
+  // Strategy 2: substring on the listing URL column
   if (!property && body.external_url) {
-    // Fall back: find by URL substring (extracts listing ID portion)
     const { data: byUrl } = await supabase
       .from("properties")
-      .select("id, name, " + idColumn + ", " + urlColumn)
+      .select(`id, name, ${idColumn}, ${urlColumn}, loopnet_share_url`)
       .eq("organization_id", ORG_ID)
       .ilike(urlColumn, `%${body.external_listing_id}%`)
       .maybeSingle();
     if (byUrl) {
       property = byUrl;
-      // Backfill the listing_id column for future lookups
       await supabase.from("properties").update({ [idColumn]: body.external_listing_id }).eq("id", property.id);
     }
   }
 
+  // Strategy 3 (LoopNet only): match the share URL. The CoStar listing-
+  // manager share-report URL is what John pastes into properties.loopnet_share_url
+  // when he wants this listing's metrics flowing into the dashboard. The
+  // share-token-based external_listing_id from content-loopnet-share.js
+  // looks like "share:<first-20-chars-of-token>", so we substring-match
+  // that token against the saved share URL.
+  if (!property && body.source === "loopnet") {
+    let shareTokenSubstring: string | null = null;
+    if (body.external_listing_id?.startsWith("share:")) {
+      shareTokenSubstring = body.external_listing_id.slice("share:".length);
+    } else if (body.external_url?.includes("/listingperformancereport/shared/")) {
+      const m = body.external_url.match(/\/listingperformancereport\/shared\/([A-Za-z0-9_=+/-]+)/);
+      if (m) shareTokenSubstring = m[1].slice(0, 20);
+    }
+    if (shareTokenSubstring) {
+      const { data: byShare } = await supabase
+        .from("properties")
+        .select(`id, name, ${idColumn}, ${urlColumn}, loopnet_share_url`)
+        .eq("organization_id", ORG_ID)
+        .ilike("loopnet_share_url", `%${shareTokenSubstring}%`)
+        .maybeSingle();
+      if (byShare) property = byShare;
+    }
+  }
+
   if (!property) {
-    const fieldLabel = body.source === "crexi" ? "CREXi URL" : "LoopNet URL";
+    const isShareReport = body.external_url?.includes("/listingperformancereport/shared/");
+    const fieldLabel = body.source === "crexi"
+      ? "CREXi URL"
+      : isShareReport
+      ? "LoopNet share report URL"
+      : "LoopNet URL";
     const urlToPaste = body.external_url || `(this listing's URL, ID ${body.external_listing_id})`;
     return NextResponse.json(
       {
