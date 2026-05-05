@@ -89,6 +89,10 @@ function eventIcon(type: string): string {
     case "archived": return "🗄️";
     case "promoted_to_deal": return "💼";
     case "error": return "⚠️";
+    // CREXi leads watcher (Phase 1)
+    case "crexi_lead_discovered": return "🆕";
+    case "crexi_engagement": return "🔥";
+    case "crexi_visit_increased": return "👀";
     default: return "•";
   }
 }
@@ -103,6 +107,10 @@ function eventColor(type: string): string {
     case "draft_generated": return C.coral;
     case "promoted_to_deal": return C.green;
     case "error": return C.red;
+    // CREXi leads watcher
+    case "crexi_lead_discovered": return C.teal;
+    case "crexi_engagement": return C.coral;
+    case "crexi_visit_increased": return C.amber;
     default: return C.charMuted;
   }
 }

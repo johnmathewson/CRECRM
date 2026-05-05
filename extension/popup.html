@@ -27,7 +27,16 @@
   <button id="sync">Sync this listing</button>
   <button id="settings" class="secondary">Settings</button>
   <div id="meta" class="meta"></div>
-  <div class="footer">v0.1 · <a href="#" id="open-options">Configure API key</a></div>
+
+  <div id="watcher-panel" style="margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.06);">
+    <div style="font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(240,237,228,0.55); margin-bottom: 6px;">
+      Leads watcher
+    </div>
+    <div id="watcher-status" style="font-size: 11px; color: rgba(240,237,228,0.75); line-height: 1.45;">Checking…</div>
+    <button id="run-watcher-now" class="secondary" style="margin-top: 8px;">Run leads watcher now</button>
+  </div>
+
+  <div class="footer">v0.2 · <a href="#" id="open-options">Configure API key</a></div>
   <script src="popup.js"></script>
 </body>
 </html>
