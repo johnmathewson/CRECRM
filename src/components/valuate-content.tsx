@@ -128,6 +128,13 @@ export default function ValuateContent() {
   const [result, setResult] = useState<ValuationResultData | null>(null);
   const [downloading, setDownloading] = useState<string | null>(null);
 
+  // Save-to-pipeline state
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [savedTo, setSavedTo] = useState<{ propertySlug: string; dealId: string | null } | null>(null);
+  const [saveRole, setSaveRole] = useState<string>("listing_broker");
+  const [saveTxn, setSaveTxn] = useState<string>("sale");
+
   // ── Unit management ────────────────────────────────────
   const addUnit = () => setUnits([...units, emptyUnit()]);
 
@@ -405,10 +412,65 @@ export default function ValuateContent() {
     setDownloading(null);
   };
 
+  // ── Save to Pipeline (Property + optional Deal) ────────
+  const saveValuation = async (addToDeals: boolean) => {
+    if (!result?.valuation) return;
+    setSaving(true);
+    setSaveError("");
+    setSavedTo(null);
+
+    const v = result.valuation;
+    const totalSF = v.subject.sqft || (totalSqft ? parseFloat(totalSqft) : undefined);
+    const stabilizedValue = v.reconciledValue?.high || v.reconciledValue?.mid || null;
+    const currentNOI = v.incomeApproach?.estimatedNOI ?? null;
+    const stabilizedRate = v.incomeApproach?.estimatedMarketRent ?? null;
+    const occupancyPct = occupancy ? parseFloat(occupancy) : null;
+    const yearBuiltNum = yearBuilt ? parseInt(yearBuilt) : null;
+    const pricePerSf = stabilizedValue && totalSF ? Math.round(stabilizedValue / totalSF) : null;
+
+    try {
+      const res = await fetch("/api/valuate/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          address: address.trim(),
+          formattedAddress: v.subject.geocoded?.formattedAddress,
+          city: v.subject.geocoded?.city,
+          state: v.subject.geocoded?.state,
+          assetType: v.subject.assetType || assetType || undefined,
+          sqft: totalSF,
+          yearBuilt: yearBuiltNum,
+          occupancyPct,
+          stabilizedValue,
+          currentNOI,
+          stabilizedRate,
+          capRate: v.salesComparison?.avgCapRate ?? 0.075,
+          pricePerSf,
+          yourRole: saveRole,
+          transactionType: saveTxn,
+          addToDeals,
+          notes: `Saved from valuation tool · ${new Date().toLocaleDateString()}`,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSaveError(data.error || "Failed to save");
+        return;
+      }
+      setSavedTo({ propertySlug: data.propertySlug, dealId: data.dealId });
+    } catch (err: any) {
+      setSaveError(err.message || "Network error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // ── Reset ──────────────────────────────────────────────
   const reset = () => {
     setResult(null);
     setError("");
+    setSavedTo(null);
+    setSaveError("");
   };
 
   const v = result?.valuation;
@@ -1041,6 +1103,81 @@ export default function ValuateContent() {
                 </div>
               </Panel>
             )}
+
+            {/* Save to Pipeline */}
+            <Panel title="Save to Pipeline" actions={<span />}>
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 12 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <label style={{ fontSize: 10, color: "rgba(240,237,228,0.5)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                    Your role
+                  </label>
+                  <select
+                    value={saveRole}
+                    onChange={(e) => setSaveRole(e.target.value)}
+                    style={{ ...selectStyle, width: 180 }}
+                    disabled={saving || !!savedTo}
+                  >
+                    <option value="listing_broker">Listing broker</option>
+                    <option value="buyer_broker">Buyer broker</option>
+                    <option value="owner">Owner</option>
+                    <option value="investor">Investor</option>
+                    <option value="advisor">Advisor</option>
+                  </select>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <label style={{ fontSize: 10, color: "rgba(240,237,228,0.5)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                    Transaction
+                  </label>
+                  <select
+                    value={saveTxn}
+                    onChange={(e) => setSaveTxn(e.target.value)}
+                    style={{ ...selectStyle, width: 140 }}
+                    disabled={saving || !!savedTo}
+                  >
+                    <option value="sale">Sale</option>
+                    <option value="lease">Lease</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button
+                  style={{ ...btnSecondary, opacity: savedTo ? 0.5 : 1 }}
+                  onClick={() => saveValuation(false)}
+                  disabled={saving || !!savedTo}
+                >
+                  {saving && !savedTo ? "Saving..." : "Save as Property"}
+                </button>
+                <button
+                  style={{ ...btnPrimary, opacity: savedTo ? 0.5 : 1 }}
+                  onClick={() => saveValuation(true)}
+                  disabled={saving || !!savedTo}
+                >
+                  {saving && !savedTo ? "Saving..." : "Save & Add to Deals"}
+                </button>
+              </div>
+
+              {saveError && (
+                <p style={{ marginTop: 10, fontSize: 12, color: "#E07A5F" }}>{saveError}</p>
+              )}
+              {savedTo && (
+                <div style={{ marginTop: 12, padding: 10, borderRadius: 4, background: "rgba(78,205,196,0.08)", border: "1px solid rgba(78,205,196,0.25)" }}>
+                  <p style={{ fontSize: 12, color: "#4ECDC4", margin: 0, marginBottom: 6 }}>
+                    ✓ Saved to your pipeline
+                  </p>
+                  <div style={{ fontSize: 12, color: "rgba(240,237,228,0.7)", display: "flex", gap: 12, flexWrap: "wrap" }}>
+                    <a href={`/properties/${savedTo.propertySlug}`} style={{ color: "#E07A5F", textDecoration: "underline" }}>
+                      View property →
+                    </a>
+                    {savedTo.dealId && (
+                      <a href={`/deals`} style={{ color: "#E07A5F", textDecoration: "underline" }}>
+                        View in Deals pipeline →
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+            </Panel>
 
             {/* PDF Downloads */}
             <Panel title="Download Reports" actions={<span />}>
