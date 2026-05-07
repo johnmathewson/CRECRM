@@ -17,7 +17,9 @@ html {
 }
 
 body {
-  background: linear-gradient(160deg, #0A1615 0%, #0D1F1E 30%, #142827 60%, #0B1918 100%);
+  /* Charcoal-anchored ink — subtle 4-stop gradient through the charcoal scale,
+     no green tint. Editorial financial-terminal energy. */
+  background: linear-gradient(160deg, #0D0D0D 0%, #141414 30%, #1A1A1A 60%, #0D0D0D 100%);
   color: var(--cream);
   min-height: 100vh;
 }

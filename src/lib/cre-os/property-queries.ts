@@ -37,12 +37,32 @@ export interface PropertyCard {
   noi: number | null;
   capRate: number | null;
   occupancyPct: number | null;
+
   /** Days since the last activity touched this property */
   daysSinceTouch: number | null;
   /** Open task count */
   openTasks: number;
+  /** Overdue task count */
+  overdueTasks: number;
   /** Hot-lead count referencing this property */
   hotLeads: number;
+
+  /** Intelligence flags — booleans that drive triage filters and badges */
+  isHot: boolean;          // any unanswered hot lead
+  isQuiet: boolean;        // listed/active and 12+ days since last touch
+  isStale: boolean;        // listed and > 14 days since last touch (stronger signal)
+  isMissingValuation: boolean; // listed/active without noi+capRate set
+  isClosingSoon: boolean;  // not yet wired (needs deal join); reserved for future
+
+  /**
+   * Priority score — higher = more attention-worthy. Drives "Today's focus"
+   * sort. Combines hot leads, overdue tasks, stage staleness, missing valuation.
+   * Cards score zero when nothing's pending.
+   */
+  priorityScore: number;
+
+  /** One-line, human-readable next action — null when calm */
+  nextAction: string | null;
 }
 
 export interface PropertyKeyContact {
@@ -181,15 +201,40 @@ export async function loadPropertyList(filters: PropertyListFilters = {}): Promi
   const ids = props.map((p) => p.id);
 
   // Aggregate signals — one query each, merge by property_id
-  const [activityMap, taskMap, hotLeadMap] = await Promise.all([
+  const [activityMap, taskMap, overdueTaskMap, hotLeadMap] = await Promise.all([
     fetchLastActivityByProperty(ids),
     fetchOpenTaskCounts(ids),
+    fetchOverdueTaskCounts(ids),
     fetchHotLeadCounts(ids),
   ]);
 
   return props.map((p): PropertyCard => {
     const lastActivityIso = activityMap.get(p.id);
     const daysSinceTouch = lastActivityIso ? daysSince(lastActivityIso) : null;
+    const status = (p.status ?? "").toLowerCase();
+    const listed = status === "listed" || status === "active";
+
+    const hotLeads = hotLeadMap.get(p.id) ?? 0;
+    const openTasks = taskMap.get(p.id) ?? 0;
+    const overdueTasks = overdueTaskMap.get(p.id) ?? 0;
+
+    const isHot = hotLeads > 0;
+    const isQuiet = listed && daysSinceTouch !== null && daysSinceTouch >= 12;
+    const isStale = listed && daysSinceTouch !== null && daysSinceTouch >= 14;
+    const isMissingValuation =
+      listed && (numOrNull(p.noi) === null || numOrNull(p.cap_rate) === null);
+
+    // Priority score — composite of urgency signals. Tuned so a single hot
+    // lead beats a quiet listing, an overdue task beats stale, and "closes
+    // this week" (when wired in Phase 4) beats everything.
+    let priorityScore = 0;
+    priorityScore += hotLeads * 3;
+    priorityScore += overdueTasks * 2;
+    if (isStale) priorityScore += 2;
+    else if (isQuiet) priorityScore += 1;
+    if (isMissingValuation) priorityScore += 1;
+    if (openTasks > 0 && overdueTasks === 0) priorityScore += 1;
+
     return {
       id: p.id,
       slug: p.slug,
@@ -207,11 +252,46 @@ export async function loadPropertyList(filters: PropertyListFilters = {}): Promi
       noi: numOrNull(p.noi),
       capRate: numOrNull(p.cap_rate),
       occupancyPct: numOrNull(p.occupancy_pct),
+
       daysSinceTouch,
-      openTasks: taskMap.get(p.id) ?? 0,
-      hotLeads: hotLeadMap.get(p.id) ?? 0,
+      openTasks,
+      overdueTasks,
+      hotLeads,
+      isHot,
+      isQuiet,
+      isStale,
+      isMissingValuation,
+      isClosingSoon: false, // wired when deal join lands
+
+      priorityScore,
+      nextAction: pickNextAction({
+        hotLeads, overdueTasks, openTasks, isStale, isQuiet,
+        isMissingValuation, listed, daysSinceTouch,
+      }),
     };
   });
+}
+
+/** Pick the single most-urgent next action to surface on the card. Order
+ * matters: hot leads dominate, then overdue, then stage-staleness, then
+ * gentle nudges. Returns null when the asset is calm. */
+function pickNextAction(s: {
+  hotLeads: number;
+  overdueTasks: number;
+  openTasks: number;
+  isStale: boolean;
+  isQuiet: boolean;
+  isMissingValuation: boolean;
+  listed: boolean;
+  daysSinceTouch: number | null;
+}): string | null {
+  if (s.hotLeads > 0) return `Reply to ${s.hotLeads} hot lead${s.hotLeads === 1 ? "" : "s"}`;
+  if (s.overdueTasks > 0) return `Resolve ${s.overdueTasks} overdue task${s.overdueTasks === 1 ? "" : "s"}`;
+  if (s.isStale) return "Refresh listing — 14+ days quiet";
+  if (s.isQuiet) return "Owner update due";
+  if (s.isMissingValuation) return "Run a fresh BOV";
+  if (s.openTasks > 0) return `Work ${s.openTasks} open task${s.openTasks === 1 ? "" : "s"}`;
+  return null;
 }
 
 // ── Detail loader ──────────────────────────────────────────────────────────
@@ -298,6 +378,23 @@ async function fetchOpenTaskCounts(ids: string[]): Promise<Map<string, number>> 
     .eq("organization_id", ORG_ID)
     .in("property_id", ids)
     .neq("status", "done");
+  const m = new Map<string, number>();
+  for (const r of (data ?? []) as any[]) {
+    m.set(r.property_id, (m.get(r.property_id) ?? 0) + 1);
+  }
+  return m;
+}
+
+async function fetchOverdueTaskCounts(ids: string[]): Promise<Map<string, number>> {
+  const sb = createServerSupabase();
+  const today = new Date().toISOString().slice(0, 10);
+  const { data } = await sb
+    .from("tasks")
+    .select("property_id")
+    .eq("organization_id", ORG_ID)
+    .in("property_id", ids)
+    .neq("status", "done")
+    .lt("due_date", today);
   const m = new Map<string, number>();
   for (const r of (data ?? []) as any[]) {
     m.set(r.property_id, (m.get(r.property_id) ?? 0) + 1);

@@ -9,15 +9,17 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Brand backgrounds (4-stop gradient mirrors the marketing site)
+        // Brand backgrounds — charcoal-anchored (dropped green tint per
+        // brand evolution; mirrors the editorial financial-terminal feel
+        // closer than the teal-base did).
         steward: {
-          base: "#0A1615",
-          dark: "#0D1F1E",
-          mid: "#142827",
-          panel: "#1A2726",
-          ink: "#0A1615",      // alias for "page"
-          surface: "#142827",  // raised panel
-          surfaceHi: "#1A2726",// active/selected panel
+          base: "#0D0D0D",     // charcoal-950 — page background
+          dark: "#1A1A1A",     // charcoal-900 — alt page bg / sticky overlays
+          mid: "#282828",      // charcoal-800 — raised surface (cards, panels)
+          panel: "#383838",    // charcoal-700 — active / selected panel
+          ink: "#0D0D0D",
+          surface: "#1A1A1A",
+          surfaceHi: "#282828",
         },
         coral: {
           50:  "#FCF1EE",
