@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { createClient } from "@supabase/supabase-js";
 import { computeSellerNet, type SellerNetInputs } from "@/lib/seller-net";
 import { OfferPrintView } from "./OfferPrintView";
 
@@ -13,16 +13,20 @@ export const dynamic = "force-dynamic";
  * print effect fires `window.print()` on load so the user just hits "Save
  * as PDF" in the system print dialog.
  *
- * Server-renders so the page is fully populated before the print fires —
- * no flicker, no missing data. The layout is a single page (Letter size)
- * with Stewardship CRE branding and the full numeric breakdown.
+ * Uses the anon client (NOT the cookie-session client) so RLS-by-anon-role
+ * on seller_net_offers and properties applies the same way the API routes
+ * see the data. With the cookie client the queries run as `authenticated`,
+ * which has no policies on these tables → notFound() → 404.
  */
 export default async function OfferPrintPage({
   params,
 }: {
   params: { slug: string; offerId: string };
 }) {
-  const sb = createServerSupabase();
+  const sb = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
 
   const { data: property } = await sb
     .from("properties")

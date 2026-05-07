@@ -233,7 +233,7 @@ export function OfferPrintView({
                     Preferred: <b>{fmtMoneyExact(p.preferred_return)}</b>
                   </span>
                   <span>
-                    Owed: <b>{fmtMoneyExact(p.owed)}</b>
+                    Residual share: <b>{fmtMoneyExact(p.residual_share)}</b>
                   </span>
                   <span className="accent">
                     Total dist: <b>{fmtMoneyExact(p.total_distribution)}</b>

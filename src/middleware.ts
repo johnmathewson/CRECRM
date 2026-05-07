@@ -29,8 +29,24 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // If not logged in and not already on /login, redirect to login
-  if (!user && !request.nextUrl.pathname.startsWith("/login") && !request.nextUrl.pathname.startsWith("/auth")) {
+  // Public routes — exempt from auth redirect:
+  //   /login, /auth/*  : the auth flow itself
+  //   /cre-os/properties/*/offers/*/print : seller-net PDF print pages, opened
+  //                       both from CRE OS (admin) and from owner-portal magic
+  //                       links (no CRM session). The URL embeds opaque IDs
+  //                       (property slug + offer UUID) and the page only reads
+  //                       data scoped to those IDs — same share-by-link model
+  //                       as the magic links themselves.
+  const isPrintRoute = /^\/cre-os\/properties\/[^/]+\/offers\/[^/]+\/print/.test(
+    request.nextUrl.pathname
+  );
+
+  if (
+    !user &&
+    !request.nextUrl.pathname.startsWith("/login") &&
+    !request.nextUrl.pathname.startsWith("/auth") &&
+    !isPrintRoute
+  ) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
