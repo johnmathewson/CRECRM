@@ -7,6 +7,7 @@
  */
 
 import { createServerSupabase } from "@/lib/supabase/server";
+import { formatDueLabel, formatShortDate, humanizeActivity, relativeTime } from "./time-utils";
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 
@@ -365,49 +366,3 @@ function buildSummary(chips: CopilotChipData, tasks: TaskRow[], kpis: DashboardK
   return bits.length ? bits.join(" · ") : "Pipeline looks calm. Good day to source new opportunities.";
 }
 
-function formatDueLabel(dateStr: string | null, today: string): string {
-  if (!dateStr) return "—";
-  if (dateStr === today) return "Today";
-  // tomorrow
-  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
-  if (dateStr === tomorrow) return "Tomorrow";
-  // overdue
-  if (dateStr < today) return `Overdue · ${formatShortDate(dateStr)}`;
-  return formatShortDate(dateStr);
-}
-
-function formatShortDate(s: string): string {
-  const [y, m, d] = s.split("-").map(Number);
-  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  return `${months[(m ?? 1) - 1]} ${d}`;
-}
-
-function relativeTime(iso: string | null): string {
-  if (!iso) return "—";
-  const t = new Date(iso).getTime();
-  const diff = Math.max(0, Date.now() - t);
-  const m = Math.round(diff / 60000);
-  if (m < 1) return "just now";
-  if (m < 60) return `${m}m ago`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const d = Math.round(h / 24);
-  if (d < 7) return `${d}d ago`;
-  return formatShortDate(new Date(t).toISOString().slice(0, 10));
-}
-
-function humanizeActivity(t: string | null | undefined): string {
-  switch ((t ?? "").toLowerCase()) {
-    case "email":          return "emailed";
-    case "call":           return "called";
-    case "meeting":        return "met with";
-    case "tour":           return "toured";
-    case "note":           return "noted";
-    case "stage_change":   return "advanced stage on";
-    case "valuation_run":  return "ran a valuation on";
-    case "comp_import":    return "imported comps for";
-    case "doc_upload":     return "uploaded a document for";
-    case "task_complete":  return "completed a task on";
-    default:               return "updated";
-  }
-}
