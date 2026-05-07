@@ -48,11 +48,15 @@ export interface SellerNetTotals {
   commission: number;
   /** Net of credits/debits across all line_items (positive = adds to seller). */
   adjustments: number;
-  /** offer_price - commission + adjustments */
+  /** offer_price - commission + adjustments — the seller's gross before any partner waterfall. */
   net_proceeds: number;
-  /** Sum of capital + preferred-return owed across all partners. */
+  /** Sum of every partner's capital contribution. Surfaced as the "Initial investment" line. */
+  total_capital: number;
+  /** Sum of every partner's preferred return earned (capital × pref% × hold years). */
+  total_preferred: number;
+  /** total_capital + total_preferred — kept for backwards-compat with saved offer rows. */
   partners_due: number;
-  /** net_proceeds - partners_due */
+  /** net_proceeds - partners_due — the residual that gets split by ownership %. */
   net_after_partners: number;
   /** Per-partner breakdown for distribution display. */
   partner_breakdown: Array<{
@@ -65,9 +69,13 @@ export interface SellerNetTotals {
     residual_share: number;
     /** Total distribution to this partner = owed + residual_share. */
     total_distribution: number;
+    /** Their ownership % stake (mirrored from input for display convenience). */
+    ownership_pct: number;
   }>;
   /** Residual that goes to sponsor / common (sum of unallocated ownership %). */
   sponsor_residual: number;
+  /** Sponsor / common ownership % (100 - sum of partner ownership). */
+  sponsor_pct: number;
 }
 
 const num = (v: any): number => {
@@ -102,11 +110,13 @@ export function computeSellerNet(inputs: SellerNetInputs): SellerNetTotals {
     };
   });
 
-  const partners_due = breakdown.reduce((s, p) => s + p.owed, 0);
+  const total_capital = breakdown.reduce((s, p) => s + p.capital, 0);
+  const total_preferred = breakdown.reduce((s, p) => s + p.preferred_return, 0);
+  const partners_due = total_capital + total_preferred;
   const net_after_partners = net_proceeds - partners_due;
 
   const totalOwnership = breakdown.reduce((s, p) => s + p.ownership_pct, 0);
-  const sponsorPct = Math.max(0, 100 - totalOwnership);
+  const sponsor_pct = Math.max(0, 100 - totalOwnership);
 
   // Residual is what's left after capital + pref. It splits by ownership_pct.
   const partner_breakdown = breakdown.map((p) => {
@@ -118,18 +128,22 @@ export function computeSellerNet(inputs: SellerNetInputs): SellerNetTotals {
       owed: p.owed,
       residual_share,
       total_distribution: p.owed + residual_share,
+      ownership_pct: p.ownership_pct,
     };
   });
 
-  const sponsor_residual = (net_after_partners * sponsorPct) / 100;
+  const sponsor_residual = (net_after_partners * sponsor_pct) / 100;
 
   return {
     commission,
     adjustments,
     net_proceeds,
+    total_capital,
+    total_preferred,
     partners_due,
     net_after_partners,
     partner_breakdown,
     sponsor_residual,
+    sponsor_pct,
   };
 }

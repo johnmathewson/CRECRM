@@ -65,6 +65,7 @@ const DEFAULT_LINE_ITEMS: SellerNetLineItem[] = [
   { label: "Tax prorations", amount: 0, sign: "credit" },
   { label: "Tax credits", amount: 0, sign: "credit" },
   { label: "Seller concessions", amount: 0, sign: "debit" },
+  { label: "Mortgage payoff", amount: 0, sign: "debit" },
 ];
 
 const fmtMoney = (n: number) => {
@@ -537,7 +538,7 @@ export function OffersTab({ p }: { p: PropertyDetail }) {
             </div>
 
             {/* Live totals column */}
-            {totals && <LiveTotals totals={totals} />}
+            {totals && editorInputs && <LiveTotals inputs={editorInputs} totals={totals} />}
           </div>
         </Panel>
       )}
@@ -810,33 +811,102 @@ function PartnerRow({
   );
 }
 
-function LiveTotals({ totals }: { totals: SellerNetTotals }) {
-  // Derived offer = commission + (net - adj) — derive from totals so we
-  // don't need to thread the raw input number into here.
-  const offerPrice = totals.commission + totals.net_proceeds - totals.adjustments;
+/**
+ * LiveTotals — the right-side waterfall panel.
+ *
+ * Layout (top to bottom):
+ *   1. Offer price
+ *   2. Commission (with rate label if a % was set)
+ *   3. Each line item individually, with its label and signed amount
+ *   4. Initial investment (sum of all partner capital — only shown if > 0)
+ *   5. Preferred return (sum of all preferred — only shown if > 0)
+ *   6. Net proceeds (the residual that's distributed by ownership %)
+ *   7. Distribution rows: each ownership-% partner + sponsor/common
+ *
+ * Math note: total of distribution rows == Net proceeds. Partners with
+ * capital but 0% ownership received their take in lines 4–5; they don't
+ * also appear in the distribution section (would double-count).
+ */
+function LiveTotals({ inputs, totals }: { inputs: SellerNetInputs; totals: SellerNetTotals }) {
+  const offerPrice = inputs.offer_price;
+  const commissionLabel =
+    inputs.commission_pct !== null && inputs.commission_pct !== undefined && inputs.commission_pct !== 0
+      ? `Commission (${inputs.commission_pct}%)`
+      : "Commission";
+  const hasPartners = inputs.partners.length > 0;
+  // Distribution recipients = ownership-% partners + (sponsor if non-zero %).
+  const distributionPartners = totals.partner_breakdown.filter((p) => p.ownership_pct > 0);
+  const showDistribution =
+    hasPartners && (distributionPartners.length > 0 || totals.sponsor_pct > 0) && totals.net_after_partners !== 0;
+
   return (
     <div className="rounded border border-coral-400/25 bg-coral-400/[0.04] p-4 self-start">
       <div className="font-mono text-[9px] uppercase tracking-eyebrow text-coral-400 mb-3">Live result</div>
+
       <Row label="Offer price" value={fmtMoneyExact(offerPrice)} />
-      <Row label="Commission" value={"-" + fmtMoneyExact(totals.commission)} muted />
-      <Row
-        label="Adjustments (net)"
-        value={(totals.adjustments >= 0 ? "+" : "") + fmtMoneyExact(totals.adjustments)}
-        muted
-      />
-      <div className="my-3 border-t border-white/[0.08]" />
-      <Row label="Net proceeds" value={fmtMoneyExact(totals.net_proceeds)} emphasize />
-      {totals.partners_due > 0 && (
+      <Row label={commissionLabel} value={"-" + fmtMoneyExact(totals.commission)} muted />
+
+      {/* Each line item, individually labeled. Hide $0 lines so the panel
+          doesn't fill up with placeholder rows from the default form. */}
+      {inputs.line_items
+        .filter((li) => li.amount !== 0)
+        .map((li, i) => (
+          <Row
+            key={i}
+            label={li.label || (li.sign === "credit" ? "Credit" : "Debit")}
+            value={(li.sign === "credit" ? "+" : "-") + fmtMoneyExact(li.amount)}
+            muted
+          />
+        ))}
+
+      {/* Partner-side deductions */}
+      {(totals.total_capital > 0 || totals.total_preferred > 0) && (
         <>
-          <Row label="Partners owed" value={"-" + fmtMoneyExact(totals.partners_due)} muted />
-          <div className="my-3 border-t border-white/[0.08]" />
-          <Row label="Net after partners" value={fmtMoneyExact(totals.net_after_partners)} emphasize />
-          {totals.sponsor_residual !== 0 && (
-            <p className="mt-3 font-body text-[10.5px] text-cream-subtle">
-              Sponsor / common: <span className="font-mono text-cream">{fmtMoneyExact(totals.sponsor_residual)}</span>
-            </p>
+          <div className="my-2 border-t border-white/[0.06]" />
+          {totals.total_capital > 0 && (
+            <Row label="Initial investment" value={"-" + fmtMoneyExact(totals.total_capital)} muted />
+          )}
+          {totals.total_preferred > 0 && (
+            <Row label="Preferred return" value={"-" + fmtMoneyExact(totals.total_preferred)} muted />
           )}
         </>
+      )}
+
+      <div className="my-3 border-t border-white/[0.08]" />
+      <Row label="Net proceeds" value={fmtMoneyExact(totals.net_after_partners)} emphasize />
+
+      {/* Distribution of the residual */}
+      {showDistribution && (
+        <div className="mt-4 pt-3 border-t border-white/[0.08]">
+          <div className="font-mono text-[9px] uppercase tracking-eyebrow text-cream-subtle mb-2">
+            Distribution
+          </div>
+          {distributionPartners.map((p, i) => (
+            <Row
+              key={i}
+              label={`${p.name} (${p.ownership_pct}%)`}
+              value={fmtMoneyExact(p.residual_share)}
+              partner
+            />
+          ))}
+          {totals.sponsor_pct > 0 && (
+            <Row
+              label={`Sponsor / Common (${totals.sponsor_pct}%)`}
+              value={fmtMoneyExact(totals.sponsor_residual)}
+              partner
+            />
+          )}
+        </div>
+      )}
+
+      {/* Note for capital-only partners (0% ownership) — they got paid in the
+          deduction lines above, not in the distribution. Help the user
+          reconcile the math. */}
+      {hasPartners && totals.partner_breakdown.some((p) => p.ownership_pct === 0 && p.owed > 0) && (
+        <p className="mt-3 font-body text-[10px] text-cream-subtle italic">
+          Capital-only partners (0% ownership) are paid in the deductions above; they do not also appear in the
+          distribution.
+        </p>
       )}
     </div>
   );
@@ -847,12 +917,23 @@ function Row({
   value,
   emphasize,
   muted,
+  partner,
 }: {
   label: string;
   value: string;
   emphasize?: boolean;
   muted?: boolean;
+  /** Distribution-row styling — partner name on left, money on right, slightly tighter. */
+  partner?: boolean;
 }) {
+  if (partner) {
+    return (
+      <div className="flex items-baseline justify-between py-1">
+        <span className="font-body text-[11px] text-cream-dim truncate pr-2">{label}</span>
+        <span className="font-mono text-[12px] text-cream font-medium shrink-0">{value}</span>
+      </div>
+    );
+  }
   return (
     <div className="flex items-baseline justify-between py-1.5">
       <span
@@ -1053,7 +1134,10 @@ function OfferRow({
         </div>
       </div>
 
-      {/* Stats grid */}
+      {/* Stats grid — uses the same labels as the live panel so the math
+          reads consistently from input → result. "Net proceeds" here is
+          the residual that gets distributed by ownership %, matching the
+          coral-highlighted line in the editor. */}
       <div className="mt-3 pt-3 border-t border-white/[0.04] grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 font-body text-[11px]">
         <Stat label="Offer" value={fmtMoney(offer.offer_price)} />
         <Stat
@@ -1062,18 +1146,20 @@ function OfferRow({
           muted
         />
         <Stat
-          label="Net proceeds"
+          label="Subtotal"
           value={offer.computed_net_proceeds !== null ? fmtMoney(offer.computed_net_proceeds) : "—"}
-          emphasize
+          muted
         />
         <Stat
-          label="After partners"
+          label="Net proceeds"
           value={
-            offer.computed_partners_due && offer.computed_partners_due > 0 && offer.computed_net_after_partners !== null
+            offer.computed_net_after_partners !== null
               ? fmtMoney(offer.computed_net_after_partners)
-              : "—"
+              : offer.computed_net_proceeds !== null
+                ? fmtMoney(offer.computed_net_proceeds)
+                : "—"
           }
-          emphasize={!!offer.computed_partners_due && offer.computed_partners_due > 0}
+          emphasize
         />
       </div>
 

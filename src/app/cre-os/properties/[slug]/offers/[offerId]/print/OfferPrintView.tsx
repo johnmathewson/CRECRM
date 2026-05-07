@@ -184,7 +184,10 @@ export function OfferPrintView({
           )}
         </div>
 
-        {/* Line items table */}
+        {/* Closing-cost reconciliation — single waterfall table that flows
+            offer → commission → each line item → initial investment →
+            preferred return → Net proceeds. Mirrors the live calculator
+            so the PDF reads identically to what the broker saw on screen. */}
         <div className="section">
           <div className="label-line">Closing-cost reconciliation</div>
           <table className="table">
@@ -203,81 +206,99 @@ export function OfferPrintView({
                 <td>Commission{inputs.commission_pct !== null && inputs.commission_pct !== undefined ? ` (${inputs.commission_pct}%)` : ""}</td>
                 <td className="num debit">-{fmtMoneyExact(totals.commission)}</td>
               </tr>
-              {(inputs.line_items ?? []).map((li, i) => (
-                <tr key={i}>
-                  <td>{li.label || (li.sign === "credit" ? "Credit" : "Debit")}</td>
-                  <td className={`num ${li.sign === "debit" ? "debit" : ""}`}>
-                    {li.sign === "debit" ? "-" : "+"}
-                    {fmtMoneyExact(li.amount)}
-                  </td>
+              {(inputs.line_items ?? [])
+                .filter((li) => li.amount !== 0)
+                .map((li, i) => (
+                  <tr key={i}>
+                    <td>{li.label || (li.sign === "credit" ? "Credit" : "Debit")}</td>
+                    <td className={`num ${li.sign === "debit" ? "debit" : ""}`}>
+                      {li.sign === "debit" ? "-" : "+"}
+                      {fmtMoneyExact(li.amount)}
+                    </td>
+                  </tr>
+                ))}
+              {totals.total_capital > 0 && (
+                <tr>
+                  <td>Initial investment</td>
+                  <td className="num debit">-{fmtMoneyExact(totals.total_capital)}</td>
                 </tr>
-              ))}
+              )}
+              {totals.total_preferred > 0 && (
+                <tr>
+                  <td>Preferred return</td>
+                  <td className="num debit">-{fmtMoneyExact(totals.total_preferred)}</td>
+                </tr>
+              )}
               <tr>
                 <td><b>Net proceeds</b></td>
-                <td className="num"><b style={{ color: "var(--coral-500)" }}>{fmtMoneyExact(totals.net_proceeds)}</b></td>
+                <td className="num">
+                  <b style={{ color: "var(--coral-500)" }}>{fmtMoneyExact(totals.net_after_partners)}</b>
+                </td>
               </tr>
             </tbody>
           </table>
         </div>
 
-        {/* Partner waterfall (only if we have any) */}
+        {/* Distribution of net proceeds — only ownership-% recipients +
+            sponsor. Capital-only partners (0% ownership) get their take in
+            the deductions above; documented in the partner detail block
+            below for completeness. */}
         {totals.partner_breakdown.length > 0 && (
           <div className="section partner-block">
-            <div className="label-line">Partner equity waterfall</div>
+            <div className="label-line">Distribution of net proceeds</div>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Recipient</th>
+                  <th style={{ textAlign: "right", width: "90px" }}>Stake</th>
+                  <th style={{ textAlign: "right", width: "120px" }}>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {totals.partner_breakdown
+                  .filter((p) => p.ownership_pct > 0)
+                  .map((p, i) => (
+                    <tr key={i}>
+                      <td>{p.name}</td>
+                      <td className="num muted">{p.ownership_pct}%</td>
+                      <td className="num"><b>{fmtMoneyExact(p.residual_share)}</b></td>
+                    </tr>
+                  ))}
+                {totals.sponsor_pct > 0 && (
+                  <tr>
+                    <td>Sponsor / Common</td>
+                    <td className="num muted">{totals.sponsor_pct}%</td>
+                    <td className="num">
+                      <b style={{ color: "var(--coral-500)" }}>{fmtMoneyExact(totals.sponsor_residual)}</b>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+
+            {/* Detail per partner — useful for capital-only partners (0%
+                ownership) who don't appear in the distribution table above. */}
+            <div className="label-line" style={{ marginTop: 18 }}>Partner detail</div>
             {totals.partner_breakdown.map((p, i) => (
               <div key={i} className="partner-row">
-                <div className="name">{p.name}</div>
+                <div className="name">
+                  {p.name}
+                  {p.ownership_pct > 0 && (
+                    <span style={{ fontWeight: 400, color: "var(--charcoal-500)", fontSize: 10, marginLeft: 8 }}>
+                      ({p.ownership_pct}% ownership)
+                    </span>
+                  )}
+                </div>
                 <div className="grid">
                   <span>Capital: <b>{fmtMoneyExact(p.capital)}</b></span>
-                  <span>
-                    Preferred: <b>{fmtMoneyExact(p.preferred_return)}</b>
-                  </span>
-                  <span>
-                    Residual share: <b>{fmtMoneyExact(p.residual_share)}</b>
-                  </span>
+                  <span>Preferred: <b>{fmtMoneyExact(p.preferred_return)}</b></span>
+                  <span>Residual share: <b>{fmtMoneyExact(p.residual_share)}</b></span>
                   <span className="accent">
                     Total dist: <b>{fmtMoneyExact(p.total_distribution)}</b>
                   </span>
                 </div>
               </div>
             ))}
-
-            {/* Bottom-line summary */}
-            <div className="summary" style={{ marginTop: 14 }}>
-              <div className="panel">
-                <div className="label-line">Net proceeds</div>
-                <div className="row"><span>Offer</span><span className="num">{fmtMoneyExact(offerPrice)}</span></div>
-                <div className="row muted"><span>Commission</span><span className="num">-{fmtMoneyExact(totals.commission)}</span></div>
-                <div className="row muted">
-                  <span>Adjustments (net)</span>
-                  <span className="num">
-                    {totals.adjustments >= 0 ? "+" : ""}
-                    {fmtMoneyExact(totals.adjustments)}
-                  </span>
-                </div>
-                <div className="row divider" />
-                <div className="row headline">
-                  <span>Net proceeds</span>
-                  <span className="num">{fmtMoneyExact(totals.net_proceeds)}</span>
-                </div>
-              </div>
-              <div className="panel">
-                <div className="label-line">After partners</div>
-                <div className="row">
-                  <span>Net proceeds</span>
-                  <span className="num">{fmtMoneyExact(totals.net_proceeds)}</span>
-                </div>
-                <div className="row muted">
-                  <span>Partners owed (capital + pref)</span>
-                  <span className="num">-{fmtMoneyExact(totals.partners_due)}</span>
-                </div>
-                <div className="row divider" />
-                <div className="row headline">
-                  <span>Sponsor / common residual</span>
-                  <span className="num">{fmtMoneyExact(totals.sponsor_residual)}</span>
-                </div>
-              </div>
-            </div>
           </div>
         )}
 
