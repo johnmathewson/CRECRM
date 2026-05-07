@@ -48,7 +48,7 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
   // ── Validate token ──
   const { data: tokenRow } = await supabase
     .from("owner_access_tokens")
-    .select("id, property_ids, label, expires_at, revoked_at, last_viewed_at, owner_contact_id")
+    .select("id, property_ids, label, audience, expires_at, revoked_at, last_viewed_at, owner_contact_id")
     .eq("token", params.token)
     .eq("organization_id", ORG_ID)
     .maybeSingle();
@@ -326,6 +326,9 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
   return NextResponse.json(
     {
       label: tokenRow.label,
+      // 'owner' (default) or 'investor'. Marketing site uses this to redirect
+      // to the right route if a recipient lands on the wrong one.
+      audience: tokenRow.audience === "investor" ? "investor" : "owner",
       expires_at: tokenRow.expires_at,
       properties: propertiesOut,
       week_starting: isoDate(thisWeekStart),
