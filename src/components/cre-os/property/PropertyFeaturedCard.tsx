@@ -47,7 +47,7 @@ export function PropertyFeaturedCard({ p }: { p: PropertyCard }) {
             )}
             <span className="ml-3 text-cream-subtle">·  PRIORITY</span>
           </Eyebrow>
-          <h3 className="mt-1 font-display text-2xl text-cream tracking-tight group-hover:text-coral-300 transition-colors leading-tight">
+          <h3 className="mt-1 font-display font-medium text-2xl text-cream tracking-tight group-hover:text-coral-300 transition-colors leading-tight">
             {p.name}
           </h3>
           {fullAddress && (

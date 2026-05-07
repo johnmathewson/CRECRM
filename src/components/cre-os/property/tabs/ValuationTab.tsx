@@ -71,7 +71,7 @@ export function ValuationTab({ p }: { p: PropertyDetail }) {
                 <Eyebrow tone="teal">Lease comps</Eyebrow>
                 <div className="mt-2 flex items-baseline justify-between">
                   <div>
-                    <div className="font-display text-2xl text-cream">${v.compMedianRent.toFixed(2)}<span className="ml-1 font-mono text-[10px] text-cream-subtle">/SF/yr</span></div>
+                    <div className="font-display font-medium text-2xl text-cream">${v.compMedianRent.toFixed(2)}<span className="ml-1 font-mono text-[10px] text-cream-subtle">/SF/yr</span></div>
                     <div className="font-mono text-[10px] text-cream-subtle">
                       Median across {v.compCount} comp{v.compCount === 1 ? "" : "s"} in {p.city}
                     </div>
@@ -101,7 +101,7 @@ export function ValuationTab({ p }: { p: PropertyDetail }) {
                 {compImpliedValue && p.sqft && (
                   <div className="mt-4 pt-3 border-t border-white/[0.04]">
                     <div className="font-heading text-[12px] text-cream">Implied value at comp midpoint</div>
-                    <div className="font-display text-2xl text-cream mt-1">{fmtMoney(compImpliedValue)}</div>
+                    <div className="font-display font-medium text-2xl text-cream mt-1">{fmtMoney(compImpliedValue)}</div>
                   </div>
                 )}
               </div>
@@ -120,7 +120,7 @@ export function ValuationTab({ p }: { p: PropertyDetail }) {
         >
           <div className="flex items-baseline gap-4 flex-wrap">
             <div>
-              <div className="font-display text-3xl text-cream">{tensionPct > 0 ? "+" : ""}{tensionPct.toFixed(1)}%</div>
+              <div className="font-display font-medium text-3xl text-cream">{tensionPct > 0 ? "+" : ""}{tensionPct.toFixed(1)}%</div>
               <div className="font-mono text-[10px] text-cream-subtle">vs comp midpoint</div>
             </div>
             <div className="flex-1 min-w-[200px]">
@@ -153,7 +153,7 @@ function RangeTile({ label, value, accent }: { label: string; value: number; acc
   return (
     <div className={`rounded p-2 border ${accent ? "border-coral-400/30 bg-coral-400/[0.05]" : "border-white/[0.05] bg-white/[0.02]"}`}>
       <div className="font-mono text-[9px] uppercase tracking-eyebrow text-cream-subtle">{label}</div>
-      <div className={`mt-0.5 font-display text-lg ${accent ? "text-coral-300" : "text-cream"}`}>${value.toFixed(2)}</div>
+      <div className={`mt-0.5 font-display font-medium text-lg ${accent ? "text-coral-300" : "text-cream"}`}>${value.toFixed(2)}</div>
       <div className="font-mono text-[9px] text-cream-subtle">/SF</div>
     </div>
   );

@@ -51,7 +51,7 @@ export function PropertyListCard({ p }: { p: PropertyCard }) {
                 <span className="ml-2 text-cream-subtle">·  {p.transactionType.replace("_", " ").toUpperCase()}</span>
               )}
             </Eyebrow>
-            <h3 className="mt-1 font-display text-lg text-cream tracking-tight group-hover:text-coral-300 transition-colors leading-snug">
+            <h3 className="mt-1 font-display font-medium text-lg text-cream tracking-tight group-hover:text-coral-300 transition-colors leading-snug">
               {p.name}
             </h3>
             {fullAddress && (

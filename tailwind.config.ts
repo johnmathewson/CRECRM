@@ -84,9 +84,11 @@ const config: Config = {
         },
       },
       fontFamily: {
-        // Brand voice: Cinzel display, DM Sans heading, Inter body, JetBrains mono.
-        // Loaded via next/font in the cre-os layout (CSS variable indirection).
-        display: ["var(--font-cinzel)", "Times New Roman", "serif"],
+        // Brand voice: Space Grotesk display, DM Sans heading, Inter body,
+        // JetBrains Mono mono. Loaded via next/font (CSS variable indirection).
+        // Display swapped from Cinzel — wanted modern editorial / financial-
+        // terminal energy, not luxury-invitation.
+        display: ["var(--font-space-grotesk)", "system-ui", "sans-serif"],
         heading: ["var(--font-dm-sans)", "system-ui", "sans-serif"],
         body:    ["var(--font-inter)", "system-ui", "sans-serif"],
         mono:    ["var(--font-jetbrains)", "ui-monospace", "monospace"],

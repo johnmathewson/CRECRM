@@ -53,7 +53,7 @@ export function KpiTile({
   return (
     <div className={`bg-steward-surface/40 border border-white/[0.05] rounded-md ${padding} flex flex-col gap-2`}>
       <Eyebrow tone="coral">{label}</Eyebrow>
-      <div className={`font-display ${valueSize} text-cream leading-none tracking-tight`}>
+      <div className={`font-display font-medium ${valueSize} text-cream leading-none tracking-tight`}>
         {value}
       </div>
       {(delta || caption) && (

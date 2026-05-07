@@ -122,7 +122,7 @@ export function Sidebar() {
     <aside className="w-56 shrink-0 h-full border-r border-white/[0.04] bg-steward-base/40 backdrop-blur-md flex flex-col">
       {/* Brand */}
       <div className="px-5 py-4 border-b border-white/[0.04]">
-        <div className="font-display text-base text-cream tracking-wider">STEWARDSHIP</div>
+        <div className="font-display font-medium text-base text-cream tracking-wider">STEWARDSHIP</div>
         <div className="font-mono text-[9px] text-coral-400 uppercase tracking-eyebrow mt-0.5">CRE OS · Beta</div>
       </div>
 

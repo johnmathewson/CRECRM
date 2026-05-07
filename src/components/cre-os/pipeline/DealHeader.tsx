@@ -45,7 +45,7 @@ export function DealHeader({ d }: { d: DealDetail }) {
 
       <div className="mt-2 flex items-start justify-between gap-6 flex-wrap">
         <div className="flex-1 min-w-0">
-          <h1 className="font-display text-3xl text-cream tracking-tight leading-tight">{title}</h1>
+          <h1 className="font-display font-medium text-3xl text-cream tracking-tight leading-tight">{title}</h1>
           {subline && (
             <div className="mt-1 font-mono text-[11px] text-cream-dim uppercase tracking-wide truncate">
               {subline}

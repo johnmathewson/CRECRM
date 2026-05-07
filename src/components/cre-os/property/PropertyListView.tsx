@@ -135,7 +135,7 @@ export function PropertyListView({ properties }: { properties: PropertyCard[] })
         {/* ─── 1. Portfolio command header ─── */}
         <header>
           <Eyebrow tone="coral">Properties · Asset intelligence</Eyebrow>
-          <h1 className="mt-1 font-display text-3xl text-cream tracking-tight">Portfolio command surface</h1>
+          <h1 className="mt-1 font-display font-medium text-3xl text-cream tracking-tight">Portfolio command surface</h1>
           {synthesisLine && (
             <p className="mt-2 font-heading text-[14px] text-cream-dim leading-relaxed max-w-3xl">
               {synthesisLine}
@@ -225,7 +225,7 @@ function CommandStat({ label, value, caption }: { label: string; value: string; 
   return (
     <div className="bg-steward-mid/40 border border-white/[0.05] rounded-md p-4">
       <div className="font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle">{label}</div>
-      <div className="mt-1 font-display text-2xl text-cream leading-none">{value}</div>
+      <div className="mt-1 font-display font-medium text-2xl text-cream leading-none">{value}</div>
       {caption && <div className="mt-1 font-mono text-[9px] text-cream-subtle">{caption}</div>}
     </div>
   );

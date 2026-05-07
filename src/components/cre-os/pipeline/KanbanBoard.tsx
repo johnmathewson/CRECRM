@@ -33,7 +33,7 @@ export function KanbanBoard({ board }: { board: PipelineBoard }) {
                   <span className="font-mono text-[10px] text-cream-dim">{col.count}</span>
                 </div>
                 <div className="mt-1 flex items-baseline gap-2">
-                  <span className="font-display text-base text-cream leading-none">
+                  <span className="font-display font-medium text-base text-cream leading-none">
                     {col.totalValue > 0 ? fmtMoney(col.totalValue) : "—"}
                   </span>
                   {col.weightedValue > 0 && col.weightedValue !== col.totalValue && (

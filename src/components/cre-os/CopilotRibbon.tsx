@@ -90,7 +90,7 @@ function CopilotChipItem({ chip }: { chip: CopilotChip }) {
       href={chip.href}
       className={`flex items-center gap-3 px-3 py-2 rounded border transition-colors ${toneClass}`}
     >
-      <span className={`font-display text-xl leading-none ${countClass}`}>{chip.count}</span>
+      <span className={`font-display font-medium text-xl leading-none ${countClass}`}>{chip.count}</span>
       <span className="flex flex-col items-start leading-tight">
         <span className="font-heading text-[11px] font-semibold uppercase tracking-eyebrow">
           {chip.label}

@@ -138,7 +138,7 @@ export function CommandCenterView({ data }: { data: DashboardData }) {
             {pipeline.map((s) => (
               <div key={s.stage} className="bg-white/[0.02] border border-white/[0.04] rounded p-3">
                 <Eyebrow tone={s.count > 0 ? "coral" : "muted"}>{s.stage}</Eyebrow>
-                <div className="mt-2 font-display text-2xl text-cream leading-none">{s.count}</div>
+                <div className="mt-2 font-display font-medium text-2xl text-cream leading-none">{s.count}</div>
                 <div className="mt-1 font-mono text-[10px] text-cream-subtle">{s.value > 0 ? fmtMoney(s.value) : "—"}</div>
               </div>
             ))}

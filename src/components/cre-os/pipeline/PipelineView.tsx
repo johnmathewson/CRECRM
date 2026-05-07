@@ -121,7 +121,7 @@ export function PipelineView({
         {/* Page header */}
         <div>
           <Eyebrow tone="coral">Pipeline</Eyebrow>
-          <h1 className="mt-1 font-display text-3xl text-cream tracking-tight">Deal flow</h1>
+          <h1 className="mt-1 font-display font-medium text-3xl text-cream tracking-tight">Deal flow</h1>
           <p className="mt-1 font-body text-[13px] text-cream-dim">
             Two parallel ladders. Listings tracks sell-side / lease-side mandates. Pursuits tracks buy-side acquisitions.
           </p>
