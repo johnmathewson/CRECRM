@@ -19,6 +19,8 @@ interface CreateBody {
   owner_contact_id?: string | null;
   label?: string;
   expires_in_days?: number;
+  /** "owner" (default) for seller listing-performance views; "investor" for buyer/LP pursuit views. */
+  audience?: "owner" | "investor";
 }
 
 export async function GET() {
@@ -70,11 +72,13 @@ export async function POST(req: NextRequest) {
   }
 
   const validIds = foundProps.map((p: any) => p.id);
+  const audience: "owner" | "investor" = body.audience === "investor" ? "investor" : "owner";
+  const audienceWord = audience === "investor" ? "Investor" : "Owner";
   const labelGuess =
     body.label?.trim() ||
     (foundProps.length === 1
-      ? `Owner — ${foundProps[0].headline || foundProps[0].name}`
-      : `Owner — ${foundProps.length} listings`);
+      ? `${audienceWord} — ${foundProps[0].headline || foundProps[0].name}`
+      : `${audienceWord} — ${foundProps.length} listings`);
 
   const token = generateToken();
   const { data, error } = await supabase
@@ -85,16 +89,18 @@ export async function POST(req: NextRequest) {
       owner_contact_id: body.owner_contact_id || null,
       property_ids: validIds,
       label: labelGuess,
+      audience,
       expires_at: expiresAt,
     })
-    .select("id, token, label, property_ids, expires_at, created_at")
+    .select("id, token, label, property_ids, audience, expires_at, created_at")
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   const marketingBase = process.env.NEXT_PUBLIC_MARKETING_URL || "https://stewardshipcre.com";
+  const audienceSlug = audience === "investor" ? "investor" : "owner";
   return NextResponse.json({
     token: data,
-    url: `${marketingBase}/owner/${token}`,
+    url: `${marketingBase}/${audienceSlug}/${token}`,
   });
 }

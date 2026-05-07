@@ -57,7 +57,7 @@ export function PropertyWorkspace({ p, threads, perf }: { p: PropertyDetail; thr
         <div className="space-y-1.5">
           <RailAction label="Run BOV" href={`/valuate?address=${encodeURIComponent([p.address, p.city, p.state].filter(Boolean).join(", ") || p.name)}`} />
           <RailAction label="Generate OM" href="#" disabled />
-          <RailAction label="Send owner update" href="#" disabled />
+          <RailAction label="Generate owner link" href={`/cre-os/portals?property=${p.id}&audience=owner`} />
           <RailAction label="Add a task" href="#" disabled />
           <RailAction label="View public listing" href="#" disabled />
         </div>
