@@ -1047,7 +1047,10 @@ function OfferRow({
     }
   }
 
-  const printHref = `/cre-os/properties/${propertySlug}/offers/${offer.id}/print`;
+  // Print page lives outside /cre-os/ so it doesn't inherit the app shell's
+  // viewport-locked layout. Opens in a new tab; auto-print disabled so the
+  // broker can scroll/preview before saving as PDF.
+  const printHref = `/print/seller-net/${propertySlug}/${offer.id}`;
 
   return (
     <article

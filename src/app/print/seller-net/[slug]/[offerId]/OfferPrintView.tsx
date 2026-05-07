@@ -3,37 +3,20 @@
 import type { SellerNetInputs, SellerNetTotals } from "@/lib/seller-net";
 
 /**
- * OfferPrintView — rendered seller-net summary, styled for a clean PDF
- * artifact via print CSS.
+ * OfferPrintView — branded seller-net summary, styled for both an on-screen
+ * preview and a clean PDF artifact.
  *
- * Two things to know about this layout:
- *
- * 1. The print page lives under /cre-os/, which has a global layout that
- *    sets `h-[100dvh] w-screen overflow-hidden` to keep the app shell
- *    pinned to the viewport. That parent rule blocks scroll on the print
- *    page. We escape it by making the outermost wrapper position:fixed
- *    inset:0 overflow:auto on screen — that's positioned relative to the
- *    viewport, not the locked parent, so it scrolls independently. On
- *    print we revert to static flow so the document paginates normally.
- *
- * 2. We do NOT auto-fire window.print(). The broker wants to preview the
- *    layout first; the toolbar at the top has a manual "Print or save as
- *    PDF" button that opens the dialog when ready.
+ * This page lives at /print/seller-net/[slug]/[offerId], OUTSIDE /cre-os/,
+ * so it doesn't inherit the app shell's viewport-locked layout. The body
+ * scrolls naturally — no overlay tricks needed. The toolbar at the top is
+ * sticky so the broker can scroll the document, then click "Print or save
+ * as PDF" when ready.
  */
 
 const fmtMoneyExact = (n: number | null | undefined) =>
   n !== null && n !== undefined && Number.isFinite(n)
     ? n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })
     : "$0";
-
-const fmtMoneyPretty = (n: number | null | undefined) => {
-  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
-  const sign = n < 0 ? "-" : "";
-  const abs = Math.abs(n);
-  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`;
-  if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(0)}k`;
-  return `${sign}$${abs.toFixed(0)}`;
-};
 
 export function OfferPrintView({
   property,
@@ -51,34 +34,13 @@ export function OfferPrintView({
   const today = offer.offer_date ?? new Date().toISOString().slice(0, 10);
 
   return (
-    <div className="print-overlay">
-      {/* Print-specific styles. Live styles are inline so this page works
-          standalone without the main app shell. Color tokens match the
-          Stewardship brand (charcoal + coral). */}
+    <>
+      {/* Print-specific styles. All inline so this page works standalone
+          regardless of what global stylesheets the rest of the app loads. */}
       <style>{`
         @page {
           size: letter;
           margin: 0.5in 0.55in;
-        }
-        /* Escape the /cre-os parent layout's overflow-hidden viewport lock
-           on screen. On screen we float over the app shell as a scrollable
-           overlay. On print we revert to static flow so pagination works. */
-        @media screen {
-          .print-overlay {
-            position: fixed;
-            inset: 0;
-            overflow-y: auto;
-            background: white;
-            z-index: 9999;
-            -webkit-overflow-scrolling: touch;
-          }
-        }
-        @media print {
-          .print-overlay {
-            position: static;
-            overflow: visible;
-            z-index: auto;
-          }
         }
         :root {
           --charcoal-950: #0D0D0D;
@@ -102,10 +64,12 @@ export function OfferPrintView({
           line-height: 1.45;
           margin: 0;
           padding: 0;
+          height: auto;
+          overflow: auto;
           -webkit-print-color-adjust: exact;
           print-color-adjust: exact;
         }
-        .doc { max-width: 7.5in; margin: 0 auto; padding: 24px 0; }
+        .doc { max-width: 7.5in; margin: 0 auto; padding: 24px 16px 48px; }
         .brand { display: flex; align-items: baseline; justify-content: space-between; gap: 24px; padding-bottom: 14px; border-bottom: 2px solid var(--charcoal-950); margin-bottom: 22px; }
         .brand h1 { margin: 0; font-family: 'Space Grotesk', system-ui, sans-serif; font-size: 22px; font-weight: 500; letter-spacing: 0.04em; color: var(--charcoal-950); }
         .brand .sub { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--coral-500); margin-top: 3px; }
@@ -123,13 +87,6 @@ export function OfferPrintView({
         .num { font-family: 'JetBrains Mono', ui-monospace, monospace; text-align: right; }
         .num.muted { color: var(--charcoal-400); }
         .num.debit { color: var(--coral-500); }
-        .summary { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
-        .summary .panel { border: 1px solid var(--charcoal-700); border-radius: 4px; padding: 14px; }
-        .summary .row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 11px; }
-        .summary .row.muted { color: var(--charcoal-400); }
-        .summary .row.divider { border-top: 1px solid #E5E0D8; margin: 6px 0; padding: 0; }
-        .summary .row.headline { font-size: 14px; font-weight: 600; color: var(--coral-500); padding: 6px 0; }
-        .summary .row .num { font-weight: 500; }
         .partner-block { margin-top: 14px; }
         .partner-row { border: 1px solid #E5E0D8; padding: 8px 10px; border-radius: 3px; margin-bottom: 8px; }
         .partner-row .name { font-weight: 600; font-size: 11.5px; }
@@ -153,12 +110,13 @@ export function OfferPrintView({
         @media print {
           .toolbar { display: none; }
           html, body { background: white; }
+          .doc { padding: 0; }
         }
       `}</style>
 
       {/* Sticky toolbar — visible on screen, hidden on print. Lets the
           broker scroll the document, then click to fire the print dialog
-          when they're ready to save as PDF. */}
+          when ready to save as PDF. */}
       <div className="toolbar">
         <span>Stewardship CRE — Seller Net Summary</span>
         <span style={{ marginLeft: "auto", color: "var(--charcoal-400)" }}>
@@ -361,6 +319,6 @@ export function OfferPrintView({
           </span>
         </div>
       </div>
-    </div>
+    </>
   );
 }

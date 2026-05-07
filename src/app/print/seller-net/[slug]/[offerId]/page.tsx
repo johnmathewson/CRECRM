@@ -8,15 +8,20 @@ const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 export const dynamic = "force-dynamic";
 
 /**
- * Branded seller-net summary, print-optimized. The "Download PDF" button on
- * the property workspace's Offers tab opens this in a new tab; an auto-
- * print effect fires `window.print()` on load so the user just hits "Save
- * as PDF" in the system print dialog.
+ * Branded seller-net summary, print-optimized.
  *
- * Uses the anon client (NOT the cookie-session client) so RLS-by-anon-role
- * on seller_net_offers and properties applies the same way the API routes
- * see the data. With the cookie client the queries run as `authenticated`,
- * which has no policies on these tables → notFound() → 404.
+ * Lives at /print/seller-net/[slug]/[offerId] (NOT under /cre-os/) so it
+ * doesn't inherit the app shell's viewport-locked layout — the page
+ * scrolls naturally on the body and the broker can preview before
+ * saving as PDF.
+ *
+ * Uses the anon-key Supabase client because the seller_net_offers RLS
+ * policies are TO anon. With the cookie session the queries would run
+ * as `authenticated`, which has no policies on those tables.
+ *
+ * Public by URL — middleware exempts /print/*. Same security model as
+ * the magic-link portals: the URL embeds opaque IDs (property slug +
+ * offer UUID) and the page only surfaces data scoped to those IDs.
  */
 export default async function OfferPrintPage({
   params,

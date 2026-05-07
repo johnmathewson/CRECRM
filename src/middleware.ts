@@ -31,15 +31,14 @@ export async function middleware(request: NextRequest) {
 
   // Public routes — exempt from auth redirect:
   //   /login, /auth/*  : the auth flow itself
-  //   /cre-os/properties/*/offers/*/print : seller-net PDF print pages, opened
-  //                       both from CRE OS (admin) and from owner-portal magic
-  //                       links (no CRM session). The URL embeds opaque IDs
-  //                       (property slug + offer UUID) and the page only reads
-  //                       data scoped to those IDs — same share-by-link model
-  //                       as the magic links themselves.
-  const isPrintRoute = /^\/cre-os\/properties\/[^/]+\/offers\/[^/]+\/print/.test(
-    request.nextUrl.pathname
-  );
+  //   /print/*         : seller-net PDF print pages, opened both from CRE OS
+  //                      (admin, logged-in) and from owner-portal magic links
+  //                      (no CRM session). The URL embeds opaque IDs (property
+  //                      slug + offer UUID) and the page only surfaces data
+  //                      scoped to those IDs — same share-by-link contract as
+  //                      the magic links themselves. Lives outside /cre-os/
+  //                      so it doesn't inherit the app shell's viewport lock.
+  const isPrintRoute = request.nextUrl.pathname.startsWith("/print/");
 
   if (
     !user &&
