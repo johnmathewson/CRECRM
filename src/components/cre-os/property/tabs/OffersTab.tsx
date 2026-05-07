@@ -846,18 +846,17 @@ function LiveTotals({ inputs, totals }: { inputs: SellerNetInputs; totals: Selle
       <Row label="Offer price" value={fmtMoneyExact(offerPrice)} />
       <Row label={commissionLabel} value={"-" + fmtMoneyExact(totals.commission)} muted />
 
-      {/* Each line item, individually labeled. Hide $0 lines so the panel
-          doesn't fill up with placeholder rows from the default form. */}
-      {inputs.line_items
-        .filter((li) => li.amount !== 0)
-        .map((li, i) => (
-          <Row
-            key={i}
-            label={li.label || (li.sign === "credit" ? "Credit" : "Debit")}
-            value={(li.sign === "credit" ? "+" : "-") + fmtMoneyExact(li.amount)}
-            muted
-          />
-        ))}
+      {/* Every line item the broker has on the offer — even $0. They
+          explicitly added/kept these lines; if they want one off the
+          panel they hit the × button on the row in the editor. */}
+      {inputs.line_items.map((li, i) => (
+        <Row
+          key={i}
+          label={li.label || (li.sign === "credit" ? "Credit" : "Debit")}
+          value={(li.sign === "credit" ? "+" : "-") + fmtMoneyExact(li.amount)}
+          muted
+        />
+      ))}
 
       {/* Partner-side deductions */}
       {(totals.total_capital > 0 || totals.total_preferred > 0) && (

@@ -244,17 +244,15 @@ export function OfferPrintView({
                 <td>Commission{inputs.commission_pct !== null && inputs.commission_pct !== undefined ? ` (${inputs.commission_pct}%)` : ""}</td>
                 <td className="num debit">-{fmtMoneyExact(totals.commission)}</td>
               </tr>
-              {(inputs.line_items ?? [])
-                .filter((li) => li.amount !== 0)
-                .map((li, i) => (
-                  <tr key={i}>
-                    <td>{li.label || (li.sign === "credit" ? "Credit" : "Debit")}</td>
-                    <td className={`num ${li.sign === "debit" ? "debit" : ""}`}>
-                      {li.sign === "debit" ? "-" : "+"}
-                      {fmtMoneyExact(li.amount)}
-                    </td>
-                  </tr>
-                ))}
+              {(inputs.line_items ?? []).map((li, i) => (
+                <tr key={i}>
+                  <td>{li.label || (li.sign === "credit" ? "Credit" : "Debit")}</td>
+                  <td className={`num ${li.sign === "debit" ? "debit" : ""}`}>
+                    {li.sign === "debit" ? "-" : "+"}
+                    {fmtMoneyExact(li.amount)}
+                  </td>
+                </tr>
+              ))}
               {totals.total_capital > 0 && (
                 <tr>
                   <td>Initial investment</td>
