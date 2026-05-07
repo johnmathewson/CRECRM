@@ -59,7 +59,12 @@ export interface CompPulseRow {
 export interface MarketSnapshot {
   submarkets: SubmarketRow[];
   assetClasses: AssetClassSnapshot[];
+  /** Most recent 12 — kept for any caller that wants a thin pulse view. */
   recentComps: CompPulseRow[];
+  /** Every comp (lease + sale), date-sorted. The Market view filters and
+   *  exports off this list so the broker can drill from broad aggregates
+   *  to a specific row without a second round-trip. */
+  allComps: CompPulseRow[];
   totals: {
     leaseComps: number;
     saleComps: number;
@@ -209,9 +214,9 @@ export async function loadMarketSnapshot(): Promise<MarketSnapshot> {
       when: relativeTime(r.sale_date ?? r.created_at ?? null),
       notes: r.notes,
     }));
-  const recentComps = [...pulseLease, ...pulseSale]
-    .sort((a, b) => new Date(b.date ?? 0).getTime() - new Date(a.date ?? 0).getTime())
-    .slice(0, 12);
+  const allComps = [...pulseLease, ...pulseSale]
+    .sort((a, b) => new Date(b.date ?? 0).getTime() - new Date(a.date ?? 0).getTime());
+  const recentComps = allComps.slice(0, 12);
 
   // ── Portfolio-wide medians ──
   const allRents = lease.map((r) => numOrNull(r.rent_per_sqft)).filter((v): v is number => v !== null && v > 0);
@@ -223,6 +228,7 @@ export async function loadMarketSnapshot(): Promise<MarketSnapshot> {
     submarkets,
     assetClasses,
     recentComps,
+    allComps,
     totals: {
       leaseComps: lease.length,
       saleComps: sale.length,
