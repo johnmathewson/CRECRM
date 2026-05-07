@@ -71,7 +71,7 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
   earliestStart.setUTCDate(earliestStart.getUTCDate() - 7 * (WEEKS_TO_RETURN - 1));
 
   // ── Pull everything in parallel ──
-  const [propsRes, metricsRes, viewsRes, inquiriesRes, ndaRes, downloadsRes] = await Promise.all([
+  const [propsRes, metricsRes, viewsRes, inquiriesRes, ndaRes, downloadsRes, offersRes] = await Promise.all([
     supabase
       .from("properties")
       .select("id, name, headline, address, city, state, asset_type, transaction_type, status, asking_price, lease_rate, sqft, slug, images, crexi_url, loopnet_url")
@@ -111,6 +111,12 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
       .eq("organization_id", ORG_ID)
       .in("property_id", propertyIds)
       .gte("accessed_at", earliestStart.toISOString()),
+    supabase
+      .from("seller_net_offers")
+      .select("id, property_id, title, buyer_name, offer_date, offer_price, commission_pct, commission_amount, line_items, partners, computed_commission, computed_adjustments, computed_net_proceeds, computed_partners_due, computed_net_after_partners, notes, created_at, updated_at")
+      .eq("organization_id", ORG_ID)
+      .in("property_id", propertyIds)
+      .order("created_at", { ascending: false }),
   ]);
 
   // ── Aggregate + anonymize ──
@@ -332,6 +338,8 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
       expires_at: tokenRow.expires_at,
       properties: propertiesOut,
       week_starting: isoDate(thisWeekStart),
+      // Seller-net offer scenarios saved against any of these properties.
+      offers: offersRes.data ?? [],
     },
     { headers: corsHeaders(origin) }
   );
