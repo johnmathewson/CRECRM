@@ -1,12 +1,12 @@
 import { notFound } from "next/navigation";
 import { PropertyWorkspace } from "@/components/cre-os/property/PropertyWorkspace";
 import { loadPropertyDetail } from "@/lib/cre-os/property-queries";
+import { loadCommunicationsForProperty } from "@/lib/cre-os/communications-queries";
 
 /**
- * Phase 2 — Property workspace. The most important screen in the product:
- * a property opens into a multi-panel workspace (Overview · Valuation & Comps
- * · Performance · Activity) with an AI summary band, a property-scoped
- * insights rail, and quick-action affordances.
+ * Phase 2 — Property workspace. Loads detail + threaded communications in
+ * parallel. Workspace tabs: Overview / Valuation & Comps / Communications /
+ * Performance / Activity.
  */
 export const dynamic = "force-dynamic";
 
@@ -17,5 +17,6 @@ export default async function PropertyDetailPage({
 }) {
   const detail = await loadPropertyDetail(params.slug);
   if (!detail) notFound();
-  return <PropertyWorkspace p={detail} />;
+  const threads = await loadCommunicationsForProperty(detail.id);
+  return <PropertyWorkspace p={detail} threads={threads} />;
 }
