@@ -13,11 +13,14 @@ export function Eyebrow({
 }: {
   children: React.ReactNode;
   num?: number;
-  tone?: "coral" | "teal" | "muted";
+  tone?: "coral" | "teal" | "muted" | "amber";
   className?: string;
 }) {
   const colorClass =
-    tone === "coral" ? "text-coral-400" : tone === "teal" ? "text-teal-400" : "text-cream-muted";
+    tone === "coral" ? "text-coral-400"
+    : tone === "teal" ? "text-teal-400"
+    : tone === "amber" ? "text-amber"
+    : "text-cream-muted";
   return (
     <div
       className={`font-heading text-[10px] font-semibold uppercase tracking-eyebrow ${colorClass} ${className}`}
