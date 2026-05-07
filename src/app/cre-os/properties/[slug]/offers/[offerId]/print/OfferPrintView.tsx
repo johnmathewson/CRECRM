@@ -1,13 +1,24 @@
 "use client";
 
-import { useEffect } from "react";
 import type { SellerNetInputs, SellerNetTotals } from "@/lib/seller-net";
 
 /**
- * OfferPrintView — the actual rendered seller-net summary, styled for a
- * clean PDF artifact via print CSS. Auto-fires `window.print()` on mount
- * unless ?noprint is in the URL (so a broker can preview without the
- * dialog popping).
+ * OfferPrintView — rendered seller-net summary, styled for a clean PDF
+ * artifact via print CSS.
+ *
+ * Two things to know about this layout:
+ *
+ * 1. The print page lives under /cre-os/, which has a global layout that
+ *    sets `h-[100dvh] w-screen overflow-hidden` to keep the app shell
+ *    pinned to the viewport. That parent rule blocks scroll on the print
+ *    page. We escape it by making the outermost wrapper position:fixed
+ *    inset:0 overflow:auto on screen — that's positioned relative to the
+ *    viewport, not the locked parent, so it scrolls independently. On
+ *    print we revert to static flow so the document paginates normally.
+ *
+ * 2. We do NOT auto-fire window.print(). The broker wants to preview the
+ *    layout first; the toolbar at the top has a manual "Print or save as
+ *    PDF" button that opens the dialog when ready.
  */
 
 const fmtMoneyExact = (n: number | null | undefined) =>
@@ -35,20 +46,12 @@ export function OfferPrintView({
   inputs: SellerNetInputs;
   totals: SellerNetTotals;
 }) {
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (window.location.search.includes("noprint")) return;
-    // Slight delay so layout settles before the dialog pops
-    const t = setTimeout(() => window.print(), 350);
-    return () => clearTimeout(t);
-  }, []);
-
   const fullAddress = [property.address, property.city, property.state, property.zip].filter(Boolean).join(", ");
   const offerPrice = inputs.offer_price;
   const today = offer.offer_date ?? new Date().toISOString().slice(0, 10);
 
   return (
-    <>
+    <div className="print-overlay">
       {/* Print-specific styles. Live styles are inline so this page works
           standalone without the main app shell. Color tokens match the
           Stewardship brand (charcoal + coral). */}
@@ -56,6 +59,26 @@ export function OfferPrintView({
         @page {
           size: letter;
           margin: 0.5in 0.55in;
+        }
+        /* Escape the /cre-os parent layout's overflow-hidden viewport lock
+           on screen. On screen we float over the app shell as a scrollable
+           overlay. On print we revert to static flow so pagination works. */
+        @media screen {
+          .print-overlay {
+            position: fixed;
+            inset: 0;
+            overflow-y: auto;
+            background: white;
+            z-index: 9999;
+            -webkit-overflow-scrolling: touch;
+          }
+        }
+        @media print {
+          .print-overlay {
+            position: static;
+            overflow: visible;
+            z-index: auto;
+          }
         }
         :root {
           --charcoal-950: #0D0D0D;
@@ -115,20 +138,35 @@ export function OfferPrintView({
         .partner-row .grid .accent b { color: var(--coral-500); }
         .footer { margin-top: 28px; padding-top: 14px; border-top: 1px solid #E5E0D8; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 8.5px; color: var(--charcoal-500); display: flex; justify-content: space-between; }
         .notes { font-style: italic; color: var(--charcoal-700); border-left: 2px solid var(--coral-400); padding-left: 10px; font-size: 10.5px; }
-        .toolbar { background: var(--charcoal-950); color: var(--cream-100); padding: 10px 14px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; display: flex; gap: 12px; align-items: center; }
+        .toolbar {
+          position: sticky; top: 0; z-index: 10;
+          background: var(--charcoal-950); color: var(--cream-100);
+          padding: 10px 14px;
+          font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px;
+          display: flex; gap: 12px; align-items: center;
+          box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+        }
         .toolbar a, .toolbar button { color: var(--coral-400); background: transparent; border: 1px solid var(--coral-400); padding: 4px 10px; border-radius: 3px; font: inherit; text-decoration: none; cursor: pointer; }
         .toolbar a:hover, .toolbar button:hover { background: rgba(224, 122, 95, 0.15); }
+        .toolbar .primary { background: var(--coral-400); color: var(--charcoal-950); border-color: var(--coral-400); font-weight: 600; }
+        .toolbar .primary:hover { background: var(--coral-500); border-color: var(--coral-500); }
         @media print {
           .toolbar { display: none; }
           html, body { background: white; }
         }
       `}</style>
 
-      {/* Hidden in print — top toolbar with manual "Print" + close-tab hint */}
+      {/* Sticky toolbar — visible on screen, hidden on print. Lets the
+          broker scroll the document, then click to fire the print dialog
+          when they're ready to save as PDF. */}
       <div className="toolbar">
         <span>Stewardship CRE — Seller Net Summary</span>
-        <span style={{ marginLeft: "auto" }}>If the print dialog didn't open,</span>
-        <button type="button" onClick={() => window.print()}>Print or save as PDF</button>
+        <span style={{ marginLeft: "auto", color: "var(--charcoal-400)" }}>
+          Scroll to preview · click to save
+        </span>
+        <button type="button" className="primary" onClick={() => window.print()}>
+          Print or save as PDF
+        </button>
       </div>
 
       <div className="doc">
@@ -325,6 +363,6 @@ export function OfferPrintView({
           </span>
         </div>
       </div>
-    </>
+    </div>
   );
 }
