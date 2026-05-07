@@ -113,10 +113,11 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
       .gte("accessed_at", earliestStart.toISOString()),
     supabase
       .from("seller_net_offers")
-      .select("id, property_id, title, buyer_name, offer_date, offer_price, commission_pct, commission_amount, line_items, partners, computed_commission, computed_adjustments, computed_net_proceeds, computed_partners_due, computed_net_after_partners, notes, created_at, updated_at")
+      .select("id, property_id, title, buyer_name, offer_date, offer_price, commission_pct, commission_amount, line_items, partners, computed_commission, computed_adjustments, computed_net_proceeds, computed_partners_due, computed_net_after_partners, notes, published_at, created_at, updated_at")
       .eq("organization_id", ORG_ID)
       .in("property_id", propertyIds)
-      .order("created_at", { ascending: false }),
+      .not("published_at", "is", null)  // owner sees published only
+      .order("published_at", { ascending: false }),
   ]);
 
   // ── Aggregate + anonymize ──

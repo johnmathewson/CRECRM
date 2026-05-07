@@ -88,11 +88,12 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
   const { data, error } = await sb
     .from("seller_net_offers")
     .select(
-      "id, property_id, title, buyer_name, offer_date, offer_price, commission_pct, commission_amount, line_items, partners, computed_commission, computed_adjustments, computed_net_proceeds, computed_partners_due, computed_net_after_partners, notes, created_at, updated_at"
+      "id, property_id, title, buyer_name, offer_date, offer_price, commission_pct, commission_amount, line_items, partners, computed_commission, computed_adjustments, computed_net_proceeds, computed_partners_due, computed_net_after_partners, notes, published_at, created_at, updated_at"
     )
     .eq("organization_id", ORG_ID)
     .in("property_id", propertyIds)
-    .order("created_at", { ascending: false });
+    .not("published_at", "is", null)
+    .order("published_at", { ascending: false });
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500, headers: corsHeaders(origin) });
@@ -142,6 +143,8 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
     organization_id: ORG_ID,
     property_id: body.property_id,
     created_via_token_id: auth.token.id,
+    // Owner self-saves are auto-published — they're already the audience.
+    published_at: new Date().toISOString(),
     title: body.title.trim(),
     buyer_name: body.buyer_name?.trim() || null,
     offer_date: body.offer_date || null,
