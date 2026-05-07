@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/cre-os/AppShell";
 import { Panel } from "@/components/cre-os/Panel";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
@@ -93,12 +95,16 @@ export function DealWorkspace({ d }: { d: DealDetail }) {
     <AppShell rail={rail}>
       <DealHeader d={d} />
 
-      {/* Stage stepper */}
+      {/* Stage stepper — clickable, advances the deal */}
       <div className="mb-6">
         <Eyebrow tone="muted">Pipeline ladder</Eyebrow>
+        <p className="mt-1 font-body text-[10px] text-cream-subtle">
+          Click any stage to move the deal there. The paired property's status updates in lockstep when you advance.
+        </p>
         <div className="mt-2">
-          <StageStepper currentStage={d.stage} />
+          <StageStepper currentStage={d.stage} dealId={d.id} />
         </div>
+        <DealCloseActions deal={d} />
       </div>
 
       {/* Main 2-col body */}
@@ -261,4 +267,106 @@ function synthesizeDealInsights(d: DealDetail): Array<{ id: string; confidence: 
   }
 
   return out.slice(0, 5);
+}
+
+// ── Close-deal action row ───────────────────────────────────────────────────
+function DealCloseActions({ deal }: { deal: DealDetail }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState<"won" | "lost" | "dead" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  if (deal.isClosed) {
+    return (
+      <div className="mt-4 flex items-center gap-2">
+        <StatusBadge tone="teal">Closed Won</StatusBadge>
+        {deal.actualClose && (
+          <span className="font-mono text-[10px] text-cream-subtle">on {deal.actualClose}</span>
+        )}
+      </div>
+    );
+  }
+  if (deal.isDead) {
+    return (
+      <div className="mt-4 flex items-center gap-2">
+        <StatusBadge tone="neutral">Dead</StatusBadge>
+        {deal.deadReason && (
+          <span className="font-mono text-[10px] text-cream-subtle">— {deal.deadReason}</span>
+        )}
+      </div>
+    );
+  }
+
+  async function close(outcome: "won" | "lost" | "dead") {
+    let reason: string | null = null;
+    let agreed_price: number | null = null;
+    let actual_close: string | null = null;
+
+    if (outcome === "won") {
+      const dateStr = prompt("Close date (YYYY-MM-DD)?", new Date().toISOString().slice(0, 10));
+      if (!dateStr) return;
+      actual_close = dateStr;
+      const priceStr = prompt(`Agreed ${deal.dealType === "lease" ? "rate ($/SF/yr)" : "price"}?`, deal.price?.toString() || "");
+      if (priceStr) {
+        const n = Number(priceStr.replace(/[$,]/g, ""));
+        if (!Number.isNaN(n)) agreed_price = n;
+      }
+    } else {
+      reason = prompt(outcome === "lost" ? "Why was the deal lost? (optional)" : "Why is this dead? (optional)") || null;
+      if (reason === null && outcome === "dead") {
+        // Cancel on dead — confirm
+        if (!confirm("Mark this deal as dead with no reason recorded?")) return;
+      }
+    }
+
+    setBusy(outcome);
+    setError(null);
+    try {
+      const res = await fetch(`/api/deals/${deal.id}/close`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ outcome, reason, agreed_price, actual_close }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+      router.refresh();
+    } catch (err: any) {
+      setError(err.message ?? String(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="mt-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-mono text-[9px] uppercase tracking-eyebrow text-cream-subtle mr-1">Close out</span>
+        <button
+          onClick={() => close("won")}
+          disabled={!!busy}
+          className="px-3 py-1.5 rounded border border-teal-400/40 bg-teal-400/[0.08] hover:bg-teal-400/[0.18] font-heading text-[10px] uppercase tracking-eyebrow font-semibold text-teal-300 disabled:opacity-50 transition-colors"
+        >
+          {busy === "won" ? "Closing…" : "Mark won"}
+        </button>
+        <button
+          onClick={() => close("lost")}
+          disabled={!!busy}
+          className="px-3 py-1.5 rounded border border-amber/40 bg-amber/[0.08] hover:bg-amber/[0.18] font-heading text-[10px] uppercase tracking-eyebrow font-semibold text-amber disabled:opacity-50 transition-colors"
+        >
+          {busy === "lost" ? "Marking…" : "Mark lost"}
+        </button>
+        <button
+          onClick={() => close("dead")}
+          disabled={!!busy}
+          className="px-3 py-1.5 rounded border border-red-400/30 bg-red-500/[0.08] hover:bg-red-500/[0.18] font-heading text-[10px] uppercase tracking-eyebrow font-semibold text-red-300 disabled:opacity-50 transition-colors"
+        >
+          {busy === "dead" ? "Marking…" : "Mark dead"}
+        </button>
+      </div>
+      {error && (
+        <div className="mt-2 px-3 py-1.5 rounded border border-red-400/30 bg-red-500/[0.06] font-body text-[11px] text-red-300">
+          {error}
+        </div>
+      )}
+    </div>
+  );
 }

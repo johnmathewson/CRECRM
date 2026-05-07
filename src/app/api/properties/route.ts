@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { defaultStageForStatus, type PropertyStatus } from "@/lib/cre-os/property-status";
 export const dynamic = "force-dynamic";
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
+const USER_ID = "b0000000-0000-0000-0000-000000000001";
 
 // ── Asset-type normalization ────────────────────────────────────────────────
 // DB check constraint allows exactly these. Anything else (e.g. AI extraction
@@ -123,7 +125,62 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ property: data }, { status: 201 });
+    // ── Auto-pair a deal so the property shows up in pipeline ──
+    // Skip when caller explicitly opts out (create_deal=false) or when the
+    // property is at a terminal status that doesn't belong in pipeline.
+    let createdDeal: any = null;
+    const wantDeal = body.create_deal !== false;
+    const status = (insertPayload.status as PropertyStatus) || "listed";
+    const txType: "sale" | "lease" =
+      insertPayload.transaction_type === "lease" ? "lease" : "sale";
+
+    if (wantDeal && status !== "dead") {
+      const stage = defaultStageForStatus(status);
+      const price =
+        txType === "sale"
+          ? insertPayload.asking_price ?? null
+          : insertPayload.lease_rate ?? null;
+      const dealName =
+        body.deal_name?.trim() ||
+        `${insertPayload.headline || insertPayload.name} — ${
+          txType === "lease" ? "Lease" : "Sale"
+        }`;
+
+      const { data: dealRow, error: dealErr } = await supabase
+        .from("deals")
+        .insert({
+          organization_id: orgId,
+          property_id: data.id,
+          client_contact_id: body.client_contact_id || null,
+          deal_type: txType,
+          deal_name: dealName,
+          price,
+          probability_pct: 50,
+          assigned_to: USER_ID,
+        })
+        .select()
+        .single();
+
+      if (dealErr) {
+        // Don't fail the whole request — the property is created. Log and
+        // surface the error so the UI can warn.
+        console.error("Auto-pair deal failed:", dealErr.message);
+      } else {
+        createdDeal = dealRow;
+        await supabase.from("deal_stages").insert({
+          deal_id: dealRow.id,
+          stage,
+          entered_at: new Date().toISOString(),
+          entered_by: USER_ID,
+          notes: `Auto-paired with new property at status="${status}"`,
+        });
+      }
+    }
+
+    return NextResponse.json(
+      { property: data, deal: createdDeal },
+      { status: 201 }
+    );
   } catch (error: any) {
     console.error("Properties POST error:", error);
     return NextResponse.json(

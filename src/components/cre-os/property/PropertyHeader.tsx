@@ -2,6 +2,7 @@
 
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { StatusBadge } from "@/components/cre-os/StatusBadge";
+import { StatusEditor } from "./StatusEditor";
 import type { PropertyDetail } from "@/lib/cre-os/property-queries";
 
 const fmtMoney = (n: number | null) => {
@@ -56,7 +57,7 @@ export function PropertyHeader({ p }: { p: PropertyDetail }) {
           )}
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            {p.status && <StatusBadge tone={statusTone}>{p.status.replace("_", " ")}</StatusBadge>}
+            <StatusEditor propertyId={p.id} currentStatus={p.status} />
             {p.pipelineStage && <StatusBadge tone={stageTone}>{p.pipelineStage}</StatusBadge>}
             {p.yourRole && (
               <span className="font-mono text-[10px] text-cream-subtle uppercase tracking-eyebrow">

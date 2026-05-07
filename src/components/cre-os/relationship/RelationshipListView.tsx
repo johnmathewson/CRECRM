@@ -7,6 +7,7 @@ import { Panel } from "@/components/cre-os/Panel";
 import type { RailSection } from "@/components/cre-os/InsightsRail";
 import type { InsightItem } from "@/components/cre-os/InsightCard";
 import { RelationshipListCard } from "./RelationshipListCard";
+import { CreateContactDialog } from "./CreateContactDialog";
 import type { RelationshipCard, WarmthLabel } from "@/lib/cre-os/relationship-queries";
 
 const CONTACT_TYPES = ["all", "owner", "buyer", "tenant", "lender", "investor", "broker", "vendor", "attorney", "other"];
@@ -22,6 +23,7 @@ export function RelationshipListView({ contacts }: { contacts: RelationshipCard[
   const [contactType, setContactType] = useState("all");
   const [warmth, setWarmth] = useState<WarmthLabel | "all">("all");
   const [bucket, setBucket] = useState<Bucket>("all");
+  const [createOpen, setCreateOpen] = useState(false);
 
   const counts = useMemo(() => ({
     all: contacts.length,
@@ -104,18 +106,26 @@ export function RelationshipListView({ contacts }: { contacts: RelationshipCard[
     <AppShell rail={rail}>
       <div className="space-y-7">
         {/* Command header */}
-        <header>
-          <Eyebrow tone="coral">Relationships · Network intelligence</Eyebrow>
-          <h1 className="mt-1 font-display font-medium text-3xl text-cream tracking-tight">Relationship command surface</h1>
-          <p className="mt-2 font-heading text-[14px] text-cream-dim leading-relaxed max-w-3xl">
-            {buildSynthesis(contacts, counts, warmthDist)}
-          </p>
-          <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
-            <CommandStat label="Contacts" value={contacts.length.toString()} caption="In your book" />
-            <CommandStat label="Hot relationships" value={warmthDist.hot.toString()} caption={`of ${contacts.length}`} />
-            <CommandStat label="Active deals" value={contacts.reduce((s, c) => s + c.openDealCount, 0).toString()} caption="Across all contacts" />
-            <CommandStat label="Follow-ups overdue" value={counts.followUpsDue.toString()} caption="Today's outreach" />
+        <header className="flex items-start justify-between gap-6">
+          <div className="min-w-0 flex-1">
+            <Eyebrow tone="coral">Relationships · Network intelligence</Eyebrow>
+            <h1 className="mt-1 font-display font-medium text-3xl text-cream tracking-tight">Relationship command surface</h1>
+            <p className="mt-2 font-heading text-[14px] text-cream-dim leading-relaxed max-w-3xl">
+              {buildSynthesis(contacts, counts, warmthDist)}
+            </p>
+            <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
+              <CommandStat label="Contacts" value={contacts.length.toString()} caption="In your book" />
+              <CommandStat label="Hot relationships" value={warmthDist.hot.toString()} caption={`of ${contacts.length}`} />
+              <CommandStat label="Active deals" value={contacts.reduce((s, c) => s + c.openDealCount, 0).toString()} caption="Across all contacts" />
+              <CommandStat label="Follow-ups overdue" value={counts.followUpsDue.toString()} caption="Today's outreach" />
+            </div>
           </div>
+          <button
+            onClick={() => setCreateOpen(true)}
+            className="shrink-0 px-4 py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] hover:bg-coral-400/[0.18] font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-coral-300 transition-colors"
+          >
+            + Add contact
+          </button>
         </header>
 
         {/* Triage strip */}
@@ -184,6 +194,7 @@ export function RelationshipListView({ contacts }: { contacts: RelationshipCard[
           )}
         </section>
       </div>
+      <CreateContactDialog open={createOpen} onClose={() => setCreateOpen(false)} />
     </AppShell>
   );
 }

@@ -9,6 +9,7 @@ import type { RailSection } from "@/components/cre-os/InsightsRail";
 import type { InsightItem } from "@/components/cre-os/InsightCard";
 import { PropertyListCard } from "./PropertyListCard";
 import { PropertyFeaturedCard } from "./PropertyFeaturedCard";
+import { CreatePropertyDialog } from "./CreatePropertyDialog";
 import type { PropertyCard } from "@/lib/cre-os/property-queries";
 
 const ASSET_TYPES = ["all", "retail", "office", "industrial", "multifamily", "hospitality", "medical", "land", "mixed_use", "other"];
@@ -31,6 +32,7 @@ export function PropertyListView({ properties }: { properties: PropertyCard[] })
   const [assetType, setAssetType] = useState("all");
   const [status, setStatus] = useState("all");
   const [bucket, setBucket] = useState<TriageBucket>("all");
+  const [createOpen, setCreateOpen] = useState(false);
 
   // Triage bucket counts (derived from full set, not filtered)
   const counts = useMemo(() => ({
@@ -133,20 +135,28 @@ export function PropertyListView({ properties }: { properties: PropertyCard[] })
     <AppShell rail={rail}>
       <div className="space-y-7">
         {/* ─── 1. Portfolio command header ─── */}
-        <header>
-          <Eyebrow tone="coral">Properties · Asset intelligence</Eyebrow>
-          <h1 className="mt-1 font-display font-medium text-3xl text-cream tracking-tight">Portfolio command surface</h1>
-          {synthesisLine && (
-            <p className="mt-2 font-heading text-[14px] text-cream-dim leading-relaxed max-w-3xl">
-              {synthesisLine}
-            </p>
-          )}
-          <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
-            <CommandStat label="Assets" value={properties.length.toString()} caption="On the books" />
-            <CommandStat label="Aggregate value" value={fmtMoney(totalValue)} caption="Asking price sum" />
-            <CommandStat label="In-place NOI" value={fmtMoney(totalNoi)} caption="Across portfolio" />
-            <CommandStat label="Weighted cap" value={weightedCap !== null ? (weightedCap * 100).toFixed(2) + "%" : "—"} caption="$-weighted average" />
+        <header className="flex items-start justify-between gap-6">
+          <div className="min-w-0 flex-1">
+            <Eyebrow tone="coral">Properties · Asset intelligence</Eyebrow>
+            <h1 className="mt-1 font-display font-medium text-3xl text-cream tracking-tight">Portfolio command surface</h1>
+            {synthesisLine && (
+              <p className="mt-2 font-heading text-[14px] text-cream-dim leading-relaxed max-w-3xl">
+                {synthesisLine}
+              </p>
+            )}
+            <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
+              <CommandStat label="Assets" value={properties.length.toString()} caption="On the books" />
+              <CommandStat label="Aggregate value" value={fmtMoney(totalValue)} caption="Asking price sum" />
+              <CommandStat label="In-place NOI" value={fmtMoney(totalNoi)} caption="Across portfolio" />
+              <CommandStat label="Weighted cap" value={weightedCap !== null ? (weightedCap * 100).toFixed(2) + "%" : "—"} caption="$-weighted average" />
+            </div>
           </div>
+          <button
+            onClick={() => setCreateOpen(true)}
+            className="shrink-0 px-4 py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] hover:bg-coral-400/[0.18] font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-coral-300 transition-colors"
+          >
+            + Add property
+          </button>
         </header>
 
         {/* ─── 2. Triage strip — operational filter chips ─── */}
@@ -216,6 +226,7 @@ export function PropertyListView({ properties }: { properties: PropertyCard[] })
           )}
         </section>
       </div>
+      <CreatePropertyDialog open={createOpen} onClose={() => setCreateOpen(false)} />
     </AppShell>
   );
 }

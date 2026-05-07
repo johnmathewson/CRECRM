@@ -7,7 +7,9 @@ import { Panel } from "@/components/cre-os/Panel";
 import { KpiTile } from "@/components/cre-os/KpiTile";
 import type { RailSection } from "@/components/cre-os/InsightsRail";
 import { KanbanBoard } from "./KanbanBoard";
+import { CreateDealDialog } from "./CreateDealDialog";
 import type { PipelineBoard } from "@/lib/cre-os/pipeline-queries";
+import type { PortalCandidate, PortalContactCandidate } from "@/lib/cre-os/portal-queries";
 
 const fmtMoney = (n: number) => {
   if (!Number.isFinite(n) || n <= 0) return "—";
@@ -25,11 +27,14 @@ const fmtMoney = (n: number) => {
 export function PipelineView({
   listings,
   pursuits,
+  candidates,
 }: {
   listings: PipelineBoard;
   pursuits: PipelineBoard;
+  candidates: { properties: PortalCandidate[]; contacts: PortalContactCandidate[] };
 }) {
   const [side, setSide] = useState<"listings" | "pursuits">("listings");
+  const [createOpen, setCreateOpen] = useState(false);
   const board = side === "listings" ? listings : pursuits;
 
   // Derived stage health flags for the rail
@@ -119,12 +124,20 @@ export function PipelineView({
     <AppShell rail={rail}>
       <div className="space-y-6">
         {/* Page header */}
-        <div>
-          <Eyebrow tone="coral">Pipeline</Eyebrow>
-          <h1 className="mt-1 font-display font-medium text-3xl text-cream tracking-tight">Deal flow</h1>
-          <p className="mt-1 font-body text-[13px] text-cream-dim">
-            Two parallel ladders. Listings tracks sell-side / lease-side mandates. Pursuits tracks buy-side acquisitions.
-          </p>
+        <div className="flex items-start justify-between gap-6">
+          <div className="min-w-0 flex-1">
+            <Eyebrow tone="coral">Pipeline</Eyebrow>
+            <h1 className="mt-1 font-display font-medium text-3xl text-cream tracking-tight">Deal flow</h1>
+            <p className="mt-1 font-body text-[13px] text-cream-dim">
+              Two parallel ladders. Listings tracks sell-side / lease-side mandates. Pursuits tracks buy-side acquisitions.
+            </p>
+          </div>
+          <button
+            onClick={() => setCreateOpen(true)}
+            className="shrink-0 px-4 py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] hover:bg-coral-400/[0.18] font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-coral-300 transition-colors"
+          >
+            + Add deal
+          </button>
         </div>
 
         {/* Side toggle + KPIs */}
@@ -180,6 +193,13 @@ export function PipelineView({
           )}
         </Panel>
       </div>
+      <CreateDealDialog
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        properties={candidates.properties.map((p) => ({ id: p.id, name: p.name, city: p.city, state: p.state }))}
+        contacts={candidates.contacts.map((c) => ({ id: c.id, fullName: c.name, email: c.email }))}
+        defaultDealType={side === "pursuits" ? "buyer_rep" : "sale"}
+      />
     </AppShell>
   );
 }
