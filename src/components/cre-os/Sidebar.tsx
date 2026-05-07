@@ -127,56 +127,95 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
   },
 ];
 
-export function Sidebar() {
+export function Sidebar({
+  mobileOpen = false,
+  onClose,
+}: {
+  mobileOpen?: boolean;
+  onClose?: () => void;
+}) {
   const pathname = usePathname();
 
   return (
-    <aside className="w-56 shrink-0 h-full border-r border-white/[0.04] bg-steward-base/40 backdrop-blur-md flex flex-col">
-      {/* Brand */}
-      <div className="px-5 py-4 border-b border-white/[0.04]">
-        <div className="font-display font-medium text-base text-cream tracking-wider">STEWARDSHIP</div>
-        <div className="font-mono text-[9px] text-coral-400 uppercase tracking-eyebrow mt-0.5">CRE OS · Beta</div>
-      </div>
+    <>
+      {/* Mobile backdrop (only when drawer open) */}
+      {mobileOpen && (
+        <div
+          className="lg:hidden fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
+          onClick={onClose}
+          aria-hidden
+        />
+      )}
 
-      {/* Nav */}
-      <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-5">
-        {NAV_GROUPS.map((group) => (
-          <div key={group.label}>
-            <div className="px-2 mb-2 font-heading text-[9px] font-semibold uppercase tracking-eyebrow text-cream-subtle">
-              {group.label}
-            </div>
-            <div className="space-y-0.5">
-              {group.items.map((item) => {
-                const active = pathname === item.href || pathname?.startsWith(item.href + "/");
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`flex items-center gap-3 px-2.5 py-2 rounded transition-colors ${
-                      active
-                        ? "bg-coral-400/[0.10] text-cream border-l-2 border-coral-400 pl-2"
-                        : "text-cream-dim hover:bg-white/[0.04] hover:text-cream"
-                    }`}
-                  >
-                    <span className={active ? "text-coral-300" : "text-cream-subtle"}>{item.icon}</span>
-                    <span className="font-heading text-[12px] font-medium flex-1">{item.label}</span>
-                    {item.badge !== undefined && item.badge > 0 && (
-                      <span className="font-mono text-[9px] text-coral-300">{item.badge}</span>
-                    )}
-                  </Link>
-                );
-              })}
-            </div>
+      <aside
+        className={`
+          flex flex-col bg-steward-base/95 lg:bg-steward-base/40 backdrop-blur-md border-r border-white/[0.04]
+          /* Mobile: fixed drawer that slides in from the left */
+          fixed lg:static inset-y-0 left-0 z-50
+          w-72 lg:w-56 shrink-0 h-full
+          transition-transform duration-200 ease-out
+          ${mobileOpen ? "translate-x-0" : "-translate-x-full"} lg:translate-x-0
+        `}
+      >
+        {/* Brand + mobile close */}
+        <div className="px-5 py-4 border-b border-white/[0.04] flex items-start justify-between gap-2">
+          <div>
+            <div className="font-display font-medium text-base text-cream tracking-wider">STEWARDSHIP</div>
+            <div className="font-mono text-[9px] text-coral-400 uppercase tracking-eyebrow mt-0.5">CRE OS · Beta</div>
           </div>
-        ))}
-      </nav>
-
-      {/* Footer */}
-      <div className="px-4 py-3 border-t border-white/[0.04]">
-        <div className="font-mono text-[9px] text-cream-subtle">
-          john@stewardshipcre.com
+          <button
+            onClick={onClose}
+            className="lg:hidden -mr-1 p-2 text-cream-subtle hover:text-cream transition-colors"
+            aria-label="Close navigation"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" className="w-5 h-5">
+              <line x1="6" y1="6" x2="18" y2="18" strokeLinecap="round" />
+              <line x1="6" y1="18" x2="18" y2="6" strokeLinecap="round" />
+            </svg>
+          </button>
         </div>
-      </div>
-    </aside>
+
+        {/* Nav */}
+        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-5">
+          {NAV_GROUPS.map((group) => (
+            <div key={group.label}>
+              <div className="px-2 mb-2 font-heading text-[9px] font-semibold uppercase tracking-eyebrow text-cream-subtle">
+                {group.label}
+              </div>
+              <div className="space-y-0.5">
+                {group.items.map((item) => {
+                  const active = pathname === item.href || pathname?.startsWith(item.href + "/");
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={onClose}
+                      className={`flex items-center gap-3 px-2.5 py-2.5 lg:py-2 rounded transition-colors ${
+                        active
+                          ? "bg-coral-400/[0.10] text-cream border-l-2 border-coral-400 pl-2"
+                          : "text-cream-dim hover:bg-white/[0.04] hover:text-cream active:bg-white/[0.06]"
+                      }`}
+                    >
+                      <span className={active ? "text-coral-300" : "text-cream-subtle"}>{item.icon}</span>
+                      <span className="font-heading text-[13px] lg:text-[12px] font-medium flex-1">{item.label}</span>
+                      {item.badge !== undefined && item.badge > 0 && (
+                        <span className="font-mono text-[9px] text-coral-300">{item.badge}</span>
+                      )}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </nav>
+
+        {/* Footer */}
+        <div className="px-4 py-3 border-t border-white/[0.04]">
+          <div className="font-mono text-[10px] lg:text-[9px] text-cream-subtle">
+            john@stewardshipcre.com
+          </div>
+        </div>
+      </aside>
+    </>
   );
 }

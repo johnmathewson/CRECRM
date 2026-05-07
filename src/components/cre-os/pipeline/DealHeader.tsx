@@ -38,7 +38,7 @@ export function DealHeader({ d }: { d: DealDetail }) {
     .join(" · ");
 
   return (
-    <div className="bg-steward-base/80 backdrop-blur-md border-b border-white/[0.04] -mx-8 px-8 -mt-6 pt-6 pb-5 mb-6">
+    <div className="bg-steward-base/80 backdrop-blur-md border-b border-white/[0.04] -mx-4 px-4 -mt-5 pt-5 pb-5 mb-6 lg:-mx-8 lg:px-8 lg:-mt-6 lg:pt-6">
       <Eyebrow tone="coral">
         Deal · {d.dealType ? d.dealType.replace("_", " ").toUpperCase() : "—"}
       </Eyebrow>

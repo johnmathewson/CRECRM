@@ -179,7 +179,7 @@ export function LeadDetail({ lead }: { lead: LeadDetailData }) {
 
   return (
     <AppShell rail={rail}>
-      <div className="bg-steward-base/80 backdrop-blur-md border-b border-white/[0.04] -mx-8 px-8 -mt-6 pt-6 pb-5 mb-6">
+      <div className="bg-steward-base/80 backdrop-blur-md border-b border-white/[0.04] -mx-4 px-4 -mt-5 pt-5 pb-5 mb-6 lg:-mx-8 lg:px-8 lg:-mt-6 lg:pt-6">
         <Eyebrow tone="coral">
           Inbox · Lead{lead.source && <span className="ml-2 text-cream-subtle">·  {lead.source.toUpperCase()}</span>}
         </Eyebrow>
@@ -359,7 +359,7 @@ export function LeadDetail({ lead }: { lead: LeadDetailData }) {
 
       {/* Sticky action bar — fixed, thumb-zone friendly */}
       {!isArchived && (
-        <div className="fixed bottom-0 left-56 right-[300px] bg-steward-base/95 backdrop-blur-md border-t border-coral-400/20 px-8 py-3 z-30">
+        <div className="fixed bottom-0 left-0 right-0 lg:left-56 lg:right-[300px] bg-steward-base/95 backdrop-blur-md border-t border-coral-400/20 px-4 lg:px-8 py-3 z-30 [padding-bottom:max(0.75rem,env(safe-area-inset-bottom))]">
           {actionState.error && (
             <div className="mb-2 px-3 py-1.5 rounded bg-coral-400/[0.08] border border-coral-400/30 font-body text-[12px] text-coral-300">
               {actionState.error}

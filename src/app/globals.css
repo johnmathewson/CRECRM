@@ -188,3 +188,23 @@ body {
   background: rgba(224, 122, 95, 0.3);
   color: var(--cream);
 }
+
+/* ── Hide scrollbar utility (for horizontal tab strips on mobile) ─ */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── Mobile-friendliness baseline ─────────────── */
+@media (max-width: 1023px) {
+  /* Stop iOS from auto-zooming on focused inputs/selects/textareas. The
+     16px floor on form-control text is the magic threshold. */
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}

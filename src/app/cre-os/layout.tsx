@@ -35,7 +35,7 @@ const jetbrains = JetBrains_Mono({
 export default function CreOsLayout({ children }: { children: React.ReactNode }) {
   return (
     <div
-      className={`${spaceGrotesk.variable} ${dmSans.variable} ${inter.variable} ${jetbrains.variable} h-screen w-screen overflow-hidden`}
+      className={`${spaceGrotesk.variable} ${dmSans.variable} ${inter.variable} ${jetbrains.variable} h-[100dvh] w-screen overflow-hidden`}
     >
       {children}
     </div>

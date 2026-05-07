@@ -1,10 +1,19 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Stewardship CRM — CRE Intelligence Platform",
   description:
     "Commercial real estate intelligence platform for Stewardship Asset Group",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  // Charcoal base so iOS notch / Android nav bar match the app surface
+  themeColor: "#0D0D0D",
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

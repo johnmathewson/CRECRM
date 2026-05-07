@@ -55,12 +55,12 @@ export function PortalCard({ token, onChanged }: { token: PortalToken; onChanged
           : `Expires ${formatShortDate(token.expiresAt)}`;
 
   return (
-    <article className={`rounded border bg-steward-surface/40 px-5 py-4 transition-colors ${
+    <article className={`rounded border bg-steward-surface/40 px-4 lg:px-5 py-4 transition-colors ${
       token.status === "active"
         ? "border-white/[0.06] hover:border-white/[0.12]"
         : "border-white/[0.04] opacity-70"
     }`}>
-      <div className="flex items-start justify-between gap-6">
+      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3 lg:gap-6">
         {/* Left: identity */}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
@@ -100,10 +100,12 @@ export function PortalCard({ token, onChanged }: { token: PortalToken; onChanged
         </div>
 
         {/* Right: signals + actions */}
-        <div className="shrink-0 flex flex-col items-end gap-2 text-right">
-          <div className="font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle">{lastViewedLabel}</div>
-          <div className="font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle">{expiryLabel}</div>
-          <div className="flex items-center gap-1.5 mt-1">
+        <div className="shrink-0 flex flex-row lg:flex-col items-center lg:items-end justify-between lg:justify-start gap-2 lg:text-right flex-wrap">
+          <div className="flex flex-col items-start lg:items-end gap-0.5">
+            <div className="font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle">{lastViewedLabel}</div>
+            <div className="font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle">{expiryLabel}</div>
+          </div>
+          <div className="flex items-center gap-1.5">
             <button
               onClick={copyLink}
               className="px-2.5 py-1 rounded border border-white/[0.06] bg-white/[0.04] hover:bg-white/[0.08] font-heading text-[10px] uppercase tracking-eyebrow font-semibold text-cream-dim hover:text-cream transition-colors"

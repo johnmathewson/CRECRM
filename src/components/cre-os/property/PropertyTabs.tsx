@@ -29,7 +29,7 @@ export function PropertyTabs({ p, threads, perf }: { p: PropertyDetail; threads:
 
   return (
     <div>
-      <div className="flex items-center gap-6 border-b border-white/[0.06] -mx-1 px-1">
+      <div className="flex items-center gap-5 lg:gap-6 border-b border-white/[0.06] -mx-4 lg:-mx-1 px-4 lg:px-1 overflow-x-auto no-scrollbar">
         {TABS.map((t) => {
           const isActive = active === t.key;
           const badge = t.key === "communications" && threads.length > 0 ? threads.length : null;
@@ -37,7 +37,7 @@ export function PropertyTabs({ p, threads, perf }: { p: PropertyDetail; threads:
             <button
               key={t.key}
               onClick={() => setActive(t.key)}
-              className={`relative py-3 font-heading text-[12px] uppercase tracking-eyebrow font-semibold transition-colors flex items-center gap-1.5 ${
+              className={`relative py-3 font-heading text-[12px] uppercase tracking-eyebrow font-semibold transition-colors flex items-center gap-1.5 whitespace-nowrap ${
                 isActive ? "text-cream" : "text-cream-subtle hover:text-cream-dim"
               }`}
             >

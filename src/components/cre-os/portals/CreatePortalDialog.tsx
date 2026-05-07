@@ -103,7 +103,7 @@ export function CreatePortalDialog({
       onClick={onClose}
     >
       <div
-        className="my-12 w-full max-w-2xl bg-steward-base border border-white/[0.08] rounded shadow-panel-soft"
+        className="my-2 mx-2 lg:my-12 w-full max-w-2xl bg-steward-base border border-white/[0.08] rounded shadow-panel-soft"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
