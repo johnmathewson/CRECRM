@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { PropertyDetail } from "@/lib/cre-os/property-queries";
 import type { ThreadSummary } from "@/lib/cre-os/communications-queries";
+import type { ListingPerformance } from "@/lib/cre-os/listing-perf-queries";
 import { OverviewTab } from "./tabs/OverviewTab";
 import { ValuationTab } from "./tabs/ValuationTab";
 import { CommunicationsTab } from "./tabs/CommunicationsTab";
@@ -23,7 +24,7 @@ type TabKey = (typeof TABS)[number]["key"];
  * tab renders its content below. Coral-underline active treatment matches
  * the editorial brand language.
  */
-export function PropertyTabs({ p, threads }: { p: PropertyDetail; threads: ThreadSummary[] }) {
+export function PropertyTabs({ p, threads, perf }: { p: PropertyDetail; threads: ThreadSummary[]; perf: ListingPerformance }) {
   const [active, setActive] = useState<TabKey>("overview");
 
   return (
@@ -56,7 +57,7 @@ export function PropertyTabs({ p, threads }: { p: PropertyDetail; threads: Threa
         {active === "overview" && <OverviewTab p={p} />}
         {active === "valuation" && <ValuationTab p={p} />}
         {active === "communications" && <CommunicationsTab threads={threads} propertyName={p.name} />}
-        {active === "performance" && <PerformanceTab p={p} />}
+        {active === "performance" && <PerformanceTab p={p} perf={perf} />}
         {active === "activity" && <ActivityTab p={p} />}
       </div>
     </div>
