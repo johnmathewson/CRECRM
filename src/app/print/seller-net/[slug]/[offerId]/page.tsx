@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { unstable_noStore as noStore } from "next/cache";
 import { createClient } from "@supabase/supabase-js";
 import { computeSellerNet, type SellerNetInputs } from "@/lib/seller-net";
 import { OfferPrintView } from "./OfferPrintView";
@@ -6,6 +7,9 @@ import { OfferPrintView } from "./OfferPrintView";
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 
 export const dynamic = "force-dynamic";
+// Belt-and-suspenders no-cache: dynamic = "force-dynamic" should be enough
+// but noStore() opts out of every caching layer Next.js exposes, so the
+// PDF route can't possibly serve stale data after the broker just saved.
 
 /**
  * Branded seller-net summary, print-optimized.
@@ -28,6 +32,7 @@ export default async function OfferPrintPage({
 }: {
   params: { slug: string; offerId: string };
 }) {
+  noStore();
   const sb = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!

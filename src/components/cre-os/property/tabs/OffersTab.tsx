@@ -185,11 +185,18 @@ export function OffersTab({ p }: { p: PropertyDetail }) {
     setActionError(null);
   }
 
-  async function save(opts: { publish?: boolean } = {}) {
-    if (!editor || !editorInputs) return;
+  /**
+   * Persist the current editor state. Returns the saved offer's id (whether
+   * it was a fresh insert or a patch on an existing row), or null if a
+   * validation/network error happened. Doesn't close the editor or refetch
+   * — callers do that depending on what flow they're in (Save vs. Preview
+   * PDF, etc.).
+   */
+  async function commitOffer(opts: { publish?: boolean } = {}): Promise<string | null> {
+    if (!editor || !editorInputs) return null;
     if (editorInputs.offer_price <= 0) {
       setActionError("Offer price is required.");
-      return;
+      return null;
     }
     const effectiveTitle =
       editor.title.trim() ||
@@ -209,35 +216,72 @@ export function OffersTab({ p }: { p: PropertyDetail }) {
       notes: editor.notes.trim() || null,
     };
 
+    let savedId: string;
+    if (editor.id) {
+      const res = await fetch(`/api/properties/${p.id}/offers/${editor.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+      savedId = editor.id;
+    } else {
+      const res = await fetch(`/api/properties/${p.id}/offers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...payload, published: !!opts.publish }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+      savedId = json.offer.id;
+    }
+    // If saving an existing draft + asking to publish, hit the publish endpoint
+    if (editor.id && opts.publish) {
+      await fetch(`/api/properties/${p.id}/offers/${savedId}/publish`, { method: "POST" });
+    }
+    return savedId;
+  }
+
+  async function save(opts: { publish?: boolean } = {}) {
     setBusy("save");
     setActionError(null);
     try {
-      let savedId: string;
-      if (editor.id) {
-        const res = await fetch(`/api/properties/${p.id}/offers/${editor.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
-        savedId = editor.id;
-      } else {
-        const res = await fetch(`/api/properties/${p.id}/offers`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...payload, published: !!opts.publish }),
-        });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
-        savedId = json.offer.id;
-      }
-      // If saving an existing draft + asking to publish, hit the publish endpoint
-      if (editor.id && opts.publish) {
-        await fetch(`/api/properties/${p.id}/offers/${savedId}/publish`, { method: "POST" });
-      }
+      const savedId = await commitOffer(opts);
+      if (!savedId) return; // validation error already surfaced
       closeEditor();
       await reload();
+    } catch (err: any) {
+      setActionError(err?.message || String(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /**
+   * Save the current editor state, then open the branded PDF in a new tab.
+   * Without this, the PDF would render the *previous* saved snapshot of
+   * the offer — broker would tweak a number in the editor, click PDF, see
+   * the old version. Now the PDF always reflects what's on screen.
+   *
+   * Promotes a brand-new (no-id) offer into a saved draft so the print
+   * route can find it. Updates editor.id so subsequent edits patch the
+   * same row instead of creating duplicates.
+   */
+  async function previewPdf() {
+    if (!editor || !editorInputs) return;
+    setBusy("preview");
+    setActionError(null);
+    try {
+      const savedId = await commitOffer({ publish: false });
+      if (!savedId) return;
+      // Track the new id so further saves patch this row.
+      if (!editor.id) {
+        setEditor((prev) => (prev ? { ...prev, id: savedId } : prev));
+      }
+      await reload();
+      // Cache-bust query param so the new tab never shows a stale render.
+      window.open(`/print/seller-net/${p.slug}/${savedId}?t=${Date.now()}`, "_blank");
     } catch (err: any) {
       setActionError(err?.message || String(err));
     } finally {
@@ -512,7 +556,10 @@ export function OffersTab({ p }: { p: PropertyDetail }) {
                 />
               </Section>
 
-              {/* Action buttons */}
+              {/* Action buttons. Preview PDF auto-saves the current editor
+                  state before opening the print tab, so the PDF always
+                  reflects what's on screen — never the previous saved
+                  snapshot. */}
               <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-white/[0.05]">
                 <button
                   onClick={() => save({ publish: false })}
@@ -527,6 +574,14 @@ export function OffersTab({ p }: { p: PropertyDetail }) {
                   className="px-4 py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] hover:bg-coral-400/[0.20] font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-coral-300 disabled:opacity-50 transition-colors"
                 >
                   {editor.id ? "Save & publish" : "Save & publish to owner"}
+                </button>
+                <button
+                  onClick={previewPdf}
+                  disabled={!!busy}
+                  className="px-4 py-2 rounded border border-teal-400/40 bg-teal-400/[0.08] hover:bg-teal-400/[0.18] font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-teal-300 disabled:opacity-50 transition-colors"
+                  title="Saves your current changes, then opens the branded PDF in a new tab."
+                >
+                  {busy === "preview" ? "Saving…" : "Save & preview PDF"}
                 </button>
                 <button
                   onClick={closeEditor}
@@ -596,6 +651,7 @@ export function OffersTab({ p }: { p: PropertyDetail }) {
                 onCancelDelete={() => setConfirmDelete(null)}
                 confirmDelete={confirmDelete === o.id}
                 isEditing={editor?.id === o.id}
+                onPreviewPdfWhenEditing={editor?.id === o.id ? previewPdf : undefined}
               />
             ))}
           </div>
@@ -626,6 +682,7 @@ export function OffersTab({ p }: { p: PropertyDetail }) {
                 onCancelDelete={() => setConfirmDelete(null)}
                 confirmDelete={confirmDelete === o.id}
                 isEditing={editor?.id === o.id}
+                onPreviewPdfWhenEditing={editor?.id === o.id ? previewPdf : undefined}
               />
             ))}
           </div>
@@ -965,6 +1022,7 @@ function OfferRow({
   onConfirmDelete,
   onCancelDelete,
   confirmDelete,
+  onPreviewPdfWhenEditing,
 }: {
   propertySlug: string;
   propertyId: string;
@@ -977,6 +1035,11 @@ function OfferRow({
   onConfirmDelete: () => void;
   onCancelDelete: () => void;
   confirmDelete: boolean;
+  /** When the editor is currently editing THIS offer, the parent passes
+   *  in a save-then-open-PDF callback so the row's PDF button reflects
+   *  unsaved changes. Otherwise undefined and the row falls back to a
+   *  plain link to the print page. */
+  onPreviewPdfWhenEditing?: () => Promise<void> | void;
 }) {
   const isPublished = !!offer.published_at;
   const pubBusy = busy === `pub-${offer.id}`;
@@ -1099,15 +1162,30 @@ function OfferRow({
             </>
           ) : (
             <>
-              <a
-                href={printHref}
-                target="_blank"
-                rel="noreferrer"
-                className="px-2.5 py-1 rounded border border-white/[0.06] bg-white/[0.04] hover:bg-white/[0.08] font-heading text-[10px] uppercase tracking-eyebrow font-semibold text-cream-dim hover:text-cream transition-colors"
-                title="Opens a print-ready summary in a new tab. Save as PDF from the print dialog."
-              >
-                PDF
-              </a>
+              {/* PDF button. If the editor is open editing THIS offer, the
+                  parent passes a save-then-open callback so unsaved changes
+                  flow into the PDF. Otherwise it's a plain new-tab link to
+                  the print route — already-saved data, no save needed. */}
+              {onPreviewPdfWhenEditing ? (
+                <button
+                  onClick={() => onPreviewPdfWhenEditing()}
+                  disabled={!!busy}
+                  className="px-2.5 py-1 rounded border border-teal-400/40 bg-teal-400/[0.08] hover:bg-teal-400/[0.18] font-heading text-[10px] uppercase tracking-eyebrow font-semibold text-teal-300 disabled:opacity-50 transition-colors"
+                  title="You have this offer open in the editor — saves your edits first, then opens the PDF."
+                >
+                  {busy === "preview" ? "…" : "Save & PDF"}
+                </button>
+              ) : (
+                <a
+                  href={printHref}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-2.5 py-1 rounded border border-white/[0.06] bg-white/[0.04] hover:bg-white/[0.08] font-heading text-[10px] uppercase tracking-eyebrow font-semibold text-cream-dim hover:text-cream transition-colors"
+                  title="Opens a print-ready summary in a new tab. Save as PDF from the print dialog."
+                >
+                  PDF
+                </a>
+              )}
               <button
                 onClick={onEdit}
                 className="px-2.5 py-1 rounded border border-white/[0.06] bg-white/[0.04] hover:bg-white/[0.08] font-heading text-[10px] uppercase tracking-eyebrow font-semibold text-cream-dim hover:text-cream transition-colors"
