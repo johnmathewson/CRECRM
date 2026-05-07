@@ -330,6 +330,34 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
     })(),
   ]);
 
+  // ── Hydrate attachments for the published offers ──
+  // Owner portal only sees published offers, so we only need attachments
+  // tied to those offer ids. Sign URLs with a 30-min TTL.
+  const offerIds = (offersRes.data ?? []).map((o: any) => o.id);
+  let attachmentsByOffer: Record<string, any[]> = {};
+  if (offerIds.length > 0) {
+    const { data: attachRows } = await supabase
+      .from("offer_attachments")
+      .select("id, offer_id, file_name, storage_path, file_size, mime_type, doc_type, uploaded_at")
+      .eq("organization_id", ORG_ID)
+      .in("offer_id", offerIds)
+      .order("uploaded_at", { ascending: false });
+
+    for (const r of (attachRows ?? []) as any[]) {
+      const { data: signed } = await supabase.storage
+        .from("offer-attachments")
+        .createSignedUrl(r.storage_path, 60 * 30);
+      const enriched = { ...r, signed_url: signed?.signedUrl ?? null };
+      const list = attachmentsByOffer[r.offer_id] ?? [];
+      list.push(enriched);
+      attachmentsByOffer[r.offer_id] = list;
+    }
+  }
+  const offersWithAttachments = (offersRes.data ?? []).map((o: any) => ({
+    ...o,
+    attachments: attachmentsByOffer[o.id] ?? [],
+  }));
+
   return NextResponse.json(
     {
       label: tokenRow.label,
@@ -339,8 +367,9 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
       expires_at: tokenRow.expires_at,
       properties: propertiesOut,
       week_starting: isoDate(thisWeekStart),
-      // Seller-net offer scenarios saved against any of these properties.
-      offers: offersRes.data ?? [],
+      // Seller-net offer scenarios saved against any of these properties,
+      // each with a freshly-signed URL list of attachments.
+      offers: offersWithAttachments,
     },
     { headers: corsHeaders(origin) }
   );

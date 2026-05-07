@@ -15,7 +15,7 @@
  * is the `published_at` gate.
  */
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { Panel } from "@/components/cre-os/Panel";
 import { StatusBadge } from "@/components/cre-os/StatusBadge";
@@ -48,6 +48,17 @@ interface AdminOffer {
   published_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+interface OfferAttachment {
+  id: string;
+  file_name: string;
+  file_size: number | null;
+  mime_type: string | null;
+  doc_type: "loi" | "addendum" | "financing" | "other";
+  uploaded_at: string;
+  signed_url: string | null;
+  uploaded_via_token_id: string | null;
 }
 
 const DEFAULT_LINE_ITEMS: SellerNetLineItem[] = [
@@ -573,6 +584,8 @@ export function OffersTab({ p }: { p: PropertyDetail }) {
             {drafts.map((o) => (
               <OfferRow
                 key={o.id}
+                propertySlug={p.slug}
+                propertyId={p.id}
                 offer={o}
                 busy={busy}
                 onEdit={() => startEdit(o)}
@@ -601,6 +614,8 @@ export function OffersTab({ p }: { p: PropertyDetail }) {
             {published.map((o) => (
               <OfferRow
                 key={o.id}
+                propertySlug={p.slug}
+                propertyId={p.id}
                 offer={o}
                 busy={busy}
                 onEdit={() => startEdit(o)}
@@ -859,6 +874,8 @@ function Row({
 }
 
 function OfferRow({
+  propertySlug,
+  propertyId,
   offer,
   busy,
   isEditing,
@@ -869,6 +886,8 @@ function OfferRow({
   onCancelDelete,
   confirmDelete,
 }: {
+  propertySlug: string;
+  propertyId: string;
   offer: AdminOffer;
   busy: string | null;
   isEditing: boolean;
@@ -882,6 +901,73 @@ function OfferRow({
   const isPublished = !!offer.published_at;
   const pubBusy = busy === `pub-${offer.id}`;
   const delBusy = busy === `del-${offer.id}`;
+
+  // Attachments are loaded lazily — first render fires, list refreshes after upload/delete.
+  const [attachments, setAttachments] = useState<OfferAttachment[]>([]);
+  const [attachmentsLoaded, setAttachmentsLoaded] = useState(false);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const [showUploader, setShowUploader] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [docType, setDocType] = useState<OfferAttachment["doc_type"]>("loi");
+
+  const reloadAttachments = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `/api/properties/${propertyId}/offers/${offer.id}/attachments`,
+        { cache: "no-store" }
+      );
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+      setAttachments(json.attachments ?? []);
+      setAttachmentsLoaded(true);
+    } catch (err: any) {
+      setAttachError(err?.message || String(err));
+      setAttachmentsLoaded(true);
+    }
+  }, [propertyId, offer.id]);
+
+  useEffect(() => { reloadAttachments(); }, [reloadAttachments]);
+
+  async function uploadFile(file: File) {
+    setUploadBusy(true);
+    setAttachError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("doc_type", docType);
+      const res = await fetch(
+        `/api/properties/${propertyId}/offers/${offer.id}/attachments`,
+        { method: "POST", body: fd }
+      );
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+      await reloadAttachments();
+      setShowUploader(false);
+    } catch (err: any) {
+      setAttachError(err?.message || String(err));
+    } finally {
+      setUploadBusy(false);
+    }
+  }
+
+  async function deleteAttachment(id: string) {
+    if (!confirm("Delete this attachment? Cannot be undone.")) return;
+    setAttachError(null);
+    try {
+      const res = await fetch(
+        `/api/properties/${propertyId}/offers/${offer.id}/attachments/${id}`,
+        { method: "DELETE" }
+      );
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+      await reloadAttachments();
+    } catch (err: any) {
+      setAttachError(err?.message || String(err));
+    }
+  }
+
+  const printHref = `/cre-os/properties/${propertySlug}/offers/${offer.id}/print`;
 
   return (
     <article
@@ -911,7 +997,7 @@ function OfferRow({
             </div>
           )}
         </div>
-        <div className="shrink-0 flex items-center gap-2">
+        <div className="shrink-0 flex items-center gap-2 flex-wrap">
           {confirmDelete ? (
             <>
               <button
@@ -930,6 +1016,15 @@ function OfferRow({
             </>
           ) : (
             <>
+              <a
+                href={printHref}
+                target="_blank"
+                rel="noreferrer"
+                className="px-2.5 py-1 rounded border border-white/[0.06] bg-white/[0.04] hover:bg-white/[0.08] font-heading text-[10px] uppercase tracking-eyebrow font-semibold text-cream-dim hover:text-cream transition-colors"
+                title="Opens a print-ready summary in a new tab. Save as PDF from the print dialog."
+              >
+                PDF
+              </a>
               <button
                 onClick={onEdit}
                 className="px-2.5 py-1 rounded border border-white/[0.06] bg-white/[0.04] hover:bg-white/[0.08] font-heading text-[10px] uppercase tracking-eyebrow font-semibold text-cream-dim hover:text-cream transition-colors"
@@ -981,8 +1076,123 @@ function OfferRow({
           emphasize={!!offer.computed_partners_due && offer.computed_partners_due > 0}
         />
       </div>
+
+      {/* Attachments — LOI / addenda / financing / other */}
+      <div className="mt-3 pt-3 border-t border-white/[0.04]">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="font-mono text-[9px] uppercase tracking-eyebrow text-cream-subtle">
+            Documents{attachmentsLoaded && ` · ${attachments.length}`}
+          </div>
+          {!showUploader && (
+            <button
+              onClick={() => setShowUploader(true)}
+              className="font-mono text-[10px] uppercase tracking-eyebrow text-coral-400 hover:text-coral-300 transition-colors"
+            >
+              + Upload LOI / file
+            </button>
+          )}
+        </div>
+
+        {/* Inline uploader */}
+        {showUploader && (
+          <div className="mt-2 rounded border border-coral-400/30 bg-coral-400/[0.04] p-3 flex flex-wrap items-center gap-2">
+            <select
+              value={docType}
+              onChange={(e) => setDocType(e.target.value as OfferAttachment["doc_type"])}
+              className="px-2 py-1 rounded bg-steward-surface/60 border border-white/[0.06] font-body text-[11px] text-cream"
+            >
+              <option value="loi">LOI / Offer letter</option>
+              <option value="addendum">Addendum</option>
+              <option value="financing">Financing pre-qual</option>
+              <option value="other">Other</option>
+            </select>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) uploadFile(f);
+                if (fileInputRef.current) fileInputRef.current.value = "";
+              }}
+              disabled={uploadBusy}
+              className="font-body text-[11px] text-cream-dim file:mr-3 file:py-1 file:px-2 file:rounded file:border-0 file:bg-coral-400/[0.12] file:text-coral-300 file:font-mono file:text-[10px] file:uppercase file:tracking-eyebrow file:cursor-pointer"
+            />
+            <span className="font-body text-[10px] text-cream-subtle">25MB max · PDF, DOC, image</span>
+            <button
+              onClick={() => setShowUploader(false)}
+              className="ml-auto font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle hover:text-cream"
+              disabled={uploadBusy}
+            >
+              {uploadBusy ? "Uploading…" : "Cancel"}
+            </button>
+          </div>
+        )}
+
+        {attachError && (
+          <div className="mt-2 rounded border border-red-400/30 bg-red-500/[0.06] px-2 py-1 font-body text-[10px] text-red-300">
+            {attachError}
+          </div>
+        )}
+
+        {/* List */}
+        {attachments.length > 0 && (
+          <ul className="mt-2 space-y-1">
+            {attachments.map((a) => (
+              <li
+                key={a.id}
+                className="flex items-center justify-between gap-3 px-2 py-1.5 rounded border border-white/[0.04] bg-white/[0.02]"
+              >
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <span className="font-mono text-[9px] uppercase tracking-eyebrow text-coral-400 shrink-0">
+                    {docTypeLabel(a.doc_type)}
+                  </span>
+                  {a.signed_url ? (
+                    <a
+                      href={a.signed_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-body text-[11px] text-cream hover:text-coral-300 truncate transition-colors"
+                    >
+                      {a.file_name}
+                    </a>
+                  ) : (
+                    <span className="font-body text-[11px] text-cream-dim truncate">{a.file_name}</span>
+                  )}
+                  <span className="font-mono text-[9px] text-cream-subtle shrink-0">
+                    {fmtFileSize(a.file_size)}
+                  </span>
+                </div>
+                <button
+                  onClick={() => deleteAttachment(a.id)}
+                  className="font-mono text-[10px] text-cream-subtle hover:text-red-300 transition-colors"
+                  title="Delete"
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </article>
   );
+}
+
+function docTypeLabel(t: OfferAttachment["doc_type"]): string {
+  switch (t) {
+    case "loi": return "LOI";
+    case "addendum": return "Addendum";
+    case "financing": return "Pre-qual";
+    case "other": return "Other";
+  }
+}
+
+function fmtFileSize(n: number | null): string {
+  if (n === null || n === undefined) return "";
+  if (n < 1024) return `${n}B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)}KB`;
+  return `${(n / 1024 / 1024).toFixed(1)}MB`;
 }
 
 function Stat({
