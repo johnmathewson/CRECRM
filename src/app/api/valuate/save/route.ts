@@ -102,7 +102,10 @@ export async function POST(req: NextRequest) {
       name,
       address: body.address,
       asset_type: normalizeAssetType(body.assetType),
-      status: "active",
+      // Brand-new BOV → we're sourcing; lands at "prospecting" so the
+      // paired deal slots into the Prospecting column in the pipeline.
+      // Caller can override via body.status if they have a clearer picture.
+      status: body.status || "prospecting",
       your_role: yourRole,
       transaction_type: transactionType,
       slug,
@@ -149,11 +152,27 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // If addToDeals, create a deal + initial Lead-stage entry.
+    // Always pair a deal — properties anchor everything; if a BOV is
+    // worth saving as a property, it's worth tracking in pipeline.
+    // Caller can opt out with { addToDeals: false } if they truly want
+    // a bare property record. Stage matches the property's status so the
+    // card lands in the right column on first paint.
     let dealId: string | null = null;
-    if (body.addToDeals) {
+    const wantsDeal = body.addToDeals !== false;
+    if (wantsDeal) {
       const dealName = (body.dealName || `${name} — ${transactionType === "lease" ? "Lease" : "Sale"}`).toString().trim();
       const price = transactionType === "sale" ? (body.stabilizedValue ?? null) : (body.stabilizedRate ?? null);
+      // Map the property status we just set to the right deal stage.
+      const stage = (() => {
+        switch (propertyPayload.status) {
+          case "idea":           return "Lead";
+          case "prospecting":    return "Prospecting";
+          case "pitched":        return "BOV";
+          case "listed":         return "Active Listing";
+          case "under_contract": return "Due Diligence";
+          default:               return "Prospecting";
+        }
+      })();
 
       const { data: deal, error: dealErr } = await supabase
         .from("deals")
@@ -163,7 +182,7 @@ export async function POST(req: NextRequest) {
           deal_type: transactionType,
           deal_name: dealName,
           price: price !== null && price !== undefined && !Number.isNaN(Number(price)) ? Number(price) : null,
-          probability_pct: 25, // sensible starting probability for a fresh listing
+          probability_pct: 25,
           assigned_to: USER_ID,
           notes: `Created from valuation tool · ${body.address}`,
         })
@@ -172,7 +191,6 @@ export async function POST(req: NextRequest) {
 
       if (dealErr || !deal) {
         console.error("Deal save error:", dealErr);
-        // Property already saved — return partial success rather than 500.
         return NextResponse.json({
           propertyId: property.id,
           propertySlug: property.slug,
@@ -183,7 +201,7 @@ export async function POST(req: NextRequest) {
 
       await supabase.from("deal_stages").insert({
         deal_id: deal.id,
-        stage: "Lead",
+        stage,
         entered_at: new Date().toISOString(),
         entered_by: USER_ID,
         notes: "Created from valuation tool",

@@ -1140,20 +1140,19 @@ export default function ValuateContent() {
                 </div>
               </div>
 
+              {/* One button — converts the BOV into a real property record
+                  with a paired deal in the pipeline. Properties anchor
+                  everything in this system; when you BOV something worth
+                  saving, you're tracking it. No "save bare without a deal"
+                  path because that's a footgun (creates orphaned records
+                  invisible in pipeline). */}
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <button
-                  style={{ ...btnSecondary, opacity: savedTo ? 0.5 : 1 }}
-                  onClick={() => saveValuation(false)}
-                  disabled={saving || !!savedTo}
-                >
-                  {saving && !savedTo ? "Saving..." : "Save as Property"}
-                </button>
                 <button
                   style={{ ...btnPrimary, opacity: savedTo ? 0.5 : 1 }}
                   onClick={() => saveValuation(true)}
                   disabled={saving || !!savedTo}
                 >
-                  {saving && !savedTo ? "Saving..." : "Save & Add to Deals"}
+                  {saving && !savedTo ? "Converting..." : "Convert to Property"}
                 </button>
               </div>
 
@@ -1163,15 +1162,15 @@ export default function ValuateContent() {
               {savedTo && (
                 <div style={{ marginTop: 12, padding: 10, borderRadius: 4, background: "rgba(78,205,196,0.08)", border: "1px solid rgba(78,205,196,0.25)" }}>
                   <p style={{ fontSize: 12, color: "#4ECDC4", margin: 0, marginBottom: 6 }}>
-                    ✓ Saved to your pipeline
+                    ✓ Saved as property{savedTo.dealId ? " + tracked in pipeline" : ""}
                   </p>
                   <div style={{ fontSize: 12, color: "rgba(240,237,228,0.7)", display: "flex", gap: 12, flexWrap: "wrap" }}>
-                    <a href={`/properties/${savedTo.propertySlug}`} style={{ color: "#E07A5F", textDecoration: "underline" }}>
-                      View property →
+                    <a href={`/cre-os/properties/${savedTo.propertySlug}`} style={{ color: "#E07A5F", textDecoration: "underline" }}>
+                      Open property workspace →
                     </a>
                     {savedTo.dealId && (
-                      <a href={`/deals`} style={{ color: "#E07A5F", textDecoration: "underline" }}>
-                        View in Deals pipeline →
+                      <a href={`/cre-os/pipeline`} style={{ color: "#E07A5F", textDecoration: "underline" }}>
+                        View in pipeline →
                       </a>
                     )}
                   </div>
