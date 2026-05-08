@@ -108,7 +108,7 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
     items: [
       { label: "Market",     href: "/cre-os/market",     icon: ICON.globe,    legacyHref: "/comps" },
       { label: "Valuation",  href: "/cre-os/valuate",    icon: ICON.scale,    legacyHref: "/valuate" },
-      { label: "Reports",    href: "/cre-os/reports",    icon: ICON.chart,    legacyHref: "/reports" },
+      { label: "Reports",    href: "/cre-os/reports",    icon: ICON.chart },
       { label: "Documents",  href: "/cre-os/documents",  icon: ICON.doc },
       { label: "Listings",   href: "/cre-os/listings",   icon: ICON.trending },
     ],
