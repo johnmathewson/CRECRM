@@ -5,7 +5,10 @@ import { NextResponse } from "next/server";
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/";
+  // Default landing after OAuth = CRE OS Command Center. The `next` param
+  // can override (used by magic-link / passwordless flows that want to
+  // return the user to a specific page).
+  const next = searchParams.get("next") ?? "/cre-os";
 
   if (code) {
     const cookieStore = cookies();

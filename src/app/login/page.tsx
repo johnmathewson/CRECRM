@@ -28,7 +28,9 @@ export default function LoginPage() {
       return;
     }
 
-    router.push("/");
+    // Land directly in CRE OS — root / is just a redirect to here anyway,
+    // and going to /cre-os first avoids a flash of the redirect bounce.
+    router.push("/cre-os");
     router.refresh();
   };
 
