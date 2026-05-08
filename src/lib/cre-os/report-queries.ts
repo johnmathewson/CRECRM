@@ -25,12 +25,26 @@ export interface PipelineForecastRow {
   weightedValue: number;
 }
 
+export interface StageDealPreview {
+  id: string;
+  dealName: string | null;
+  propertyName: string | null;
+  propertySlug: string | null;
+  price: number | null;
+  weightedCommission: number | null;
+  probabilityPct: number | null;
+  expectedClose: string | null;
+  daysInStage: number | null;
+}
+
 export interface StageRollupRow {
   stage: StageKey;
   count: number;
   totalValue: number;
   weightedValue: number;
   avgProbability: number | null;
+  /** Deals at this stage — used by the expandable row in the Reports view. */
+  deals: StageDealPreview[];
 }
 
 export interface ClosedMonthRow {
@@ -81,6 +95,10 @@ export interface ReportSnapshot {
     expectedThisQuarter: number;
     wonYtdCount: number;
     wonYtdVolume: number;
+    /** Commission actually earned on closed-won deals YTD — the "what I
+     *  banked this year" number. Sums weighted_commission when set, falls
+     *  back to price × commission_pct/100. */
+    earnedYtd: number;
     leadsThisMonth: number;
     leadsLastMonth: number;
     activeListings: number;
@@ -110,11 +128,13 @@ export async function loadReportSnapshot(): Promise<ReportSnapshot> {
   // Pull everything in parallel — each query is org-scoped + targeted at
   // a specific report section.
   const [activeDealsRes, closedDealsRes, leadsRes, listingsRes, listingMetricsRes, vaultRes, ndaRes] = await Promise.all([
-    // Active deals + their current stage (for forecast + stage rollup)
+    // Active deals + their current stage (for forecast + stage rollup).
+    // Joining property so the stage drill-in can link to the workspace.
     sb.from("deals")
       .select(`
         id, deal_name, deal_type, price, weighted_commission, probability_pct,
         commission_pct, expected_close, is_closed, is_dead,
+        property:properties(id, name, slug),
         deal_stages(stage, entered_at, exited_at)
       `)
       .eq("organization_id", ORG_ID)
@@ -175,6 +195,17 @@ export async function loadReportSnapshot(): Promise<ReportSnapshot> {
   }
   const wonYtdDeals = closedDeals.filter((d) => d.actual_close && new Date(d.actual_close) >= ytdStart);
   const wonYtdVolume = wonYtdDeals.reduce((s, d) => s + (Number(d.price) || 0), 0);
+  // Earned YTD commission: prefer realized weighted_commission; fall back to
+  // price × commission_pct/100 when weighted hasn't been set on the row.
+  const earnedYtd = wonYtdDeals.reduce((s, d) => {
+    if (d.weighted_commission !== null && d.weighted_commission !== undefined) {
+      return s + Number(d.weighted_commission);
+    }
+    if (d.price !== null && d.commission_pct !== null && d.commission_pct !== undefined) {
+      return s + (Number(d.price) * Number(d.commission_pct)) / 100;
+    }
+    return s;
+  }, 0);
 
   const leadsThisMonth = leads.filter((l) => l.created_at >= thisMonthStart).length;
   const leadsLastMonth = leads.filter((l) =>
@@ -214,17 +245,42 @@ export async function loadReportSnapshot(): Promise<ReportSnapshot> {
     const active = stages.find((s) => !s.exited_at) ??
                    stages.sort((a, b) => (b.entered_at ?? "").localeCompare(a.entered_at ?? ""))[0];
     const stage = normalizeStage(active?.stage);
+    const enteredAt = active?.entered_at ?? null;
+    const daysInStage = enteredAt
+      ? Math.floor((Date.now() - new Date(enteredAt).getTime()) / 86400000)
+      : null;
+
+    // Property join may be an array (Supabase 1:1 FK quirk) or single row.
+    const propertyRel = Array.isArray(d.property) ? d.property[0] : d.property;
+
     const row = stageMap.get(stage) ?? {
       stage,
       count: 0,
       totalValue: 0,
       weightedValue: 0,
       avgProbability: null,
+      deals: [] as StageDealPreview[],
     };
     row.count += 1;
     row.totalValue += Number(d.price) || 0;
     row.weightedValue += Number(d.weighted_commission) || 0;
+    row.deals.push({
+      id: d.id,
+      dealName: d.deal_name ?? null,
+      propertyName: propertyRel?.name ?? null,
+      propertySlug: propertyRel?.slug ?? null,
+      price: numOrNull(d.price),
+      weightedCommission: numOrNull(d.weighted_commission),
+      probabilityPct: numOrNull(d.probability_pct),
+      expectedClose: d.expected_close ?? null,
+      daysInStage,
+    });
     stageMap.set(stage, row);
+  }
+  // Sort deals within each stage: stalest first (most days in stage), so
+  // the broker sees what's been sitting longest when they expand.
+  for (const row of Array.from(stageMap.values())) {
+    row.deals.sort((a, b) => (b.daysInStage ?? 0) - (a.daysInStage ?? 0));
   }
   // Compute avg probability per stage
   const stageProbabilitySums: Record<string, { sum: number; n: number }> = {};
@@ -373,6 +429,7 @@ export async function loadReportSnapshot(): Promise<ReportSnapshot> {
       expectedThisQuarter,
       wonYtdCount: wonYtdDeals.length,
       wonYtdVolume,
+      earnedYtd,
       leadsThisMonth,
       leadsLastMonth,
       activeListings: listings.length,

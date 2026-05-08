@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { AppShell } from "@/components/cre-os/AppShell";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { Panel } from "@/components/cre-os/Panel";
@@ -10,6 +10,7 @@ import type {
   ReportSnapshot,
   PipelineForecastRow,
   StageRollupRow,
+  StageDealPreview,
   ClosedMonthRow,
   LeadWeekRow,
   LeadSourceRow,
@@ -87,18 +88,37 @@ export function ReportsView({ snapshot }: { snapshot: ReportSnapshot }) {
     <AppShell rail={rail}>
       <div className="space-y-7">
         {/* Header */}
-        <header>
-          <Eyebrow tone="coral">Reports · Analytics</Eyebrow>
-          <h1 className="mt-1 font-display font-medium text-3xl text-cream tracking-tight">Reports &amp; analytics</h1>
-          <p className="mt-2 font-heading text-[14px] text-cream-dim leading-relaxed max-w-3xl">
-            {snapshot.synthesis}
-          </p>
-          <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
-            <CommandStat label="Pipeline value" value={fmtMoney(t.pipelineValue)} caption={`${t.activeDeals} active deal${t.activeDeals === 1 ? "" : "s"}`} />
-            <CommandStat label="Weighted" value={fmtMoney(t.weightedValue)} caption="Probability-adjusted" />
-            <CommandStat label="This quarter" value={fmtMoney(t.expectedThisQuarter)} caption="Expected close" accent />
-            <CommandStat label="Closed YTD" value={fmtMoney(t.wonYtdVolume)} caption={`${t.wonYtdCount} deal${t.wonYtdCount === 1 ? "" : "s"}`} />
+        <header className="flex items-start justify-between gap-6">
+          <div className="min-w-0 flex-1">
+            <Eyebrow tone="coral">Reports · Analytics</Eyebrow>
+            <h1 className="mt-1 font-display font-medium text-3xl text-cream tracking-tight">Reports &amp; analytics</h1>
+            <p className="mt-2 font-heading text-[14px] text-cream-dim leading-relaxed max-w-3xl">
+              {snapshot.synthesis}
+            </p>
+            {/* Two paired KPI rows so it's easy to read:
+                  Top   — what's in flight (active pipeline, gross + weighted)
+                  Bottom — what's been earned (closed YTD, gross volume + actual commission)
+                Earned YTD is the headline coral number — that's "what I've banked." */}
+            <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
+              <CommandStat label="Pipeline value" value={fmtMoney(t.pipelineValue)} caption={`${t.activeDeals} active · gross`} />
+              <CommandStat label="Weighted commission" value={fmtMoney(t.weightedValue)} caption="Probability-adjusted" />
+              <CommandStat label="Earned YTD" value={fmtMoney(t.earnedYtd)} caption={`Commission · ${t.wonYtdCount} closed`} accent />
+              <CommandStat label="Closed volume YTD" value={fmtMoney(t.wonYtdVolume)} caption="Gross sales price" />
+            </div>
+            <div className="mt-2 font-mono text-[10px] text-cream-subtle">
+              <span className="text-coral-300">{fmtMoney(t.expectedThisQuarter)}</span> in weighted commission expected to close this quarter.
+            </div>
           </div>
+          {/* PDF export — opens the print route in a new tab. */}
+          <a
+            href="/print/reports"
+            target="_blank"
+            rel="noreferrer"
+            className="shrink-0 px-4 py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] hover:bg-coral-400/[0.18] font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-coral-300 transition-colors"
+            title="Branded one-pager — opens in a new tab; save as PDF from the print dialog."
+          >
+            Export PDF
+          </a>
         </header>
 
         {/* ── 1. Pipeline forecast ──────────────────────────────────── */}
@@ -228,6 +248,9 @@ function ForecastChart({ rows }: { rows: PipelineForecastRow[] }) {
 }
 
 function StageTable({ rows }: { rows: StageRollupRow[] }) {
+  // Expanded-stage state — only one expanded at a time keeps the page calm.
+  const [expanded, setExpanded] = useState<string | null>(null);
+
   if (rows.length === 0) {
     return (
       <Panel>
@@ -238,11 +261,13 @@ function StageTable({ rows }: { rows: StageRollupRow[] }) {
     );
   }
   const maxCount = Math.max(1, ...rows.map((r) => r.count));
+
   return (
     <div className="rounded border border-white/[0.05] bg-steward-mid/30 overflow-hidden">
       <table className="w-full text-[12px] font-body">
         <thead>
           <tr className="text-cream-subtle text-left bg-black/10">
+            <th className="font-heading text-[10px] uppercase tracking-eyebrow font-semibold py-3 px-3 w-8"></th>
             <th className="font-heading text-[10px] uppercase tracking-eyebrow font-semibold py-3 px-3">Stage</th>
             <th className="font-heading text-[10px] uppercase tracking-eyebrow font-semibold py-3 px-3 w-[200px]">Activity</th>
             <th className="font-heading text-[10px] uppercase tracking-eyebrow font-semibold py-3 px-3 text-right">Count</th>
@@ -254,25 +279,83 @@ function StageTable({ rows }: { rows: StageRollupRow[] }) {
         <tbody>
           {rows.map((r) => {
             const pct = (r.count / maxCount) * 100;
+            const isOpen = expanded === r.stage;
             return (
-              <tr key={r.stage} className="border-t border-white/[0.04] hover:bg-white/[0.02]">
-                <td className="px-3 py-2.5">
-                  <span className="font-heading text-cream font-medium">{r.stage}</span>
-                </td>
-                <td className="px-3 py-2.5">
-                  <div className="h-1.5 bg-white/[0.04] rounded-full overflow-hidden">
-                    <div className="h-full bg-coral-400/60" style={{ width: `${pct}%` }} />
-                  </div>
-                </td>
-                <td className="px-3 py-2.5 text-right font-mono text-cream">{r.count}</td>
-                <td className="px-3 py-2.5 text-right font-mono text-cream-dim">{fmtMoney(r.totalValue)}</td>
-                <td className="px-3 py-2.5 text-right font-mono text-coral-300 font-semibold">{fmtMoney(r.weightedValue)}</td>
-                <td className="px-3 py-2.5 text-right font-mono text-cream-dim">{fmtPct(r.avgProbability)}</td>
-              </tr>
+              <Fragment key={r.stage}>
+                <tr
+                  onClick={() => setExpanded(isOpen ? null : r.stage)}
+                  className="border-t border-white/[0.04] hover:bg-white/[0.02] cursor-pointer transition-colors"
+                  title={`Click to ${isOpen ? "collapse" : "see deals at this stage"}`}
+                >
+                  <td className="px-3 py-2.5 text-cream-subtle">
+                    <span className="inline-block transition-transform" style={{ transform: isOpen ? "rotate(90deg)" : "none" }}>▸</span>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <span className="font-heading text-cream font-medium">{r.stage}</span>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <div className="h-1.5 bg-white/[0.04] rounded-full overflow-hidden">
+                      <div className="h-full bg-coral-400/60" style={{ width: `${pct}%` }} />
+                    </div>
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-mono text-cream">{r.count}</td>
+                  <td className="px-3 py-2.5 text-right font-mono text-cream-dim">{fmtMoney(r.totalValue)}</td>
+                  <td className="px-3 py-2.5 text-right font-mono text-coral-300 font-semibold">{fmtMoney(r.weightedValue)}</td>
+                  <td className="px-3 py-2.5 text-right font-mono text-cream-dim">{fmtPct(r.avgProbability)}</td>
+                </tr>
+                {isOpen && (
+                  <tr className="bg-black/15">
+                    <td colSpan={7} className="px-3 py-3">
+                      <StageDealsList deals={r.deals} />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             );
           })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function StageDealsList({ deals }: { deals: StageDealPreview[] }) {
+  if (deals.length === 0) {
+    return <p className="font-body text-[11px] text-cream-subtle italic px-3 py-2">No deals at this stage.</p>;
+  }
+  return (
+    <div className="space-y-1.5">
+      <div className="font-mono text-[9px] uppercase tracking-eyebrow text-cream-subtle px-2">
+        Deals at this stage · sorted by days stalled (longest first)
+      </div>
+      {deals.map((d) => {
+        const subtitle = [d.propertyName, d.expectedClose ? `close ${d.expectedClose}` : null]
+          .filter(Boolean)
+          .join(" · ");
+        return (
+          <a
+            key={d.id}
+            href={`/cre-os/pipeline/${d.id}`}
+            className="flex items-center justify-between gap-3 px-2.5 py-2 rounded border border-white/[0.04] bg-white/[0.02] hover:bg-white/[0.06] transition-colors group"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="font-heading text-[12px] text-cream group-hover:text-coral-300 transition-colors truncate">
+                {d.dealName || d.propertyName || "Untitled deal"}
+              </div>
+              {subtitle && (
+                <div className="font-mono text-[10px] text-cream-subtle truncate">{subtitle}</div>
+              )}
+            </div>
+            <div className="shrink-0 flex items-center gap-3 font-mono text-[10px]">
+              <span className="text-cream-dim">{fmtMoney(d.price ?? 0)}</span>
+              <span className="text-coral-300 font-semibold">{fmtMoney(d.weightedCommission ?? 0)}</span>
+              <span className="text-cream-subtle w-12 text-right">
+                {d.daysInStage === null ? "—" : `${d.daysInStage}d`}
+              </span>
+            </div>
+          </a>
+        );
+      })}
     </div>
   );
 }
