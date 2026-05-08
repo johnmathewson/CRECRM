@@ -48,7 +48,7 @@ export function ValuationTab({ p }: { p: PropertyDetail }) {
 
         <div className="mt-5 pt-4 border-t border-white/[0.04]">
           <a
-            href={`/valuate?address=${encodeURIComponent(fullAddress || p.name)}`}
+            href={`/cre-os/valuate?address=${encodeURIComponent(fullAddress || p.name)}`}
             className="inline-flex items-center gap-2 px-3 py-2 rounded border border-coral-400/40 bg-coral-400/[0.06] text-coral-300 hover:bg-coral-400/[0.10] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
           >
             Run fresh BOV →

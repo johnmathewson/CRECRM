@@ -73,7 +73,7 @@ export function PropertyHeader({ p }: { p: PropertyDetail }) {
 
         <div className="flex items-center gap-2 shrink-0">
           <a
-            href={`/valuate?address=${encodeURIComponent(fullAddress || p.name)}`}
+            href={`/cre-os/valuate?address=${encodeURIComponent(fullAddress || p.name)}`}
             className="px-3 py-2 rounded border border-coral-400/40 bg-coral-400/[0.06] text-coral-300 hover:bg-coral-400/[0.10] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
           >
             Run valuation
