@@ -5,6 +5,7 @@ import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { StatusBadge } from "@/components/cre-os/StatusBadge";
 import { StatusEditor } from "./StatusEditor";
 import { EditPropertyDialog } from "./EditPropertyDialog";
+import { LogActivityDialog } from "@/components/cre-os/activities/LogActivityDialog";
 import type { PropertyDetail } from "@/lib/cre-os/property-queries";
 
 const fmtMoney = (n: number | null) => {
@@ -27,6 +28,7 @@ export function PropertyHeader({ p }: { p: PropertyDetail }) {
   const statusTone = pillToneForStatus(p.status);
   const stageTone = pillToneForStage(p.pipelineStage);
   const [editOpen, setEditOpen] = useState(false);
+  const [logActivityOpen, setLogActivityOpen] = useState(false);
 
   const valuationCaption = [
     p.askingPrice ? fmtMoney(p.askingPrice) : null,
@@ -75,9 +77,19 @@ export function PropertyHeader({ p }: { p: PropertyDetail }) {
         </div>
 
         <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          {/* Log activity — primary daily action; coral accent puts it
+              ahead of Edit details and Run valuation. Opens a quick-capture
+              modal that auto-attaches to this property. */}
+          <button
+            onClick={() => setLogActivityOpen(true)}
+            className="px-3 py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] text-coral-300 hover:bg-coral-400/[0.20] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
+            title="Log a call, meeting, tour, or note against this property."
+          >
+            + Log activity
+          </button>
           <button
             onClick={() => setEditOpen(true)}
-            className="px-3 py-2 rounded border border-coral-400/40 bg-coral-400/[0.06] text-coral-300 hover:bg-coral-400/[0.10] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
+            className="px-3 py-2 rounded border border-white/10 bg-white/[0.03] text-cream hover:bg-white/[0.06] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
             title="Edit address, pricing, sqft, NOI, cap rate, occupancy, parking, zoning, marketing copy, and notes."
           >
             Edit details
@@ -88,12 +100,15 @@ export function PropertyHeader({ p }: { p: PropertyDetail }) {
           >
             Run valuation
           </a>
-          <button className="px-3 py-2 rounded border border-white/10 bg-white/[0.03] text-cream-subtle hover:bg-white/[0.06] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors cursor-not-allowed" disabled>
-            Generate OM
-          </button>
         </div>
       </div>
       <EditPropertyDialog open={editOpen} property={p} onClose={() => setEditOpen(false)} />
+      <LogActivityDialog
+        open={logActivityOpen}
+        onClose={() => setLogActivityOpen(false)}
+        propertyId={p.id}
+        contextLabel={p.name}
+      />
     </div>
   );
 }

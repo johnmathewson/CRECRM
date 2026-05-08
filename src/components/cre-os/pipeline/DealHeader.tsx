@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { StatusBadge } from "@/components/cre-os/StatusBadge";
+import { LogActivityDialog } from "@/components/cre-os/activities/LogActivityDialog";
 import { getStageConfig } from "@/lib/cre-os/stage-config";
 import type { DealDetail } from "@/lib/cre-os/pipeline-queries";
 
@@ -19,6 +21,7 @@ const fmtMoney = (n: number | null) => {
  */
 export function DealHeader({ d }: { d: DealDetail }) {
   const cfg = getStageConfig(d.stage);
+  const [logActivityOpen, setLogActivityOpen] = useState(false);
   const title = d.dealName ?? d.property?.name ?? d.contact?.fullName ?? "(unnamed deal)";
   const subline = [
     d.property?.address ? [d.property.address, d.property.city, d.property.state].filter(Boolean).join(", ") : null,
@@ -75,7 +78,18 @@ export function DealHeader({ d }: { d: DealDetail }) {
           )}
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          {/* Log activity — primary daily action; the stage stepper below
+              the masthead handles the actual advance. The 'Advance stage'
+              button here was a stub anyway (real advances happen via the
+              clickable stepper) so we drop it for the higher-value action. */}
+          <button
+            onClick={() => setLogActivityOpen(true)}
+            className="px-3 py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] text-coral-300 hover:bg-coral-400/[0.20] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
+            title="Log a call, meeting, tour, or note against this deal."
+          >
+            + Log activity
+          </button>
           {d.property && (
             <a
               href={`/cre-os/properties/${d.property.slug}`}
@@ -84,11 +98,16 @@ export function DealHeader({ d }: { d: DealDetail }) {
               Open property →
             </a>
           )}
-          <button className="px-3 py-2 rounded border border-coral-400/40 bg-coral-400/[0.06] text-coral-300 hover:bg-coral-400/[0.10] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors">
-            Advance stage
-          </button>
         </div>
       </div>
+      <LogActivityDialog
+        open={logActivityOpen}
+        onClose={() => setLogActivityOpen(false)}
+        dealId={d.id}
+        contactId={d.contact?.id}
+        propertyId={d.property?.id}
+        contextLabel={d.dealName ?? d.property?.name ?? d.contact?.fullName ?? "this deal"}
+      />
     </div>
   );
 }

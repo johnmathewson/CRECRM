@@ -9,6 +9,7 @@ import { CommunicationsPanel } from "@/components/cre-os/CommunicationsPanel";
 import type { RailSection } from "@/components/cre-os/InsightsRail";
 import { WarmthBadge } from "./WarmthBadge";
 import { EditContactDialog } from "./EditContactDialog";
+import { LogActivityDialog } from "@/components/cre-os/activities/LogActivityDialog";
 import type { ContactDetail } from "@/lib/cre-os/relationship-queries";
 import type { ThreadSummary } from "@/lib/cre-os/communications-queries";
 
@@ -38,6 +39,7 @@ export function ContactWorkspace({
 }) {
   const c = contact;
   const [editOpen, setEditOpen] = useState(false);
+  const [logActivityOpen, setLogActivityOpen] = useState(false);
 
   const rail: RailSection[] = [
     {
@@ -126,12 +128,20 @@ export function ContactWorkspace({
               )}
             </div>
           </div>
-          {/* Edit details — primary action on the contact masthead, same
-              pattern as the property workspace. Hits PATCH /api/contacts/[id]. */}
-          <div className="shrink-0">
+          {/* Action cluster — same pattern as the property workspace.
+              Log activity is the primary daily action; Edit details is the
+              periodic-update action. */}
+          <div className="shrink-0 flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => setLogActivityOpen(true)}
+              className="px-3 py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] text-coral-300 hover:bg-coral-400/[0.20] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
+              title="Log a call, meeting, tour, or note against this contact. Calls/meetings/tours also bump their last-conversation date."
+            >
+              + Log activity
+            </button>
             <button
               onClick={() => setEditOpen(true)}
-              className="px-3 py-2 rounded border border-coral-400/40 bg-coral-400/[0.06] text-coral-300 hover:bg-coral-400/[0.10] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
+              className="px-3 py-2 rounded border border-white/10 bg-white/[0.03] text-cream hover:bg-white/[0.06] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
               title="Edit name, email, phone, company, type, warmth, follow-up dates, and notes."
             >
               Edit details
@@ -144,6 +154,12 @@ export function ContactWorkspace({
         contactId={c.id}
         initialFullName={c.fullName}
         onClose={() => setEditOpen(false)}
+      />
+      <LogActivityDialog
+        open={logActivityOpen}
+        onClose={() => setLogActivityOpen(false)}
+        contactId={c.id}
+        contextLabel={c.fullName}
       />
 
       {/* AI synthesis */}
