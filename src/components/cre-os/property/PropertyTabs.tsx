@@ -10,11 +10,13 @@ import { CommunicationsTab } from "./tabs/CommunicationsTab";
 import { PerformanceTab } from "./tabs/PerformanceTab";
 import { ActivityTab } from "./tabs/ActivityTab";
 import { OffersTab } from "./tabs/OffersTab";
+import { DocumentsTab } from "./tabs/DocumentsTab";
 
 const TABS = [
   { key: "overview",       label: "Overview" },
   { key: "valuation",      label: "Valuation & Comps" },
   { key: "offers",         label: "Offers" },
+  { key: "documents",      label: "Documents" },
   { key: "communications", label: "Communications" },
   { key: "performance",    label: "Performance" },
   { key: "activity",       label: "Activity" },
@@ -59,6 +61,7 @@ export function PropertyTabs({ p, threads, perf }: { p: PropertyDetail; threads:
         {active === "overview" && <OverviewTab p={p} />}
         {active === "valuation" && <ValuationTab p={p} />}
         {active === "offers" && <OffersTab p={p} />}
+        {active === "documents" && <DocumentsTab p={p} />}
         {active === "communications" && <CommunicationsTab threads={threads} propertyName={p.name} />}
         {active === "performance" && <PerformanceTab p={p} perf={perf} />}
         {active === "activity" && <ActivityTab p={p} />}
