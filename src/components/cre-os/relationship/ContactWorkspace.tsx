@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { AppShell } from "@/components/cre-os/AppShell";
 import { Panel } from "@/components/cre-os/Panel";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
@@ -7,6 +8,7 @@ import { StatusBadge } from "@/components/cre-os/StatusBadge";
 import { CommunicationsPanel } from "@/components/cre-os/CommunicationsPanel";
 import type { RailSection } from "@/components/cre-os/InsightsRail";
 import { WarmthBadge } from "./WarmthBadge";
+import { EditContactDialog } from "./EditContactDialog";
 import type { ContactDetail } from "@/lib/cre-os/relationship-queries";
 import type { ThreadSummary } from "@/lib/cre-os/communications-queries";
 
@@ -35,6 +37,7 @@ export function ContactWorkspace({
   threads: ThreadSummary[];
 }) {
   const c = contact;
+  const [editOpen, setEditOpen] = useState(false);
 
   const rail: RailSection[] = [
     {
@@ -123,8 +126,25 @@ export function ContactWorkspace({
               )}
             </div>
           </div>
+          {/* Edit details — primary action on the contact masthead, same
+              pattern as the property workspace. Hits PATCH /api/contacts/[id]. */}
+          <div className="shrink-0">
+            <button
+              onClick={() => setEditOpen(true)}
+              className="px-3 py-2 rounded border border-coral-400/40 bg-coral-400/[0.06] text-coral-300 hover:bg-coral-400/[0.10] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
+              title="Edit name, email, phone, company, type, warmth, follow-up dates, and notes."
+            >
+              Edit details
+            </button>
+          </div>
         </div>
       </div>
+      <EditContactDialog
+        open={editOpen}
+        contactId={c.id}
+        initialFullName={c.fullName}
+        onClose={() => setEditOpen(false)}
+      />
 
       {/* AI synthesis */}
       <div className="relative overflow-hidden rounded-md border border-coral-400/25 bg-gradient-to-r from-steward-surfaceHi/70 via-steward-mid/50 to-steward-surface/30 backdrop-blur-md mb-6">
