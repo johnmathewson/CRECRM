@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { StatusBadge } from "@/components/cre-os/StatusBadge";
 import { StatusEditor } from "./StatusEditor";
+import { EditPropertyDialog } from "./EditPropertyDialog";
 import type { PropertyDetail } from "@/lib/cre-os/property-queries";
 
 const fmtMoney = (n: number | null) => {
@@ -24,6 +26,7 @@ export function PropertyHeader({ p }: { p: PropertyDetail }) {
   const fullAddress = [p.address, p.city, p.state, p.zip].filter(Boolean).join(", ");
   const statusTone = pillToneForStatus(p.status);
   const stageTone = pillToneForStage(p.pipelineStage);
+  const [editOpen, setEditOpen] = useState(false);
 
   const valuationCaption = [
     p.askingPrice ? fmtMoney(p.askingPrice) : null,
@@ -71,21 +74,26 @@ export function PropertyHeader({ p }: { p: PropertyDetail }) {
           )}
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          <button
+            onClick={() => setEditOpen(true)}
+            className="px-3 py-2 rounded border border-coral-400/40 bg-coral-400/[0.06] text-coral-300 hover:bg-coral-400/[0.10] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
+            title="Edit address, pricing, sqft, NOI, cap rate, occupancy, parking, zoning, marketing copy, and notes."
+          >
+            Edit details
+          </button>
           <a
             href={`/cre-os/valuate?address=${encodeURIComponent(fullAddress || p.name)}`}
-            className="px-3 py-2 rounded border border-coral-400/40 bg-coral-400/[0.06] text-coral-300 hover:bg-coral-400/[0.10] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
+            className="px-3 py-2 rounded border border-white/10 bg-white/[0.03] text-cream hover:bg-white/[0.06] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
           >
             Run valuation
           </a>
-          <button className="px-3 py-2 rounded border border-white/10 bg-white/[0.03] text-cream hover:bg-white/[0.06] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors">
+          <button className="px-3 py-2 rounded border border-white/10 bg-white/[0.03] text-cream-subtle hover:bg-white/[0.06] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors cursor-not-allowed" disabled>
             Generate OM
-          </button>
-          <button className="px-3 py-2 rounded border border-white/10 bg-white/[0.03] text-cream hover:bg-white/[0.06] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors">
-            Owner update
           </button>
         </div>
       </div>
+      <EditPropertyDialog open={editOpen} property={p} onClose={() => setEditOpen(false)} />
     </div>
   );
 }
