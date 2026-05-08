@@ -1,13 +1,6 @@
-import Nav from "@/components/nav";
-import IntegrationsContent from "@/components/integrations-content";
+import { redirect } from "next/navigation";
 
-export default function IntegrationsPage() {
-  return (
-    <>
-      <Nav />
-      <main className="relative z-[1] px-7 py-[22px] max-w-[920px] mx-auto">
-        <IntegrationsContent />
-      </main>
-    </>
-  );
+/** Soft-cutover redirect: legacy /settings/integrations → /cre-os/settings. */
+export default function LegacySettingsIntegrationsPage() {
+  redirect("/cre-os/settings");
 }

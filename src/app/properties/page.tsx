@@ -1,21 +1,16 @@
-import { Suspense } from "react";
-import Nav from "@/components/nav";
-import AiBar from "@/components/ai-bar";
-import PropertiesContent from "@/components/properties-content";
+import { redirect } from "next/navigation";
 
-export default function PropertiesPage() {
-  return (
-    <>
-      <Nav />
-      <main className="relative z-[1] px-7 py-[22px] max-w-[1480px] mx-auto">
-        <AiBar />
-        {/* PropertiesContent uses useSearchParams() to handle ?focus=<property_id>
-            deep-links from the deals modal. Next.js requires that to be inside a
-            Suspense boundary so the rest of the page can still pre-render. */}
-        <Suspense fallback={null}>
-          <PropertiesContent />
-        </Suspense>
-      </main>
-    </>
-  );
+/**
+ * Soft-cutover redirect: legacy /properties → /cre-os/properties.
+ *
+ * The CRE OS Properties command surface is now the canonical home for
+ * property browsing, filtering, and add-property workflow. The legacy
+ * properties-content (with the purple Nav, side-panel selector, and
+ * AddListingWizard) is preserved in src/components/ but no longer
+ * rendered.
+ *
+ * Reversible: revert this file to restore the legacy view.
+ */
+export default function LegacyPropertiesPage() {
+  redirect("/cre-os/properties");
 }
