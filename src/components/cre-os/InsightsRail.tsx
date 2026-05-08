@@ -6,10 +6,15 @@ import { InsightCard, InsightItem } from "./InsightCard";
 /**
  * InsightsRail — the right-rail intelligence stream.
  *
- * Desktop (≥ lg): inline column to the right of main, full height.
- * Mobile (< lg): hidden by default; AppShell shows it as a right-side
- *   drawer when the user taps the sparkles icon in the Topbar. Backdrop
- *   click closes.
+ * Inline only at xl (≥1280px). Below xl, the rail is hidden by default
+ * and shown as a right-side drawer when the user taps the sparkles icon
+ * in the Topbar. Backdrop click closes.
+ *
+ * Why xl and not lg: at 1024-1279px (most laptop screens) showing both
+ * sidebar (224px) AND rail (300px) inline leaves the main column with
+ * only 500-700px, which squeezes 4-across KPI grids and causes content
+ * overlap. The rail moves to drawer mode below xl so the broker gets
+ * the full content width unless they're on a true desktop monitor.
  */
 export interface RailSection {
   eyebrow: string;
@@ -29,10 +34,10 @@ export function InsightsRail({
 }) {
   return (
     <>
-      {/* Mobile backdrop */}
+      {/* Drawer backdrop (visible only when drawer is open below xl) */}
       {mobileOpen && (
         <div
-          className="lg:hidden fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
+          className="xl:hidden fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
           onClick={onClose}
           aria-hidden
         />
@@ -40,16 +45,15 @@ export function InsightsRail({
 
       <aside
         className={`
-          flex flex-col bg-steward-base/95 lg:bg-steward-base/30 backdrop-blur-md border-l border-white/[0.04] overflow-y-auto
-          /* Mobile: fixed drawer from the right */
-          fixed lg:static inset-y-0 right-0 z-50
-          w-[88vw] max-w-[340px] lg:w-[300px] shrink-0 h-full
+          flex flex-col bg-steward-base/95 xl:bg-steward-base/30 backdrop-blur-md border-l border-white/[0.04] overflow-y-auto
+          fixed xl:static inset-y-0 right-0 z-50
+          w-[88vw] max-w-[340px] xl:w-[300px] shrink-0 h-full
           transition-transform duration-200 ease-out
-          ${mobileOpen ? "translate-x-0" : "translate-x-full"} lg:translate-x-0
+          ${mobileOpen ? "translate-x-0" : "translate-x-full"} xl:translate-x-0
         `}
       >
-        {/* Mobile header (close button) */}
-        <div className="lg:hidden px-5 py-4 border-b border-white/[0.04] flex items-center justify-between">
+        {/* Drawer header (close button) — visible whenever drawer is shown */}
+        <div className="xl:hidden px-5 py-4 border-b border-white/[0.04] flex items-center justify-between">
           <div className="font-mono text-[10px] uppercase tracking-eyebrow text-coral-400">
             Insights
           </div>

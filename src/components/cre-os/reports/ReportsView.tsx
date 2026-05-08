@@ -99,7 +99,7 @@ export function ReportsView({ snapshot }: { snapshot: ReportSnapshot }) {
                   Top   — what's in flight (active pipeline, gross + weighted)
                   Bottom — what's been earned (closed YTD, gross volume + actual commission)
                 Earned YTD is the headline coral number — that's "what I've banked." */}
-            <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="mt-5 grid grid-cols-2 lg:grid-cols-4 gap-3">
               <CommandStat label="Pipeline value" value={fmtMoney(t.pipelineValue)} caption={`${t.activeDeals} active · gross`} />
               <CommandStat label="Weighted commission" value={fmtMoney(t.weightedValue)} caption="Probability-adjusted" />
               <CommandStat label="Earned YTD" value={fmtMoney(t.earnedYtd)} caption={`Commission · ${t.wonYtdCount} closed`} accent />

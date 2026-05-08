@@ -499,7 +499,7 @@ export function EditPropertyDialog({ open, property, onClose }: Props) {
 
 // ── Sub-components ─────────────────────────────────────────────────────────
 const inputCls =
-  "w-full px-3 py-2 rounded bg-steward-surface/60 border border-white/[0.06] focus:border-coral-400/40 focus:outline-none font-body text-[12px] text-cream placeholder:text-cream-subtle";
+  "w-full px-3 py-2 rounded bg-steward-surface/60 border border-white/[0.06] focus:border-coral-400/40 focus:outline-none font-body text-base lg:text-[12px] text-cream placeholder:text-cream-subtle";
 
 function Section({
   label,

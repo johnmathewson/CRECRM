@@ -9,21 +9,23 @@ import { InsightsRail, RailSection } from "./InsightsRail";
 /**
  * AppShell — the operating-system frame for every CRE OS page.
  *
- * Desktop (≥ lg / 1024px):
+ * Wide desktop (≥ xl / 1280px):
  *   ┌──────────────────────────────────────────────────────────────┐
  *   │ Topbar                                                        │
  *   ├──────────┬──────────────────────────────┬───────────────────┤
  *   │ Sidebar  │ Main scroll                  │ InsightsRail       │
  *   └──────────┴──────────────────────────────┴───────────────────┘
  *
- * Mobile (< lg):
+ * Laptop (lg / 1024-1279px):
+ *   - Sidebar inline, InsightsRail collapses to drawer (sparkles in Topbar).
+ *   - Frees up ~300px so KPI grids and tables don't get squeezed.
+ *
+ * Mobile/tablet (< lg):
  *   - Sidebar collapses to an overlay drawer (hamburger in Topbar).
- *   - InsightsRail collapses to a right-side overlay drawer (a "sparkles"
- *     button in Topbar — only shown when the page passes a rail).
+ *   - InsightsRail collapses to a right-side overlay drawer.
  *   - Main becomes single-column, full-width, with reduced padding.
  *
- * Drawers auto-close on route change (so tapping a sidebar link feels like
- * a normal nav).
+ * Drawers auto-close on route change.
  */
 export function AppShell({
   rail,
@@ -59,7 +61,7 @@ export function AppShell({
         onRailClick={hasRail ? () => setRailOpen(true) : undefined}
       />
       <div className="flex-1 flex min-h-0 relative">
-        {/* Sidebar — inline on lg+, drawer on mobile */}
+        {/* Sidebar — inline on lg+, drawer below */}
         <Sidebar mobileOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
         {/* Main — full-width on mobile, padded on desktop */}
@@ -67,7 +69,7 @@ export function AppShell({
           <div className="max-w-[1600px] mx-auto px-4 py-5 lg:px-8 lg:py-6">{children}</div>
         </main>
 
-        {/* InsightsRail — inline on lg+, drawer on mobile */}
+        {/* InsightsRail — inline on xl+, drawer below */}
         {hasRail && (
           <InsightsRail
             sections={rail!}

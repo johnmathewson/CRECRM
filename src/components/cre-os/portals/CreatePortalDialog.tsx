@@ -177,7 +177,7 @@ export function CreatePortalDialog({
                   value={propertyQuery}
                   onChange={(e) => setPropertyQuery(e.target.value)}
                   placeholder="Filter by name, address, city…"
-                  className="w-full px-3 py-2 rounded bg-steward-surface/60 border border-white/[0.06] focus:border-coral-400/40 focus:outline-none font-body text-[12px] text-cream placeholder:text-cream-subtle"
+                  className="w-full px-3 py-2 rounded bg-steward-surface/60 border border-white/[0.06] focus:border-coral-400/40 focus:outline-none font-body text-base lg:text-[12px] text-cream placeholder:text-cream-subtle"
                 />
                 <div className="mt-2 max-h-48 overflow-y-auto rounded border border-white/[0.04] bg-steward-surface/30">
                   {filteredProperties.length === 0 ? (
@@ -219,7 +219,7 @@ export function CreatePortalDialog({
                   value={contactQuery}
                   onChange={(e) => setContactQuery(e.target.value)}
                   placeholder="Search contacts…"
-                  className="w-full px-3 py-2 rounded bg-steward-surface/60 border border-white/[0.06] focus:border-coral-400/40 focus:outline-none font-body text-[12px] text-cream placeholder:text-cream-subtle"
+                  className="w-full px-3 py-2 rounded bg-steward-surface/60 border border-white/[0.06] focus:border-coral-400/40 focus:outline-none font-body text-base lg:text-[12px] text-cream placeholder:text-cream-subtle"
                 />
                 {contactQuery.trim() && (
                   <div className="mt-2 max-h-32 overflow-y-auto rounded border border-white/[0.04] bg-steward-surface/30">
@@ -264,14 +264,14 @@ export function CreatePortalDialog({
                     value={label}
                     onChange={(e) => setLabel(e.target.value)}
                     placeholder="e.g. Owner — 850 Lakeshore"
-                    className="w-full px-3 py-2 rounded bg-steward-surface/60 border border-white/[0.06] focus:border-coral-400/40 focus:outline-none font-body text-[12px] text-cream placeholder:text-cream-subtle"
+                    className="w-full px-3 py-2 rounded bg-steward-surface/60 border border-white/[0.06] focus:border-coral-400/40 focus:outline-none font-body text-base lg:text-[12px] text-cream placeholder:text-cream-subtle"
                   />
                 </Field>
                 <Field label="Expires in">
                   <select
                     value={expiryDays}
                     onChange={(e) => setExpiryDays(Number(e.target.value))}
-                    className="w-full px-3 py-2 rounded bg-steward-surface/60 border border-white/[0.06] focus:border-coral-400/40 focus:outline-none font-body text-[12px] text-cream"
+                    className="w-full px-3 py-2 rounded bg-steward-surface/60 border border-white/[0.06] focus:border-coral-400/40 focus:outline-none font-body text-base lg:text-[12px] text-cream"
                   >
                     <option value={30}>30 days</option>
                     <option value={60}>60 days</option>

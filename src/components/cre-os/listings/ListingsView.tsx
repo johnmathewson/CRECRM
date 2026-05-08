@@ -111,7 +111,7 @@ export function ListingsView({ snapshot }: { snapshot: ListingsSnapshot }) {
             What's actively on market right now, plus the buy-side pursuits you're tracking. Click any
             card to drill into the property workspace; missing syndication links can be filled in inline.
           </p>
-          <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="mt-5 grid grid-cols-2 lg:grid-cols-4 gap-3">
             <CommandStat label="Sell-side" value={snapshot.totals.sellSideCount.toString()} caption="Listed + under contract" />
             <CommandStat label="Buy-side" value={snapshot.totals.buySideCount.toString()} caption="Active pursuits" />
             <CommandStat label="Aggregate ask" value={fmtMoney(snapshot.totals.aggregateAsk)} caption="Sell-side total" />

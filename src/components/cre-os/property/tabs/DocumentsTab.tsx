@@ -141,7 +141,7 @@ export function DocumentsTab({ p }: { p: PropertyDetail }) {
               onChange={(e) => setDescription(e.target.value)}
               placeholder="What is this — e.g. 'OM v3 — final', 'Signed listing agreement', 'T-12 through Q1'"
               disabled={uploadBusy}
-              className="mt-1 w-full px-3 py-2 rounded bg-steward-surface/60 border border-white/[0.06] focus:border-coral-400/40 focus:outline-none font-body text-[12px] text-cream placeholder:text-cream-subtle"
+              className="mt-1 w-full px-3 py-2 rounded bg-steward-surface/60 border border-white/[0.06] focus:border-coral-400/40 focus:outline-none font-body text-base lg:text-[12px] text-cream placeholder:text-cream-subtle"
             />
           </div>
           <div>

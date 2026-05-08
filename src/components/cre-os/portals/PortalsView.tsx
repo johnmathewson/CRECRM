@@ -134,7 +134,7 @@ export function PortalsView({
         </header>
 
         {/* KPI tiles */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <CommandStat label="Active links" value={snapshot.totals.active.toString()} caption={`${snapshot.totals.ownerActive} owner · ${snapshot.totals.investorActive} investor`} />
           <CommandStat label="Viewed this week" value={snapshot.totals.viewedThisWeek.toString()} caption="Active links opened in last 7d" />
           <CommandStat label="Ever opened" value={snapshot.totals.everViewed.toString()} caption="Across active + expired + revoked" />

@@ -113,7 +113,7 @@ export function RelationshipListView({ contacts }: { contacts: RelationshipCard[
             <p className="mt-2 font-heading text-[14px] text-cream-dim leading-relaxed max-w-3xl">
               {buildSynthesis(contacts, counts, warmthDist)}
             </p>
-            <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="mt-5 grid grid-cols-2 lg:grid-cols-4 gap-3">
               <CommandStat label="Contacts" value={contacts.length.toString()} caption="In your book" />
               <CommandStat label="Hot relationships" value={warmthDist.hot.toString()} caption={`of ${contacts.length}`} />
               <CommandStat label="Active deals" value={contacts.reduce((s, c) => s + c.openDealCount, 0).toString()} caption="Across all contacts" />

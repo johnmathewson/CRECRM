@@ -65,11 +65,11 @@ export function Topbar({
 
       {/* Right cluster */}
       <div className="flex items-center gap-2 lg:gap-3">
-        {/* Mobile insights button (only if the page has a rail) */}
+        {/* Insights drawer trigger — shown below xl since the rail only inlines at xl+. */}
         {onRailClick && (
           <button
             onClick={onRailClick}
-            className="lg:hidden p-2 text-cream-dim hover:text-cream transition-colors"
+            className="xl:hidden p-2 text-cream-dim hover:text-cream transition-colors"
             aria-label="Open insights"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5">

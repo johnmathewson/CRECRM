@@ -166,7 +166,7 @@ export function MarketView({ snapshot }: { snapshot: MarketSnapshot }) {
           <p className="mt-2 font-heading text-[14px] text-cream-dim leading-relaxed max-w-3xl">
             {snapshot.synthesis}
           </p>
-          <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="mt-5 grid grid-cols-2 lg:grid-cols-4 gap-3">
             <CommandStat label="Comps total" value={(snapshot.totals.leaseComps + snapshot.totals.saleComps).toLocaleString()} caption={`${snapshot.totals.leaseComps} lease · ${snapshot.totals.saleComps} sale`} />
             <CommandStat label="Submarkets covered" value={snapshot.totals.submarkets.toString()} caption="Cities with at least one comp" />
             <CommandStat label="Portfolio median rent" value={fmtRate(snapshot.totals.medianRentAcrossPortfolio)} caption="$/SF/yr · all asset types" />

@@ -694,7 +694,7 @@ export function OffersTab({ p }: { p: PropertyDetail }) {
 
 // ── Sub-components ─────────────────────────────────────────────────────────
 const inputCls =
-  "w-full px-3 py-2 rounded bg-steward-surface/60 border border-white/[0.06] focus:border-coral-400/40 focus:outline-none font-body text-[12px] text-cream placeholder:text-cream-subtle";
+  "w-full px-3 py-2 rounded bg-steward-surface/60 border border-white/[0.06] focus:border-coral-400/40 focus:outline-none font-body text-base lg:text-[12px] text-cream placeholder:text-cream-subtle";
 
 function Section({
   label,
@@ -852,7 +852,7 @@ function PartnerRow({
         </button>
       </div>
       {computed && (computed.capital > 0 || computed.preferred_return > 0 || partner.ownership_pct > 0) && (
-        <div className="mt-2 pt-2 border-t border-white/[0.05] grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 font-body text-[10.5px] text-cream-subtle">
+        <div className="mt-2 pt-2 border-t border-white/[0.05] grid grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-1 font-body text-[10.5px] text-cream-subtle">
           <span>Capital back: <span className="font-mono text-cream">{fmtMoneyExact(computed.capital)}</span></span>
           <span>Preferred: <span className="font-mono text-cream">{fmtMoneyExact(computed.preferred_return)}</span></span>
           <span>Residual share: <span className="font-mono text-cream">{fmtMoneyExact(computed.residual_share)}</span></span>
@@ -1218,7 +1218,7 @@ function OfferRow({
           reads consistently from input → result. "Net proceeds" here is
           the residual that gets distributed by ownership %, matching the
           coral-highlighted line in the editor. */}
-      <div className="mt-3 pt-3 border-t border-white/[0.04] grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 font-body text-[11px]">
+      <div className="mt-3 pt-3 border-t border-white/[0.04] grid grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-1 font-body text-[11px]">
         <Stat label="Offer" value={fmtMoney(offer.offer_price)} />
         <Stat
           label="Commission"
