@@ -87,8 +87,11 @@ export function ListingsView({ snapshot }: { snapshot: ListingsSnapshot }) {
           >
             Generate owner update links →
           </a>
+          {/* Deep-links to the listing-performance section on the Reports
+              page (anchor id="listing-performance"). Lands the broker
+              directly on the relevant 7-day rollup table. */}
           <a
-            href="/cre-os/reports"
+            href="/cre-os/reports#listing-performance"
             className="block px-3 py-2 rounded border border-white/[0.08] bg-white/[0.02] hover:bg-white/[0.06] font-body text-[11px] text-cream-dim hover:text-cream transition-colors"
           >
             Listing performance report →

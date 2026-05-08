@@ -167,7 +167,10 @@ export function ReportsView({ snapshot }: { snapshot: ReportSnapshot }) {
         </section>
 
         {/* ── 5. Listing performance ────────────────────────────────── */}
-        <section>
+        {/* id used as an anchor target — the Listings page rail deep-links
+            here with /cre-os/reports#listing-performance. scroll-mt gives
+            a comfortable buffer above the heading on jump. */}
+        <section id="listing-performance" className="scroll-mt-6">
           <div className="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
             <Eyebrow tone="coral" num={5}>Listing performance · last 7 days</Eyebrow>
             <span className="font-mono text-[10px] text-cream-subtle">
