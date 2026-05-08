@@ -10,6 +10,7 @@ import type { RailSection } from "@/components/cre-os/InsightsRail";
 import { WarmthBadge } from "./WarmthBadge";
 import { EditContactDialog } from "./EditContactDialog";
 import { LogActivityDialog } from "@/components/cre-os/activities/LogActivityDialog";
+import { CreateTaskDialog } from "@/components/cre-os/tasks/CreateTaskDialog";
 import type { ContactDetail } from "@/lib/cre-os/relationship-queries";
 import type { ThreadSummary } from "@/lib/cre-os/communications-queries";
 
@@ -40,6 +41,7 @@ export function ContactWorkspace({
   const c = contact;
   const [editOpen, setEditOpen] = useState(false);
   const [logActivityOpen, setLogActivityOpen] = useState(false);
+  const [taskOpen, setTaskOpen] = useState(false);
 
   const rail: RailSection[] = [
     {
@@ -140,6 +142,13 @@ export function ContactWorkspace({
               + Log activity
             </button>
             <button
+              onClick={() => setTaskOpen(true)}
+              className="px-3 py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] text-coral-300 hover:bg-coral-400/[0.20] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
+              title="Add a follow-up task tied to this contact."
+            >
+              + Task
+            </button>
+            <button
               onClick={() => setEditOpen(true)}
               className="px-3 py-2 rounded border border-white/10 bg-white/[0.03] text-cream hover:bg-white/[0.06] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
               title="Edit name, email, phone, company, type, warmth, follow-up dates, and notes."
@@ -158,6 +167,12 @@ export function ContactWorkspace({
       <LogActivityDialog
         open={logActivityOpen}
         onClose={() => setLogActivityOpen(false)}
+        contactId={c.id}
+        contextLabel={c.fullName}
+      />
+      <CreateTaskDialog
+        open={taskOpen}
+        onClose={() => setTaskOpen(false)}
         contactId={c.id}
         contextLabel={c.fullName}
       />

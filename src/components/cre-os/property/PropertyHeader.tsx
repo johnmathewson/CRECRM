@@ -6,6 +6,7 @@ import { StatusBadge } from "@/components/cre-os/StatusBadge";
 import { StatusEditor } from "./StatusEditor";
 import { EditPropertyDialog } from "./EditPropertyDialog";
 import { LogActivityDialog } from "@/components/cre-os/activities/LogActivityDialog";
+import { CreateTaskDialog } from "@/components/cre-os/tasks/CreateTaskDialog";
 import type { PropertyDetail } from "@/lib/cre-os/property-queries";
 
 const fmtMoney = (n: number | null) => {
@@ -29,6 +30,7 @@ export function PropertyHeader({ p }: { p: PropertyDetail }) {
   const stageTone = pillToneForStage(p.pipelineStage);
   const [editOpen, setEditOpen] = useState(false);
   const [logActivityOpen, setLogActivityOpen] = useState(false);
+  const [taskOpen, setTaskOpen] = useState(false);
 
   const valuationCaption = [
     p.askingPrice ? fmtMoney(p.askingPrice) : null,
@@ -88,6 +90,13 @@ export function PropertyHeader({ p }: { p: PropertyDetail }) {
             + Log activity
           </button>
           <button
+            onClick={() => setTaskOpen(true)}
+            className="px-3 py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] text-coral-300 hover:bg-coral-400/[0.20] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
+            title="Add a follow-up task against this property."
+          >
+            + Task
+          </button>
+          <button
             onClick={() => setEditOpen(true)}
             className="px-3 py-2 rounded border border-white/10 bg-white/[0.03] text-cream hover:bg-white/[0.06] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
             title="Edit address, pricing, sqft, NOI, cap rate, occupancy, parking, zoning, marketing copy, and notes."
@@ -106,6 +115,12 @@ export function PropertyHeader({ p }: { p: PropertyDetail }) {
       <LogActivityDialog
         open={logActivityOpen}
         onClose={() => setLogActivityOpen(false)}
+        propertyId={p.id}
+        contextLabel={p.name}
+      />
+      <CreateTaskDialog
+        open={taskOpen}
+        onClose={() => setTaskOpen(false)}
         propertyId={p.id}
         contextLabel={p.name}
       />

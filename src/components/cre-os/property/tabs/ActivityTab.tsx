@@ -2,6 +2,7 @@
 
 import { Panel } from "@/components/cre-os/Panel";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
+import { TaskRow } from "@/components/cre-os/tasks/TaskRow";
 import type { PropertyDetail } from "@/lib/cre-os/property-queries";
 
 /**
@@ -50,15 +51,9 @@ export function ActivityTab({ p }: { p: PropertyDetail }) {
           {p.tasks.length === 0 ? (
             <p className="font-body text-[12px] text-cream-subtle py-4">No tasks queued.</p>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-1">
               {p.tasks.map((t) => (
-                <div key={t.id} className="flex items-start gap-2 py-1.5">
-                  <input type="checkbox" className="mt-1 accent-coral-400" readOnly />
-                  <div className="flex-1 min-w-0">
-                    <div className="font-body text-[12px] text-cream truncate">{t.title}</div>
-                    <div className="font-mono text-[10px] text-cream-subtle">{t.due}</div>
-                  </div>
-                </div>
+                <TaskRow key={t.id} id={t.id} title={t.title} due={t.due} tone={t.tone} status={t.status} />
               ))}
             </div>
           )}

@@ -10,6 +10,7 @@ import type { RailSection } from "@/components/cre-os/InsightsRail";
 import { DealHeader } from "./DealHeader";
 import { StageStepper } from "./StageStepper";
 import { StageGuidance } from "./StageGuidance";
+import { TaskRow } from "@/components/cre-os/tasks/TaskRow";
 import { getStageConfig, normalizeStage } from "@/lib/cre-os/stage-config";
 import type { DealDetail } from "@/lib/cre-os/pipeline-queries";
 
@@ -155,17 +156,15 @@ export function DealWorkspace({ d }: { d: DealDetail }) {
         <div className="space-y-6">
           <Panel eyebrow="Open tasks" num={3} title={`${d.tasks.length} queued`}>
             {d.tasks.length === 0 ? (
-              <p className="font-body text-[12px] text-cream-subtle py-4">No tasks on this deal.</p>
+              <p className="font-body text-[12px] text-cream-subtle py-4">
+                No tasks on this deal. Use the {"\""}+ Task{"\""} button on the masthead to add one.
+              </p>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-1">
+                {/* Loader already filters to open tasks, so passing status="pending"
+                    is safe — TaskRow will mark them as not-yet-complete. */}
                 {d.tasks.map((t) => (
-                  <div key={t.id} className="flex items-start gap-2 py-1.5 border-b border-white/[0.04] last:border-b-0">
-                    <input type="checkbox" className="mt-1 accent-coral-400" readOnly />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-body text-[12px] text-cream truncate">{t.title}</div>
-                    </div>
-                    <StatusBadge size="xs" tone={t.tone}>{t.due}</StatusBadge>
-                  </div>
+                  <TaskRow key={t.id} id={t.id} title={t.title} due={t.due} tone={t.tone} status="pending" />
                 ))}
               </div>
             )}

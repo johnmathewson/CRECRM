@@ -3,6 +3,7 @@
 import { Panel } from "@/components/cre-os/Panel";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { StatusBadge } from "@/components/cre-os/StatusBadge";
+import { TaskRow } from "@/components/cre-os/tasks/TaskRow";
 import type { PropertyDetail } from "@/lib/cre-os/property-queries";
 
 const fmtMoney = (n: number | null) => {
@@ -63,17 +64,13 @@ export function OverviewTab({ p }: { p: PropertyDetail }) {
 
         <Panel eyebrow="Open tasks" num={3} title="What's queued">
           {p.tasks.length === 0 ? (
-            <p className="font-body text-[13px] text-cream-subtle py-4">No open tasks on this property.</p>
+            <p className="font-body text-[13px] text-cream-subtle py-4">
+              No open tasks on this property. Use the {"\""}+ Task{"\""} button on the masthead to add one.
+            </p>
           ) : (
             <div className="space-y-2">
               {p.tasks.map((t) => (
-                <div key={t.id} className="flex items-start gap-3 py-2 border-b border-white/[0.04] last:border-b-0">
-                  <input type="checkbox" className="mt-1 accent-coral-400" readOnly />
-                  <div className="flex-1 min-w-0">
-                    <div className="font-body text-[13px] text-cream">{t.title}</div>
-                  </div>
-                  <StatusBadge tone={t.tone} size="xs">{t.due}</StatusBadge>
-                </div>
+                <TaskRow key={t.id} id={t.id} title={t.title} due={t.due} tone={t.tone} status={t.status} />
               ))}
             </div>
           )}

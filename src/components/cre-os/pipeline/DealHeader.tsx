@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { StatusBadge } from "@/components/cre-os/StatusBadge";
 import { LogActivityDialog } from "@/components/cre-os/activities/LogActivityDialog";
+import { CreateTaskDialog } from "@/components/cre-os/tasks/CreateTaskDialog";
 import { getStageConfig } from "@/lib/cre-os/stage-config";
 import type { DealDetail } from "@/lib/cre-os/pipeline-queries";
 
@@ -22,6 +23,7 @@ const fmtMoney = (n: number | null) => {
 export function DealHeader({ d }: { d: DealDetail }) {
   const cfg = getStageConfig(d.stage);
   const [logActivityOpen, setLogActivityOpen] = useState(false);
+  const [taskOpen, setTaskOpen] = useState(false);
   const title = d.dealName ?? d.property?.name ?? d.contact?.fullName ?? "(unnamed deal)";
   const subline = [
     d.property?.address ? [d.property.address, d.property.city, d.property.state].filter(Boolean).join(", ") : null,
@@ -90,6 +92,13 @@ export function DealHeader({ d }: { d: DealDetail }) {
           >
             + Log activity
           </button>
+          <button
+            onClick={() => setTaskOpen(true)}
+            className="px-3 py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] text-coral-300 hover:bg-coral-400/[0.20] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
+            title="Add a follow-up task tied to this deal."
+          >
+            + Task
+          </button>
           {d.property && (
             <a
               href={`/cre-os/properties/${d.property.slug}`}
@@ -103,6 +112,14 @@ export function DealHeader({ d }: { d: DealDetail }) {
       <LogActivityDialog
         open={logActivityOpen}
         onClose={() => setLogActivityOpen(false)}
+        dealId={d.id}
+        contactId={d.contact?.id}
+        propertyId={d.property?.id}
+        contextLabel={d.dealName ?? d.property?.name ?? d.contact?.fullName ?? "this deal"}
+      />
+      <CreateTaskDialog
+        open={taskOpen}
+        onClose={() => setTaskOpen(false)}
         dealId={d.id}
         contactId={d.contact?.id}
         propertyId={d.property?.id}
