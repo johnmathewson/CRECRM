@@ -6,9 +6,35 @@
  *   - Per-listing weekly metrics from listing_metrics + own-site page_views.
  *   - Per-listing engagement counters: inquiries, NDAs, OM downloads.
  *   - Anonymized recent inquiry summaries (no names, no contact info).
+ *   - Saved seller-net offer scenarios (published only) + their attachments.
  *
  * Bumps last_viewed_at + writes a "any" sync request so John's browser
  * extension picks up the latest CREXi/LoopNet numbers next time it polls.
+ *
+ * ────────────────────────────────────────────────────────────────────────
+ * SECURITY MODEL — share-by-link, NOT a true magic link
+ * ────────────────────────────────────────────────────────────────────────
+ * The token in the URL is the only credential. There is no email
+ * verification, no session establishment, no cookie. Anyone with the URL
+ * can open the dashboard for the lifetime of the token.
+ *
+ * The token is opaque (24 random bytes hex = 48 chars), so it's not
+ * guessable, but if a recipient forwards the link (intentionally or via
+ * cached email/browser history), the recipient gets full access to:
+ *   • Listing performance (low sensitivity — owner already has this data)
+ *   • Saved seller-net scenarios — including partner waterfalls (HIGHER
+ *     sensitivity; partner names, capital amounts, distribution math)
+ *
+ * DEFERRED — true magic link upgrade. When the seller-net offer feature
+ * sees real-world use, upgrade to one of:
+ *   Level 2 — One-time email gate: first visit prompts for email,
+ *             must match owner_contact_id.email, sets a cookie.
+ *             No email-send infra needed.
+ *   Level 3 — Email-delivered link: token sent via Gmail OAuth, exchanged
+ *             on click for a session JWT. True OAuth-style flow.
+ * Decision recorded 2026-05-08; user prefers to defer until partner-
+ * waterfall data is being shared more broadly.
+ * ────────────────────────────────────────────────────────────────────────
  */
 
 import { NextRequest, NextResponse } from "next/server";
