@@ -26,6 +26,7 @@ import {
   asInteger,
   asDate,
   normalizeAssetType,
+  normalizeState,
   inferOwnerType,
   normalizeAddress,
   makeSlug,
@@ -126,7 +127,7 @@ export async function POST(req: NextRequest) {
           const apn = asString(getCell(row, headers, A.apn));
           const address = asString(getCell(row, headers, A.address));
           const city = asString(getCell(row, headers, A.city));
-          const state = asString(getCell(row, headers, A.state)) ?? "IN";
+          const state = normalizeState(getCell(row, headers, A.state)) ?? "IN";
           const zip = asString(getCell(row, headers, A.zip));
           const county = asString(getCell(row, headers, A.county));
           const name = asString(getCell(row, headers, A.name)) ?? address ?? `Parcel ${apn ?? idx + 1}`;
@@ -139,7 +140,7 @@ export async function POST(req: NextRequest) {
           const ownerName = asString(getCell(row, headers, A.ownerName));
           const ownerAddress = asString(getCell(row, headers, A.ownerAddress));
           const ownerCity = asString(getCell(row, headers, A.ownerCity));
-          const ownerState = asString(getCell(row, headers, A.ownerState));
+          const ownerState = normalizeState(getCell(row, headers, A.ownerState));
           const ownerZip = asString(getCell(row, headers, A.ownerZip));
           const lastSaleDate = asDate(getCell(row, headers, A.lastSaleDate));
           const lastSalePrice = asNumber(getCell(row, headers, A.lastSalePrice));
@@ -205,11 +206,31 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // ── Phase 1.5: within-file dedupe by (apn, state) ─────────────────
+      // Two CoStar rows in the same file with the same APN+state would
+      // both become inserts, leaving duplicate properties. Last-row-wins
+      // dedupe protects against that. Rows without APN are kept as-is
+      // (matched later via address fallback).
+      const dedupeMap = new Map<string, PreparedRow>();
+      const dedupedNoKey: PreparedRow[] = [];
+      for (const p of prepared) {
+        if (p.apn) {
+          dedupeMap.set(`${p.apn}::${p.state}`, p);
+        } else {
+          dedupedNoKey.push(p);
+        }
+      }
+      const dedupedPrepared = [...Array.from(dedupeMap.values()), ...dedupedNoKey];
+      const droppedDupes = prepared.length - dedupedPrepared.length;
+      if (droppedDupes > 0) {
+        errors.push(`Dropped ${droppedDupes} within-file duplicate APN+state row${droppedDupes === 1 ? "" : "s"} (last-row-wins)`);
+      }
+
       // ── Phase 2: bulk-fetch existing rows ──────────────────────────────
       // We do TWO bulk lookups: by APN (the primary match key) and by
       // ilike-prefix of address (for rows with no APN). Both are filtered
       // server-side to the org.
-      const apnList = Array.from(new Set(prepared.map((p) => p.apn).filter((s): s is string => !!s)));
+      const apnList = Array.from(new Set(dedupedPrepared.map((p) => p.apn).filter((s): s is string => !!s)));
       type ExistingRow = { id: string; status: string | null; apn: string | null; state: string | null; address: string | null };
       const byApn = new Map<string, ExistingRow>();
 
@@ -225,7 +246,7 @@ export async function POST(req: NextRequest) {
             parsed: rows.length,
             inserted: 0,
             updated: 0,
-            skipped: prepared.length,
+            skipped: dedupedPrepared.length,
             errors: [`Bulk APN lookup failed: ${apnErr.message}`],
           });
           continue;
@@ -236,7 +257,7 @@ export async function POST(req: NextRequest) {
       }
 
       // Address-fallback for rows with no APN (or no APN match yet)
-      const addressLookups = prepared
+      const addressLookups = dedupedPrepared
         .filter((p) => !p.apn || !byApn.get(`${p.apn}::${p.state}`))
         .filter((p) => !!p.address)
         .map((p) => ({ row: p, normAddr: normalizeAddress(p.address) }))
@@ -282,7 +303,7 @@ export async function POST(req: NextRequest) {
       const updates: { id: string; payload: Record<string, unknown> }[] = [];
       let skipped = 0;
 
-      for (const p of prepared) {
+      for (const p of dedupedPrepared) {
         let existing: ExistingRow | undefined;
         if (p.apn) existing = byApn.get(`${p.apn}::${p.state}`);
         if (!existing && p.address) existing = byNormAddr.get(`${normalizeAddress(p.address)}::${p.state}`);

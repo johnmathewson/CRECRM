@@ -275,15 +275,59 @@ export function normalizeAddress(addr: string | null): string {
 
 // ── Slug generator ────────────────────────────────────────────────────────
 
+/**
+ * Generate a unique-enough slug. The properties table has a UNIQUE index
+ * on slug WHERE slug IS NOT NULL, so collisions cause insert failure.
+ * Combine timestamp (ms since epoch) + 8 random base36 chars to make
+ * birthday-paradox collisions astronomically unlikely even at six-figure
+ * import volumes.
+ */
 export function makeSlug(name: string | null, fallback: string): string {
   const base = (name ?? fallback ?? "property")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .slice(0, 60);
-  // Append short hash suffix for uniqueness
-  const suffix = Math.random().toString(36).slice(2, 6);
-  return `${base}-${suffix}`;
+    .slice(0, 50);
+  const ts = Date.now().toString(36);
+  const rand = Math.random().toString(36).slice(2, 10);
+  return `${base}-${ts}${rand}`;
+}
+
+// ── State normalization ───────────────────────────────────────────────────
+
+/**
+ * USPS state-code normalization. CoStar exports sometimes have full state
+ * names ("Indiana", "Illinois") while our lane filters compare against
+ * 2-char codes — so without normalizing, lanes silently miss imports.
+ */
+// Keys are post-normalize() (lowercase, no spaces/punctuation), so
+// "New York", "NEW-YORK", "New York " all match the same key "newyork".
+const STATE_CODE_MAP: Record<string, string> = {
+  alabama: "AL", alaska: "AK", arizona: "AZ", arkansas: "AR",
+  california: "CA", colorado: "CO", connecticut: "CT", delaware: "DE",
+  districtofcolumbia: "DC", florida: "FL", georgia: "GA", hawaii: "HI",
+  idaho: "ID", illinois: "IL", indiana: "IN", iowa: "IA",
+  kansas: "KS", kentucky: "KY", louisiana: "LA", maine: "ME",
+  maryland: "MD", massachusetts: "MA", michigan: "MI", minnesota: "MN",
+  mississippi: "MS", missouri: "MO", montana: "MT", nebraska: "NE",
+  nevada: "NV", newhampshire: "NH", newjersey: "NJ", newmexico: "NM",
+  newyork: "NY", northcarolina: "NC", northdakota: "ND", ohio: "OH",
+  oklahoma: "OK", oregon: "OR", pennsylvania: "PA", rhodeisland: "RI",
+  southcarolina: "SC", southdakota: "SD", tennessee: "TN", texas: "TX",
+  utah: "UT", vermont: "VT", virginia: "VA", washington: "WA",
+  westvirginia: "WV", wisconsin: "WI", wyoming: "WY",
+};
+
+export function normalizeState(v: unknown): string | null {
+  const s = asString(v);
+  if (!s) return null;
+  const trimmed = s.trim();
+  if (trimmed.length === 2) return trimmed.toUpperCase();
+  const k = normalize(trimmed);
+  if (STATE_CODE_MAP[k]) return STATE_CODE_MAP[k];
+  // Fallback: first 2 chars uppercased — better than letting the full
+  // string through and silently missing every lane filter.
+  return trimmed.slice(0, 2).toUpperCase();
 }
 
 // ── CoStar field aliases ──────────────────────────────────────────────────
@@ -390,8 +434,11 @@ export function deriveSignalFlags(
   if (asBoolean(getCell(row, headers, A.reo))) flags.add("reo");
   if (asBoolean(getCell(row, headers, A.taxDelinquent))) flags.add("tax_delinquent");
 
-  const fcStage = asString(getCell(row, headers, A.foreclosureStage));
-  if (fcStage) flags.add(`fc_stage_${normalize(fcStage)}`);
+  // Note: PropStream's foreclosureStage value is captured in raw_data on
+  // the corresponding signal row, but we DON'T emit it as a separate
+  // signal_type — the DB enum is fixed and we already capture the stage
+  // via the more specific lis_pendens / nod / nts / sheriff_sale flags
+  // above.
 
   // Refi maturity windows
   const maturityStr = asDate(getCell(row, headers, A.mortgageMaturityDate));
