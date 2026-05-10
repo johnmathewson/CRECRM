@@ -1,26 +1,15 @@
 /**
  * PropStream bulk-import endpoint.
  *
- * Reads a PropStream saved-search export (XLSX/CSV) and:
- *   1. Matches each row to an existing property by APN+state, then by
- *      normalized address+state.
- *   2. Stamps the row's signal flags (pre_foreclosure, lis_pendens,
- *      tax_delinquent, refi_maturing_24mo, etc.) onto
- *      properties.prospector_signal_flags. Existing flags from prior
- *      imports are merged, not overwritten.
- *   3. For unmatched rows (PropStream sees a property CoStar didn't
- *      catch), creates a new property at status='prospect' with
- *      data_source='propstream'.
- *   4. Writes per-row entries into the `signals` table for an audit
- *      trail (one row per derived flag, severity by trigger).
- *   5. Updates mortgage / sale / value fields if PropStream has fresher
- *      data than what's on the property.
+ * Reads a PropStream saved-search export (XLSX/CSV), bulk-matches each row
+ * to an existing property by APN+state (or normalized address+state),
+ * stamps signal flags, refreshes mortgage / sale / value data, and creates
+ * a `signals` audit row per derived flag.
  *
- * Re-import = signal refresh. Old signal-flag state is replaced (per
- * import) so properties that no longer match the saved search have their
- * flags cleared on the next refresh — but only flags from THIS lane's
- * trigger family, not all flags. Pass `flagFamily` (e.g. "foreclosure")
- * to scope which flags this file is authoritative over.
+ * Performance: bulk-fetches existing matches per file, splits into batched
+ * inserts + parallel updates. Re-imports merge signal flags rather than
+ * overwriting. Warm properties (status != 'prospect') keep their status
+ * but still get fresh signal flags + live data.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -33,7 +22,6 @@ import {
   asNumber,
   asInteger,
   asDate,
-  asBoolean,
   normalizeAssetType,
   inferOwnerType,
   normalizeAddress,
@@ -46,8 +34,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
+const UPDATE_BATCH_SIZE = 25;
 
-// Map a derived flag to its severity label for the signals table.
 const FLAG_SEVERITY: Record<string, "low" | "medium" | "high" | "critical"> = {
   sheriff_sale: "critical",
   notice_of_trustee_sale: "critical",
@@ -64,12 +52,24 @@ const FLAG_SEVERITY: Record<string, "low" | "medium" | "high" | "critical"> = {
   absentee_owner: "low",
 };
 
+interface PreparedRow {
+  spreadsheetRow: number;
+  apn: string | null;
+  state: string;
+  address: string | null;
+  newFlags: string[];
+  freshData: Record<string, unknown>;
+  rawRow: Record<string, unknown>;
+  // Insert payload, only used if no existing match found
+  insertPayload: Record<string, unknown>;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
     const files = formData.getAll("files") as File[];
     const dryRun = formData.get("dryRun") === "true";
-    const laneTag = (formData.get("laneTag") as string) || null; // optional, for sourcing
+    const laneTag = (formData.get("laneTag") as string) || null;
 
     if (!files.length) {
       return NextResponse.json({ error: "No files uploaded." }, { status: 400 });
@@ -132,11 +132,8 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      let matched = 0;
-      let created = 0;
-      let signalCount = 0;
-      let skipped = 0;
-
+      // ── Phase 1: parse + classify ───────────────────────────────────────
+      const prepared: PreparedRow[] = [];
       for (let idx = 0; idx < rows.length; idx++) {
         const row = rows[idx];
         try {
@@ -147,165 +144,197 @@ export async function POST(req: NextRequest) {
           const zip = asString(getCell(row, headers, A.zip));
           const county = asString(getCell(row, headers, A.county));
           const ownerName = asString(getCell(row, headers, A.ownerName));
+          if (!apn && !address) continue;
 
-          if (!apn && !address) {
-            skipped++;
-            continue;
-          }
-
-          // Match
-          let property: { id: string; status: string | null; flags: string[] } | null = null;
-          if (apn) {
-            const r = await supabase
-              .from("properties")
-              .select("id, status, prospector_signal_flags")
-              .eq("organization_id", ORG_ID)
-              .eq("apn", apn)
-              .eq("state", state)
-              .maybeSingle();
-            if (r.data) {
-              property = {
-                id: r.data.id as string,
-                status: (r.data.status as string) ?? null,
-                flags: (r.data.prospector_signal_flags as string[]) ?? [],
-              };
-            }
-          }
-          if (!property && address) {
-            const normAddr = normalizeAddress(address);
-            const r = await supabase
-              .from("properties")
-              .select("id, status, address, prospector_signal_flags")
-              .eq("organization_id", ORG_ID)
-              .eq("state", state)
-              .ilike("address", `${address.slice(0, 30)}%`);
-            for (const cand of ((r.data ?? []) as Array<{
-              id: string;
-              status: string | null;
-              address: string | null;
-              prospector_signal_flags: string[] | null;
-            }>)) {
-              if (normalizeAddress(cand.address) === normAddr) {
-                property = {
-                  id: cand.id,
-                  status: cand.status,
-                  flags: cand.prospector_signal_flags ?? [],
-                };
-                break;
-              }
-            }
-          }
-
-          // Build signal flags
           const newFlags = deriveSignalFlags(row, headers);
 
-          // PropStream-only fresh data (we'll fold this onto the matched property)
-          const propData: Record<string, unknown> = {};
+          const freshData: Record<string, unknown> = {};
           const estVal = asNumber(getCell(row, headers, A.estimatedValue));
-          if (estVal != null) propData.estimated_value = estVal;
+          if (estVal != null) freshData.estimated_value = estVal;
           const lsd = asDate(getCell(row, headers, A.lastSaleDate));
-          if (lsd) propData.last_sale_date = lsd;
+          if (lsd) freshData.last_sale_date = lsd;
           const lsp = asNumber(getCell(row, headers, A.lastSalePrice));
-          if (lsp != null) propData.last_sale_price = lsp;
+          if (lsp != null) freshData.last_sale_price = lsp;
           const mortAmt = asNumber(getCell(row, headers, A.mortgageAmount));
-          if (mortAmt != null) propData.mortgage_balance = mortAmt;
+          if (mortAmt != null) freshData.mortgage_balance = mortAmt;
           const mortDate = asDate(getCell(row, headers, A.mortgageDate));
-          if (mortDate) propData.mortgage_origination_date = mortDate;
+          if (mortDate) freshData.mortgage_origination_date = mortDate;
           const mortMat = asDate(getCell(row, headers, A.mortgageMaturityDate));
-          if (mortMat) propData.mortgage_maturity_date = mortMat;
+          if (mortMat) freshData.mortgage_maturity_date = mortMat;
           const mortLen = asString(getCell(row, headers, A.mortgageLender));
-          if (mortLen) propData.mortgage_lender = mortLen;
+          if (mortLen) freshData.mortgage_lender = mortLen;
           const yrsOwned = asInteger(getCell(row, headers, A.yearsOwned));
-          if (yrsOwned != null) propData.years_owned = yrsOwned;
+          if (yrsOwned != null) freshData.years_owned = yrsOwned;
           const fcScore = asNumber(getCell(row, headers, A.foreclosureFactor));
-          if (fcScore != null) propData.prospector_score = fcScore;
+          if (fcScore != null) freshData.prospector_score = fcScore;
 
-          if (dryRun) {
-            if (property) matched++;
-            else created++;
-            signalCount += newFlags.length;
+          // Pre-build the insert payload for unmatched rows
+          const assetType = normalizeAssetType(getCell(row, headers, A.assetType));
+          const subType = asString(getCell(row, headers, A.subType));
+          const sqft = asInteger(getCell(row, headers, A.sqft));
+          const yearBuilt = asInteger(getCell(row, headers, A.yearBuilt));
+          const units = asInteger(getCell(row, headers, A.units));
+          const ownerType = inferOwnerType(ownerName);
+          const ownerAddress = asString(getCell(row, headers, A.ownerAddress));
+          const ownerCity = asString(getCell(row, headers, A.ownerCity));
+          const ownerState = asString(getCell(row, headers, A.ownerState));
+          const ownerZip = asString(getCell(row, headers, A.ownerZip));
+          const name = address ?? `Parcel ${apn ?? idx + 1}`;
+          const slug = makeSlug(name, apn ?? "prop");
+
+          const insertPayload: Record<string, unknown> = {
+            organization_id: ORG_ID,
+            slug,
+            status: "prospect",
+            apn,
+            name,
+            address,
+            city,
+            state,
+            zip,
+            county,
+            asset_type: assetType,
+            sub_type: subType,
+            sqft,
+            year_built: yearBuilt,
+            units,
+            owner_name_raw: ownerName,
+            owner_type: ownerType,
+            owner_state: ownerState,
+            owner_mailing_address: ownerAddress,
+            owner_mailing_city: ownerCity,
+            owner_mailing_state: ownerState,
+            owner_mailing_zip: ownerZip,
+            prospector_signal_flags: newFlags,
+            data_source: "propstream",
+            source_import: "propstream_bulk",
+            ...freshData,
+          };
+
+          prepared.push({
+            spreadsheetRow: idx + 2,
+            apn,
+            state,
+            address,
+            newFlags,
+            freshData,
+            rawRow: row,
+            insertPayload,
+          });
+        } catch (err) {
+          errors.push(`Row ${idx + 2}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      // ── Phase 2: bulk-fetch existing properties ────────────────────────
+      type ExistingRow = {
+        id: string;
+        status: string | null;
+        apn: string | null;
+        state: string | null;
+        address: string | null;
+        prospector_signal_flags: string[] | null;
+      };
+      const apnList = Array.from(new Set(prepared.map((p) => p.apn).filter((s): s is string => !!s)));
+      const byApn = new Map<string, ExistingRow>();
+
+      if (apnList.length > 0) {
+        const { data, error: apnErr } = await supabase
+          .from("properties")
+          .select("id, status, apn, state, address, prospector_signal_flags")
+          .eq("organization_id", ORG_ID)
+          .in("apn", apnList);
+        if (apnErr) {
+          fileResults.push({
+            fileName: file.name,
+            parsed: rows.length,
+            matched: 0,
+            created: 0,
+            signals: 0,
+            skipped: prepared.length,
+            errors: [`Bulk APN lookup failed: ${apnErr.message}`],
+          });
+          continue;
+        }
+        for (const r of (data ?? []) as ExistingRow[]) {
+          if (r.apn) byApn.set(`${r.apn}::${r.state ?? ""}`, r);
+        }
+      }
+
+      const addressLookups = prepared
+        .filter((p) => !p.apn || !byApn.get(`${p.apn}::${p.state}`))
+        .filter((p) => !!p.address);
+      const byNormAddr = new Map<string, ExistingRow>();
+
+      if (addressLookups.length > 0) {
+        const byState = new Map<string, string[]>();
+        for (const x of addressLookups) {
+          const list = byState.get(x.state) ?? [];
+          list.push(x.address!);
+          byState.set(x.state, list);
+        }
+        for (const [state, addrs] of Array.from(byState.entries())) {
+          const orClause = addrs
+            .slice(0, 200)
+            .map((a) => `address.ilike.${a.slice(0, 30).replace(/[,()]/g, "")}%`)
+            .join(",");
+          if (!orClause) continue;
+          const { data, error: addrErr } = await supabase
+            .from("properties")
+            .select("id, status, apn, state, address, prospector_signal_flags")
+            .eq("organization_id", ORG_ID)
+            .eq("state", state)
+            .or(orClause);
+          if (addrErr) {
+            errors.push(`Bulk address lookup (${state}): ${addrErr.message}`);
             continue;
           }
-
-          let propertyId: string;
-          if (property) {
-            // Don't trample warm properties — but we DO refresh signal flags
-            // and live-data fields. The status itself we leave alone.
-            const mergedFlags = Array.from(new Set([...property.flags, ...newFlags]));
-            const { error } = await supabase
-              .from("properties")
-              .update({
-                ...propData,
-                prospector_signal_flags: mergedFlags,
-                updated_at: new Date().toISOString(),
-              })
-              .eq("id", property.id);
-            if (error) {
-              errors.push(`Row ${idx + 2}: ${error.message}`);
-              skipped++;
-              continue;
-            }
-            propertyId = property.id;
-            matched++;
-          } else {
-            // Create a new prospect from PropStream data
-            const assetType = normalizeAssetType(getCell(row, headers, A.assetType));
-            const subType = asString(getCell(row, headers, A.subType));
-            const sqft = asInteger(getCell(row, headers, A.sqft));
-            const yearBuilt = asInteger(getCell(row, headers, A.yearBuilt));
-            const units = asInteger(getCell(row, headers, A.units));
-            const ownerType = inferOwnerType(ownerName);
-            const ownerAddress = asString(getCell(row, headers, A.ownerAddress));
-            const ownerCity = asString(getCell(row, headers, A.ownerCity));
-            const ownerState = asString(getCell(row, headers, A.ownerState));
-            const ownerZip = asString(getCell(row, headers, A.ownerZip));
-            const name = address ?? `Parcel ${apn ?? idx + 1}`;
-            const slug = makeSlug(name, apn ?? "prop");
-
-            const { data: ins, error } = await supabase
-              .from("properties")
-              .insert({
-                organization_id: ORG_ID,
-                slug,
-                status: "prospect",
-                apn,
-                name,
-                address,
-                city,
-                state,
-                zip,
-                county,
-                asset_type: assetType,
-                sub_type: subType,
-                sqft,
-                year_built: yearBuilt,
-                units,
-                owner_name_raw: ownerName,
-                owner_type: ownerType,
-                owner_state: ownerState,
-                owner_mailing_address: ownerAddress,
-                owner_mailing_city: ownerCity,
-                owner_mailing_state: ownerState,
-                owner_mailing_zip: ownerZip,
-                prospector_signal_flags: newFlags,
-                data_source: "propstream",
-                source_import: "propstream_bulk",
-                ...propData,
-              })
-              .select("id")
-              .single();
-            if (error || !ins) {
-              errors.push(`Row ${idx + 2}: ${error?.message ?? "insert failed"}`);
-              skipped++;
-              continue;
-            }
-            propertyId = ins.id as string;
-            created++;
+          for (const r of (data ?? []) as ExistingRow[]) {
+            if (r.address) byNormAddr.set(`${normalizeAddress(r.address)}::${state}`, r);
           }
+        }
+      }
 
-          // Write a signals row for each derived flag (audit + lane targeting)
-          if (newFlags.length > 0) {
-            const sigPayload = newFlags.map((flag) => ({
+      // ── Phase 3: classify ───────────────────────────────────────────────
+      const inserts: Record<string, unknown>[] = [];
+      const updates: { id: string; payload: Record<string, unknown> }[] = [];
+      const signalRows: Record<string, unknown>[] = [];
+      let matched = 0;
+      let created = 0;
+      let skipped = 0;
+
+      for (const p of prepared) {
+        let existing: ExistingRow | undefined;
+        if (p.apn) existing = byApn.get(`${p.apn}::${p.state}`);
+        if (!existing && p.address) existing = byNormAddr.get(`${normalizeAddress(p.address)}::${p.state}`);
+
+        let propertyId: string;
+        if (existing) {
+          // Merge signal flags; refresh fresh data; leave status alone (warm
+          // properties keep their status, cold get richer data + flags).
+          const mergedFlags = Array.from(new Set([...(existing.prospector_signal_flags ?? []), ...p.newFlags]));
+          updates.push({
+            id: existing.id,
+            payload: {
+              ...p.freshData,
+              prospector_signal_flags: mergedFlags,
+              updated_at: new Date().toISOString(),
+            },
+          });
+          propertyId = existing.id;
+          matched++;
+        } else {
+          // Will be inserted in batch — we can't link signals until insert
+          // returns IDs. Track inserts with their flags so we can stitch
+          // signals to the new IDs after.
+          inserts.push({ ...p.insertPayload, __new_flags__: p.newFlags, __raw_row__: p.rawRow });
+          propertyId = "__pending__";
+        }
+
+        // For matched rows, queue signal entries now (we have an ID).
+        if (propertyId !== "__pending__") {
+          for (const flag of p.newFlags) {
+            signalRows.push({
               organization_id: ORG_ID,
               signal_type: flag,
               title: humanizeFlag(flag),
@@ -314,19 +343,96 @@ export async function POST(req: NextRequest) {
               status: "new",
               data_source: "propstream",
               source_detail: laneTag ?? file.name,
-              raw_data: row,
-            }));
-            const { error: sigErr } = await supabase.from("signals").insert(sigPayload);
-            if (sigErr) {
-              errors.push(`Row ${idx + 2} signals: ${sigErr.message}`);
+              raw_data: p.rawRow,
+            });
+          }
+        }
+      }
+
+      let signalCount = 0;
+
+      if (!dryRun) {
+        // ── Phase 4a: bulk insert new properties ─────────────────────────
+        if (inserts.length > 0) {
+          for (let i = 0; i < inserts.length; i += 100) {
+            const chunk = inserts.slice(i, i + 100);
+            // Strip the helper sidecar fields before insert
+            const cleanChunk = chunk.map((c) => {
+              const { __new_flags__, __raw_row__, ...rest } = c as Record<string, unknown>;
+              void __new_flags__; void __raw_row__;
+              return rest;
+            });
+            const { data: insData, error: insErr } = await supabase
+              .from("properties")
+              .insert(cleanChunk)
+              .select("id, apn, address, state");
+            if (insErr) {
+              errors.push(`Bulk insert chunk ${i}-${i + chunk.length}: ${insErr.message}`);
             } else {
-              signalCount += newFlags.length;
+              created += chunk.length;
+              // Stitch signals to the new IDs by re-matching APN+state
+              const insertedRows = (insData ?? []) as Array<{ id: string; apn: string | null; address: string | null; state: string | null }>;
+              for (let j = 0; j < chunk.length; j++) {
+                const original = chunk[j];
+                const flags = (original.__new_flags__ as string[]) ?? [];
+                const rawRow = (original.__raw_row__ as Record<string, unknown>) ?? {};
+                if (flags.length === 0) continue;
+                // The j-th inserted row corresponds to the j-th chunk row
+                const insertedId = insertedRows[j]?.id;
+                if (!insertedId) continue;
+                for (const flag of flags) {
+                  signalRows.push({
+                    organization_id: ORG_ID,
+                    signal_type: flag,
+                    title: humanizeFlag(flag),
+                    severity: FLAG_SEVERITY[flag] ?? "medium",
+                    property_id: insertedId,
+                    status: "new",
+                    data_source: "propstream",
+                    source_detail: laneTag ?? file.name,
+                    raw_data: rawRow,
+                  });
+                }
+              }
             }
           }
-        } catch (err) {
-          errors.push(`Row ${idx + 2}: ${err instanceof Error ? err.message : String(err)}`);
-          skipped++;
         }
+
+        // ── Phase 4b: parallel updates ──────────────────────────────────
+        if (updates.length > 0) {
+          for (let i = 0; i < updates.length; i += UPDATE_BATCH_SIZE) {
+            const chunk = updates.slice(i, i + UPDATE_BATCH_SIZE);
+            const results = await Promise.all(
+              chunk.map((u) =>
+                supabase
+                  .from("properties")
+                  .update(u.payload)
+                  .eq("id", u.id)
+                  .then((r) => ({ error: r.error }))
+              )
+            );
+            for (const r of results) {
+              if (r.error) errors.push(`Update: ${r.error.message}`);
+            }
+          }
+        }
+
+        // ── Phase 4c: bulk insert signals rows ──────────────────────────
+        if (signalRows.length > 0) {
+          for (let i = 0; i < signalRows.length; i += 200) {
+            const chunk = signalRows.slice(i, i + 200);
+            const { error: sigErr } = await supabase.from("signals").insert(chunk);
+            if (sigErr) {
+              errors.push(`Signals insert chunk ${i}-${i + chunk.length}: ${sigErr.message}`);
+            } else {
+              signalCount += chunk.length;
+            }
+          }
+        }
+      } else {
+        matched = updates.length;
+        created = inserts.length;
+        signalCount = signalRows.length + inserts.reduce((s, i) => s + ((i.__new_flags__ as string[])?.length ?? 0), 0);
       }
 
       totalMatched += matched;
@@ -378,7 +484,5 @@ export async function POST(req: NextRequest) {
 }
 
 function humanizeFlag(flag: string): string {
-  return flag
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+  return flag.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }

@@ -137,10 +137,23 @@ export function DataImportsView({ jobs }: { jobs: Array<Record<string, unknown>>
         for (const [k, v] of Object.entries(extra)) fd.append(k, v);
 
         const r = await fetch(endpoint, { method: "POST", body: fd });
-        const data = await r.json();
+        // Always read body as text first, then try to JSON-parse — this
+        // way an HTML 500 from the runtime (e.g. function timeout) shows
+        // a useful message instead of "Unexpected token I…".
+        const rawBody = await r.text();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let data: any;
+        try {
+          data = JSON.parse(rawBody);
+        } catch {
+          // Likely an HTML error page from Netlify/Next runtime
+          const snippet = rawBody.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 220);
+          data = {
+            error: `HTTP ${r.status}: ${snippet || "Server returned non-JSON response (likely a function timeout or memory issue)."}`,
+          };
+        }
         if (!r.ok) {
           setError(`${f.name}: ${data.error ?? "Upload failed"}`);
-          // Keep going — one bad file shouldn't block the queue.
           agg.fileResults.push({
             fileName: f.name,
             parsed: 0,

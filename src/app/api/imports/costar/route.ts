@@ -6,9 +6,13 @@
  * cold inventory. Match key is APN+state when available; falls back to
  * normalized address.
  *
- * Idempotent: re-uploading the same file updates existing rows rather than
- * duplicating them. We never overwrite warm properties (status != 'prospect')
- * to protect rows that have been promoted into the active pipeline.
+ * Performance: bulk-fetches existing matches in one query per file, then
+ * splits incoming rows into a single batch insert + parallel updates. A
+ * 500-row file finishes in well under the function timeout. Re-imports
+ * are idempotent — same APN updates the existing row.
+ *
+ * Warm properties (status != 'prospect') are protected — never overwritten
+ * by an import, even if the APN matches.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -32,6 +36,18 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
+const UPDATE_BATCH_SIZE = 25;
+
+interface PreparedRow {
+  /** Source row index for error reporting (1-based, matches user's spreadsheet) */
+  spreadsheetRow: number;
+  /** Bare key fields used for matching */
+  apn: string | null;
+  state: string;
+  address: string | null;
+  /** Full payload to insert/update */
+  payload: Record<string, unknown>;
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -48,7 +64,6 @@ export async function POST(req: NextRequest) {
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     );
 
-    // Open import_jobs row for audit trail
     let jobId: string | null = null;
     if (!dryRun) {
       const { data: job } = await supabase
@@ -82,12 +97,10 @@ export async function POST(req: NextRequest) {
       const errors: string[] = [];
       const { headers, rows } = await parseSpreadsheet(file);
       totalParsed += rows.length;
-
-      // Resolve canonical columns once per file
       const A = COSTAR_ALIASES;
+
       const apnCol = pickColumn(headers, A.apn);
       const addrCol = pickColumn(headers, A.address);
-
       if (!apnCol && !addrCol) {
         fileResults.push({
           fileName: file.name,
@@ -103,10 +116,8 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      let inserted = 0;
-      let updated = 0;
-      let skipped = 0;
-
+      // ── Phase 1: parse all rows into a normalized prepared list ────────
+      const prepared: PreparedRow[] = [];
       for (let idx = 0; idx < rows.length; idx++) {
         const row = rows[idx];
         try {
@@ -136,52 +147,15 @@ export async function POST(req: NextRequest) {
           const loanMatDate = asDate(getCell(row, headers, A.loanMaturityDate));
           const loanAmount = asNumber(getCell(row, headers, A.loanAmount));
 
-          if (!apn && !address) {
-            skipped++;
-            continue;
-          }
+          if (!apn && !address) continue; // unprocessable row, silently skip
 
-          // Years owned derived from last sale date
           let yearsOwned: number | null = null;
           if (lastSaleDate) {
             const yrs = (Date.now() - new Date(lastSaleDate).getTime()) / (1000 * 3600 * 24 * 365.25);
             if (Number.isFinite(yrs) && yrs >= 0) yearsOwned = Math.floor(yrs);
           }
 
-          // Match: APN+state first, else normalized address+state
           const ownerType = inferOwnerType(ownerName);
-          let existing: { id: string; status: string | null } | null = null;
-          if (apn) {
-            const r = await supabase
-              .from("properties")
-              .select("id, status")
-              .eq("organization_id", ORG_ID)
-              .eq("apn", apn)
-              .eq("state", state)
-              .maybeSingle();
-            existing = (r.data as { id: string; status: string | null } | null) ?? null;
-          }
-          if (!existing && address) {
-            const normAddr = normalizeAddress(address);
-            const r = await supabase
-              .from("properties")
-              .select("id, status, address")
-              .eq("organization_id", ORG_ID)
-              .eq("state", state)
-              .ilike("address", `${address}%`);
-            for (const row of ((r.data ?? []) as Array<{ id: string; status: string | null; address: string | null }>)) {
-              if (normalizeAddress(row.address) === normAddr) {
-                existing = { id: row.id, status: row.status };
-                break;
-              }
-            }
-          }
-
-          // Don't trample warm properties
-          if (existing && existing.status && existing.status !== "prospect") {
-            skipped++;
-            continue;
-          }
 
           const payload: Record<string, unknown> = {
             organization_id: ORG_ID,
@@ -217,41 +191,160 @@ export async function POST(req: NextRequest) {
             source_import: "costar_bulk",
           };
 
-          if (dryRun) {
-            if (existing) updated++;
-            else inserted++;
-            continue;
-          }
-
-          if (existing) {
-            const { error } = await supabase
-              .from("properties")
-              .update({ ...payload, updated_at: new Date().toISOString() })
-              .eq("id", existing.id);
-            if (error) {
-              errors.push(`Row ${idx + 2}: ${error.message}`);
-              skipped++;
-            } else {
-              updated++;
-            }
-          } else {
-            const slug = makeSlug(name, address ?? apn ?? "prop");
-            const { error } = await supabase.from("properties").insert({
-              ...payload,
-              slug,
-              status: "prospect",
-            });
-            if (error) {
-              errors.push(`Row ${idx + 2}: ${error.message}`);
-              skipped++;
-            } else {
-              inserted++;
-            }
-          }
+          prepared.push({
+            spreadsheetRow: idx + 2, // +2 because user-facing row 1 is the header
+            apn,
+            state,
+            address,
+            payload,
+          });
         } catch (err) {
           errors.push(`Row ${idx + 2}: ${err instanceof Error ? err.message : String(err)}`);
-          skipped++;
         }
+      }
+
+      // ── Phase 2: bulk-fetch existing rows ──────────────────────────────
+      // We do TWO bulk lookups: by APN (the primary match key) and by
+      // ilike-prefix of address (for rows with no APN). Both are filtered
+      // server-side to the org.
+      const apnList = Array.from(new Set(prepared.map((p) => p.apn).filter((s): s is string => !!s)));
+      type ExistingRow = { id: string; status: string | null; apn: string | null; state: string | null; address: string | null };
+      const byApn = new Map<string, ExistingRow>();
+
+      if (apnList.length > 0) {
+        const { data: rowsByApn, error: apnErr } = await supabase
+          .from("properties")
+          .select("id, status, apn, state, address")
+          .eq("organization_id", ORG_ID)
+          .in("apn", apnList);
+        if (apnErr) {
+          fileResults.push({
+            fileName: file.name,
+            parsed: rows.length,
+            inserted: 0,
+            updated: 0,
+            skipped: prepared.length,
+            errors: [`Bulk APN lookup failed: ${apnErr.message}`],
+          });
+          continue;
+        }
+        for (const r of (rowsByApn ?? []) as ExistingRow[]) {
+          if (r.apn) byApn.set(`${r.apn}::${r.state ?? ""}`, r);
+        }
+      }
+
+      // Address-fallback for rows with no APN (or no APN match yet)
+      const addressLookups = prepared
+        .filter((p) => !p.apn || !byApn.get(`${p.apn}::${p.state}`))
+        .filter((p) => !!p.address)
+        .map((p) => ({ row: p, normAddr: normalizeAddress(p.address) }))
+        .filter((x) => x.normAddr);
+
+      const byNormAddr = new Map<string, ExistingRow>();
+      if (addressLookups.length > 0) {
+        // Group by state so we can do one IN-list per state
+        const byState = new Map<string, string[]>();
+        for (const x of addressLookups) {
+          const list = byState.get(x.row.state) ?? [];
+          list.push(x.row.address!);
+          byState.set(x.row.state, list);
+        }
+        // For each state, pull all properties whose address starts with any of
+        // the prefixes we care about. Keeps it to one query per state.
+        const stateBuckets = Array.from(byState.entries());
+        for (const [state, addrs] of stateBuckets) {
+          // Use first 30 chars of each address as ilike prefix
+          const orClause = addrs
+            .slice(0, 200) // safety cap on URL length
+            .map((a) => `address.ilike.${a.slice(0, 30).replace(/[,()]/g, "")}%`)
+            .join(",");
+          if (!orClause) continue;
+          const { data: rowsByAddr, error: addrErr } = await supabase
+            .from("properties")
+            .select("id, status, apn, state, address")
+            .eq("organization_id", ORG_ID)
+            .eq("state", state)
+            .or(orClause);
+          if (addrErr) {
+            errors.push(`Bulk address lookup failed for state ${state}: ${addrErr.message}`);
+            continue;
+          }
+          for (const r of (rowsByAddr ?? []) as ExistingRow[]) {
+            if (r.address) byNormAddr.set(`${normalizeAddress(r.address)}::${state}`, r);
+          }
+        }
+      }
+
+      // ── Phase 3: classify each prepared row → insert / update / skip ───
+      const inserts: Record<string, unknown>[] = [];
+      const updates: { id: string; payload: Record<string, unknown> }[] = [];
+      let skipped = 0;
+
+      for (const p of prepared) {
+        let existing: ExistingRow | undefined;
+        if (p.apn) existing = byApn.get(`${p.apn}::${p.state}`);
+        if (!existing && p.address) existing = byNormAddr.get(`${normalizeAddress(p.address)}::${p.state}`);
+
+        if (existing && existing.status && existing.status !== "prospect") {
+          // Warm property — protect from overwrite
+          skipped++;
+          continue;
+        }
+
+        if (existing) {
+          updates.push({ id: existing.id, payload: { ...p.payload, updated_at: new Date().toISOString() } });
+        } else {
+          inserts.push({
+            ...p.payload,
+            slug: makeSlug(p.payload.name as string | null, p.address ?? p.apn ?? "prop"),
+            status: "prospect",
+          });
+        }
+      }
+
+      let inserted = 0;
+      let updated = 0;
+
+      if (!dryRun) {
+        // ── Phase 4a: bulk insert ────────────────────────────────────────
+        if (inserts.length > 0) {
+          // Insert in chunks of 200 to stay under any per-statement limits
+          for (let i = 0; i < inserts.length; i += 200) {
+            const chunk = inserts.slice(i, i + 200);
+            const { error: insErr } = await supabase.from("properties").insert(chunk);
+            if (insErr) {
+              errors.push(`Bulk insert chunk ${i}-${i + chunk.length}: ${insErr.message}`);
+            } else {
+              inserted += chunk.length;
+            }
+          }
+        }
+
+        // ── Phase 4b: parallel updates (chunked) ────────────────────────
+        if (updates.length > 0) {
+          for (let i = 0; i < updates.length; i += UPDATE_BATCH_SIZE) {
+            const chunk = updates.slice(i, i + UPDATE_BATCH_SIZE);
+            const results = await Promise.all(
+              chunk.map((u) =>
+                supabase
+                  .from("properties")
+                  .update(u.payload)
+                  .eq("id", u.id)
+                  .then((r) => ({ id: u.id, error: r.error }))
+              )
+            );
+            for (const r of results) {
+              if (r.error) {
+                errors.push(`Update ${r.id.slice(0, 8)}…: ${r.error.message}`);
+              } else {
+                updated++;
+              }
+            }
+          }
+        }
+      } else {
+        inserted = inserts.length;
+        updated = updates.length;
       }
 
       totalInserted += inserted;
