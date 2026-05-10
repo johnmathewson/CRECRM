@@ -30,12 +30,29 @@ interface ImportResult {
   }>;
 }
 
+interface UploadProgress {
+  totalFiles: number;
+  fileIndex: number;
+  currentFileName: string;
+  // Aggregated across all files so far
+  parsed: number;
+  inserted: number;
+  updated: number;
+  matched: number;
+  created: number;
+  signals: number;
+  skipped: number;
+  fileResults: ImportResult["fileResults"];
+}
+
 export function DataImportsView({ jobs }: { jobs: Array<Record<string, unknown>> }) {
   const router = useRouter();
   const [costarFiles, setCostarFiles] = useState<File[]>([]);
   const [propstreamFiles, setPropstreamFiles] = useState<File[]>([]);
   const [costarBusy, setCostarBusy] = useState(false);
   const [propstreamBusy, setPropstreamBusy] = useState(false);
+  const [costarProgress, setCostarProgress] = useState<UploadProgress | null>(null);
+  const [propstreamProgress, setPropstreamProgress] = useState<UploadProgress | null>(null);
   const [costarResult, setCostarResult] = useState<ImportResult | null>(null);
   const [propstreamResult, setPropstreamResult] = useState<ImportResult | null>(null);
   const [costarError, setCostarError] = useState<string | null>(null);
@@ -74,46 +91,108 @@ export function DataImportsView({ jobs }: { jobs: Array<Record<string, unknown>>
     },
   ];
 
-  async function uploadCostar() {
-    if (costarFiles.length === 0) return;
-    setCostarBusy(true);
-    setCostarError(null);
-    setCostarResult(null);
+  // Upload files one at a time so each request stays well under the
+  // 60s function timeout, and so the user sees per-file progress.
+  // 37 small CoStar exports (500 rows each) feels like a queue, not a wait.
+  async function uploadFiles(
+    source: "costar" | "propstream",
+    files: File[],
+    extra: Record<string, string> = {}
+  ) {
+    const setBusy = source === "costar" ? setCostarBusy : setPropstreamBusy;
+    const setProgress = source === "costar" ? setCostarProgress : setPropstreamProgress;
+    const setResult = source === "costar" ? setCostarResult : setPropstreamResult;
+    const setError = source === "costar" ? setCostarError : setPropstreamError;
+    const setFiles = source === "costar" ? setCostarFiles : setPropstreamFiles;
+    const endpoint = source === "costar" ? "/api/imports/costar" : "/api/imports/propstream";
+
+    setBusy(true);
+    setError(null);
+    setResult(null);
+
+    const agg: UploadProgress = {
+      totalFiles: files.length,
+      fileIndex: 0,
+      currentFileName: "",
+      parsed: 0,
+      inserted: 0,
+      updated: 0,
+      matched: 0,
+      created: 0,
+      signals: 0,
+      skipped: 0,
+      fileResults: [],
+    };
+    setProgress({ ...agg });
+
     try {
-      const fd = new FormData();
-      for (const f of costarFiles) fd.append("files", f);
-      const r = await fetch("/api/imports/costar", { method: "POST", body: fd });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error ?? "Upload failed");
-      setCostarResult(data);
-      setCostarFiles([]);
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        agg.fileIndex = i + 1;
+        agg.currentFileName = f.name;
+        setProgress({ ...agg });
+
+        const fd = new FormData();
+        fd.append("files", f);
+        for (const [k, v] of Object.entries(extra)) fd.append(k, v);
+
+        const r = await fetch(endpoint, { method: "POST", body: fd });
+        const data = await r.json();
+        if (!r.ok) {
+          setError(`${f.name}: ${data.error ?? "Upload failed"}`);
+          // Keep going — one bad file shouldn't block the queue.
+          agg.fileResults.push({
+            fileName: f.name,
+            parsed: 0,
+            skipped: 0,
+            errors: [data.error ?? "Upload failed"],
+          });
+          setProgress({ ...agg });
+          continue;
+        }
+
+        agg.parsed += data.totalParsed ?? 0;
+        agg.inserted += data.totalInserted ?? 0;
+        agg.updated += data.totalUpdated ?? 0;
+        agg.matched += data.totalMatched ?? 0;
+        agg.created += data.totalCreated ?? 0;
+        agg.signals += data.totalSignals ?? 0;
+        agg.skipped += data.totalSkipped ?? 0;
+        if (Array.isArray(data.fileResults)) {
+          agg.fileResults.push(...data.fileResults);
+        }
+        setProgress({ ...agg });
+      }
+
+      // Build a single ImportResult for the result panel
+      const finalResult: ImportResult = {
+        totalParsed: agg.parsed,
+        totalInserted: agg.inserted,
+        totalUpdated: agg.updated,
+        totalMatched: agg.matched,
+        totalCreated: agg.created,
+        totalSignals: agg.signals,
+        totalSkipped: agg.skipped,
+        fileResults: agg.fileResults,
+      };
+      setResult(finalResult);
+      setFiles([]);
       router.refresh();
     } catch (err) {
-      setCostarError(err instanceof Error ? err.message : "Upload failed");
+      setError(err instanceof Error ? err.message : "Upload failed");
     } finally {
-      setCostarBusy(false);
+      setBusy(false);
+      setProgress(null);
     }
   }
 
-  async function uploadPropstream() {
-    if (propstreamFiles.length === 0) return;
-    setPropstreamBusy(true);
-    setPropstreamError(null);
-    setPropstreamResult(null);
-    try {
-      const fd = new FormData();
-      for (const f of propstreamFiles) fd.append("files", f);
-      if (propstreamLaneTag) fd.append("laneTag", propstreamLaneTag);
-      const r = await fetch("/api/imports/propstream", { method: "POST", body: fd });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error ?? "Upload failed");
-      setPropstreamResult(data);
-      setPropstreamFiles([]);
-      router.refresh();
-    } catch (err) {
-      setPropstreamError(err instanceof Error ? err.message : "Upload failed");
-    } finally {
-      setPropstreamBusy(false);
+  function uploadCostar() {
+    if (costarFiles.length > 0) uploadFiles("costar", costarFiles);
+  }
+
+  function uploadPropstream() {
+    if (propstreamFiles.length > 0) {
+      uploadFiles("propstream", propstreamFiles, propstreamLaneTag ? { laneTag: propstreamLaneTag } : {});
     }
   }
 
@@ -159,6 +238,7 @@ export function DataImportsView({ jobs }: { jobs: Array<Record<string, unknown>>
                 {costarBusy ? "Importing…" : "Import to Prospector"}
               </button>
             </div>
+            {costarProgress && <ProgressBar p={costarProgress} source="costar" />}
             {costarError && <ErrorBanner msg={costarError} />}
             {costarResult && <ImportResultPanel result={costarResult} source="costar" />}
           </div>
@@ -203,6 +283,7 @@ export function DataImportsView({ jobs }: { jobs: Array<Record<string, unknown>>
                 {propstreamBusy ? "Importing…" : "Import signals"}
               </button>
             </div>
+            {propstreamProgress && <ProgressBar p={propstreamProgress} source="propstream" />}
             {propstreamError && <ErrorBanner msg={propstreamError} />}
             {propstreamResult && <ImportResultPanel result={propstreamResult} source="propstream" />}
           </div>
@@ -283,6 +364,46 @@ function FileDrop({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function ProgressBar({ p, source }: { p: UploadProgress; source: ImportSource }) {
+  const pct = p.totalFiles > 0 ? Math.round((p.fileIndex / p.totalFiles) * 100) : 0;
+  return (
+    <div className="rounded border border-coral-400/30 bg-coral-400/[0.04] px-4 py-3 space-y-2.5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="font-mono text-[10px] uppercase tracking-eyebrow text-coral-300">
+            Uploading · {p.fileIndex} of {p.totalFiles}
+          </div>
+          <div className="font-body text-[11.5px] text-cream truncate mt-0.5">
+            {p.currentFileName || "Preparing…"}
+          </div>
+        </div>
+        <div className="font-display text-[18px] text-cream tabular-nums">{pct}%</div>
+      </div>
+      <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+        <div
+          className="h-full bg-gradient-to-r from-coral-500 to-coral-300 transition-all duration-300"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+        <Stat label="Parsed" value={p.parsed.toLocaleString()} />
+        {source === "costar" ? (
+          <>
+            <Stat label="Inserted" value={p.inserted.toLocaleString()} />
+            <Stat label="Updated" value={p.updated.toLocaleString()} />
+          </>
+        ) : (
+          <>
+            <Stat label="Matched" value={p.matched.toLocaleString()} />
+            <Stat label="Created" value={p.created.toLocaleString()} />
+          </>
+        )}
+        <Stat label={source === "propstream" ? "Signals" : "Skipped"} value={(source === "propstream" ? p.signals : p.skipped).toLocaleString()} />
+      </div>
     </div>
   );
 }
