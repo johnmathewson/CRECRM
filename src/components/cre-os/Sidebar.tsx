@@ -90,6 +90,14 @@ const ICON = {
       <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
+  radar: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="12" r="5" />
+      <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+      <path d="M12 3v3M12 18v3M3 12h3M18 12h3" strokeLinecap="round" />
+    </svg>
+  ),
 };
 
 const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
@@ -106,11 +114,12 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
   {
     label: "Intelligence",
     items: [
+      { label: "Prospector", href: "/cre-os/prospector", icon: ICON.radar },
+      { label: "Listings",   href: "/cre-os/listings",   icon: ICON.trending },
       { label: "Market",     href: "/cre-os/market",     icon: ICON.globe,    legacyHref: "/comps" },
       { label: "Valuation",  href: "/cre-os/valuate",    icon: ICON.scale,    legacyHref: "/valuate" },
       { label: "Reports",    href: "/cre-os/reports",    icon: ICON.chart },
       { label: "Documents",  href: "/cre-os/documents",  icon: ICON.doc },
-      { label: "Listings",   href: "/cre-os/listings",   icon: ICON.trending },
     ],
   },
   {

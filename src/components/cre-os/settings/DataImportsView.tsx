@@ -1,0 +1,375 @@
+"use client";
+
+import { useState, useRef } from "react";
+import { useRouter } from "next/navigation";
+import { AppShell } from "@/components/cre-os/AppShell";
+import { Eyebrow } from "@/components/cre-os/Eyebrow";
+import { Panel } from "@/components/cre-os/Panel";
+import type { RailSection } from "@/components/cre-os/InsightsRail";
+
+type ImportSource = "costar" | "propstream";
+
+interface ImportResult {
+  totalParsed: number;
+  totalInserted?: number;
+  totalUpdated?: number;
+  totalMatched?: number;
+  totalCreated?: number;
+  totalSignals?: number;
+  totalSkipped: number;
+  fileResults: Array<{
+    fileName: string;
+    parsed: number;
+    inserted?: number;
+    updated?: number;
+    matched?: number;
+    created?: number;
+    signals?: number;
+    skipped: number;
+    errors: string[];
+  }>;
+}
+
+export function DataImportsView({ jobs }: { jobs: Array<Record<string, unknown>> }) {
+  const router = useRouter();
+  const [costarFiles, setCostarFiles] = useState<File[]>([]);
+  const [propstreamFiles, setPropstreamFiles] = useState<File[]>([]);
+  const [costarBusy, setCostarBusy] = useState(false);
+  const [propstreamBusy, setPropstreamBusy] = useState(false);
+  const [costarResult, setCostarResult] = useState<ImportResult | null>(null);
+  const [propstreamResult, setPropstreamResult] = useState<ImportResult | null>(null);
+  const [costarError, setCostarError] = useState<string | null>(null);
+  const [propstreamError, setPropstreamError] = useState<string | null>(null);
+  const [propstreamLaneTag, setPropstreamLaneTag] = useState<string>("");
+
+  const rail: RailSection[] = [
+    {
+      eyebrow: "Pipeline",
+      children: (
+        <div className="space-y-2.5 text-[11px] font-body text-cream-dim leading-relaxed">
+          <p>
+            <span className="text-coral-300 font-mono mr-1.5">1.</span>
+            CoStar export → cold universe (status=prospect).
+          </p>
+          <p>
+            <span className="text-coral-300 font-mono mr-1.5">2.</span>
+            PropStream export → matches by APN, stamps signal flags.
+          </p>
+          <p>
+            <span className="text-coral-300 font-mono mr-1.5">3.</span>
+            Lanes pull qualifying prospects into cadence.
+          </p>
+        </div>
+      ),
+    },
+    {
+      eyebrow: "Tips",
+      children: (
+        <div className="space-y-2 text-[11px] font-body text-cream-subtle leading-relaxed">
+          <p>Use APN as the join key — it's the most reliable match between CoStar and PropStream.</p>
+          <p>Re-importing the same file is safe — it updates existing rows rather than duplicating.</p>
+          <p>Warm properties (in active pipeline) are never overwritten.</p>
+        </div>
+      ),
+    },
+  ];
+
+  async function uploadCostar() {
+    if (costarFiles.length === 0) return;
+    setCostarBusy(true);
+    setCostarError(null);
+    setCostarResult(null);
+    try {
+      const fd = new FormData();
+      for (const f of costarFiles) fd.append("files", f);
+      const r = await fetch("/api/imports/costar", { method: "POST", body: fd });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error ?? "Upload failed");
+      setCostarResult(data);
+      setCostarFiles([]);
+      router.refresh();
+    } catch (err) {
+      setCostarError(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setCostarBusy(false);
+    }
+  }
+
+  async function uploadPropstream() {
+    if (propstreamFiles.length === 0) return;
+    setPropstreamBusy(true);
+    setPropstreamError(null);
+    setPropstreamResult(null);
+    try {
+      const fd = new FormData();
+      for (const f of propstreamFiles) fd.append("files", f);
+      if (propstreamLaneTag) fd.append("laneTag", propstreamLaneTag);
+      const r = await fetch("/api/imports/propstream", { method: "POST", body: fd });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error ?? "Upload failed");
+      setPropstreamResult(data);
+      setPropstreamFiles([]);
+      router.refresh();
+    } catch (err) {
+      setPropstreamError(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setPropstreamBusy(false);
+    }
+  }
+
+  return (
+    <AppShell rail={rail}>
+      <div className="space-y-7 max-w-5xl">
+        <header>
+          <Eyebrow tone="coral">Settings · Data imports</Eyebrow>
+          <h1 className="mt-1 font-display font-medium text-3xl text-cream tracking-tight">
+            CoStar &amp; PropStream uploads
+          </h1>
+          <p className="mt-2 font-heading text-[14px] text-cream-dim leading-relaxed max-w-3xl">
+            Drop your weekly exports here. CoStar is the base universe, PropStream layers signal
+            flags (foreclosure, refi maturity, tax delinquency, etc.) on top. Properties in your
+            warm pipeline are never modified.
+          </p>
+        </header>
+
+        <Panel eyebrow="CoStar" num={1} title="Base property universe">
+          <div className="space-y-4">
+            <p className="text-[12px] font-body text-cream-dim leading-relaxed">
+              Drop a CoStar XLSX or CSV export. Recommended columns: APN/Tax ID, Property Address,
+              City, State, ZIP, County, Property Type, Building SF, Year Built, True Owner Name,
+              True Owner Address/City/State/ZIP, Last Sale Date/Price, Estimated Value, Loan info.
+            </p>
+            <FileDrop
+              files={costarFiles}
+              onFiles={setCostarFiles}
+              accept=".xlsx,.xls,.csv"
+              label="Drop CoStar export here, or click to browse"
+            />
+            <div className="flex items-center justify-between gap-3 pt-1">
+              <p className="text-[10.5px] font-mono text-cream-subtle uppercase tracking-eyebrow">
+                {costarFiles.length === 0
+                  ? "No file selected"
+                  : `${costarFiles.length} file${costarFiles.length > 1 ? "s" : ""} ready`}
+              </p>
+              <button
+                onClick={uploadCostar}
+                disabled={costarFiles.length === 0 || costarBusy}
+                className="px-4 py-2.5 lg:py-2 rounded border border-coral-400/40 bg-coral-400/[0.12] hover:bg-coral-400/[0.20] font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-coral-300 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {costarBusy ? "Importing…" : "Import to Prospector"}
+              </button>
+            </div>
+            {costarError && <ErrorBanner msg={costarError} />}
+            {costarResult && <ImportResultPanel result={costarResult} source="costar" />}
+          </div>
+        </Panel>
+
+        <Panel eyebrow="PropStream" num={2} title="Signal flags & distress data">
+          <div className="space-y-4">
+            <p className="text-[12px] font-body text-cream-dim leading-relaxed">
+              Drop a PropStream saved-search export. Common ones: pre-foreclosure list (Lane A),
+              loan maturity in the next 24 months (Lane B), 15-year-hold absentee owners (Lane C).
+              Signal flags are derived per row and stamped on the matched property.
+            </p>
+            <div>
+              <label className="block font-mono text-[9px] uppercase tracking-eyebrow text-cream-subtle mb-1">
+                Optional: Lane tag (helps audit which saved search this came from)
+              </label>
+              <input
+                type="text"
+                value={propstreamLaneTag}
+                onChange={(e) => setPropstreamLaneTag(e.target.value)}
+                placeholder="e.g. Lane A — Distressed — 2026-05-09"
+                className="w-full px-3 py-2 rounded bg-steward-surface/60 border border-white/[0.06] focus:border-coral-400/40 focus:outline-none font-body text-base lg:text-[12px] text-cream placeholder:text-cream-subtle"
+              />
+            </div>
+            <FileDrop
+              files={propstreamFiles}
+              onFiles={setPropstreamFiles}
+              accept=".xlsx,.xls,.csv"
+              label="Drop PropStream export here, or click to browse"
+            />
+            <div className="flex items-center justify-between gap-3 pt-1">
+              <p className="text-[10.5px] font-mono text-cream-subtle uppercase tracking-eyebrow">
+                {propstreamFiles.length === 0
+                  ? "No file selected"
+                  : `${propstreamFiles.length} file${propstreamFiles.length > 1 ? "s" : ""} ready`}
+              </p>
+              <button
+                onClick={uploadPropstream}
+                disabled={propstreamFiles.length === 0 || propstreamBusy}
+                className="px-4 py-2.5 lg:py-2 rounded border border-coral-400/40 bg-coral-400/[0.12] hover:bg-coral-400/[0.20] font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-coral-300 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {propstreamBusy ? "Importing…" : "Import signals"}
+              </button>
+            </div>
+            {propstreamError && <ErrorBanner msg={propstreamError} />}
+            {propstreamResult && <ImportResultPanel result={propstreamResult} source="propstream" />}
+          </div>
+        </Panel>
+
+        <Panel eyebrow="Recent imports" num={3} title="Audit log">
+          {jobs.length === 0 ? (
+            <p className="text-[12px] font-body text-cream-subtle italic">
+              No imports yet. Your history will land here.
+            </p>
+          ) : (
+            <div className="space-y-1.5">
+              {jobs.map((j) => (
+                <ImportJobRow key={j.id as string} job={j} />
+              ))}
+            </div>
+          )}
+        </Panel>
+      </div>
+    </AppShell>
+  );
+}
+
+function FileDrop({
+  files,
+  onFiles,
+  accept,
+  label,
+}: {
+  files: File[];
+  onFiles: (f: File[]) => void;
+  accept: string;
+  label: string;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [drag, setDrag] = useState(false);
+
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDrag(false);
+    const list = Array.from(e.dataTransfer.files);
+    if (list.length > 0) onFiles(list);
+  }
+
+  return (
+    <div
+      onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+      onDragLeave={() => setDrag(false)}
+      onDrop={onDrop}
+      onClick={() => inputRef.current?.click()}
+      className={`cursor-pointer rounded border-2 border-dashed transition-colors px-6 py-8 text-center ${
+        drag
+          ? "border-coral-400/60 bg-coral-400/[0.06]"
+          : "border-white/[0.10] bg-white/[0.02] hover:border-white/[0.20] hover:bg-white/[0.04]"
+      }`}
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        accept={accept}
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files) onFiles(Array.from(e.target.files));
+        }}
+      />
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-7 h-7 mx-auto mb-2 text-cream-subtle">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      <p className="font-body text-[13px] text-cream-dim">{label}</p>
+      <p className="mt-1 font-mono text-[10px] text-cream-subtle uppercase tracking-eyebrow">
+        Accepts XLSX · XLS · CSV
+      </p>
+      {files.length > 0 && (
+        <div className="mt-3 space-y-1">
+          {files.map((f, i) => (
+            <p key={i} className="font-mono text-[10.5px] text-coral-300">{f.name} <span className="text-cream-subtle">({(f.size / 1024).toFixed(0)}kb)</span></p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ErrorBanner({ msg }: { msg: string }) {
+  return (
+    <div className="rounded border border-amber/30 bg-amber/[0.08] px-3.5 py-2.5 font-body text-[12px] text-amber">
+      {msg}
+    </div>
+  );
+}
+
+function ImportResultPanel({ result, source }: { result: ImportResult; source: ImportSource }) {
+  const errors = result.fileResults.flatMap((f) => f.errors.map((e) => ({ file: f.fileName, msg: e })));
+  return (
+    <div className="rounded border border-coral-400/25 bg-coral-400/[0.04] px-4 py-3 space-y-2">
+      <div className="flex items-center gap-2">
+        <span className="inline-block w-1.5 h-1.5 rounded-full bg-coral-400" />
+        <span className="font-mono text-[10px] uppercase tracking-eyebrow text-coral-300">Import complete</span>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+        <Stat label="Parsed" value={result.totalParsed.toLocaleString()} />
+        {source === "costar" ? (
+          <>
+            <Stat label="Inserted" value={(result.totalInserted ?? 0).toLocaleString()} />
+            <Stat label="Updated" value={(result.totalUpdated ?? 0).toLocaleString()} />
+          </>
+        ) : (
+          <>
+            <Stat label="Matched" value={(result.totalMatched ?? 0).toLocaleString()} />
+            <Stat label="Created" value={(result.totalCreated ?? 0).toLocaleString()} />
+          </>
+        )}
+        <Stat label={source === "propstream" ? "Signals" : "Skipped"} value={(source === "propstream" ? result.totalSignals ?? 0 : result.totalSkipped).toLocaleString()} />
+      </div>
+      {errors.length > 0 && (
+        <details className="pt-2">
+          <summary className="font-mono text-[10px] uppercase tracking-eyebrow text-amber cursor-pointer hover:text-amber/80">
+            {errors.length} warning{errors.length > 1 ? "s" : ""} ▾
+          </summary>
+          <ul className="mt-2 space-y-1 max-h-48 overflow-y-auto">
+            {errors.slice(0, 25).map((e, i) => (
+              <li key={i} className="font-mono text-[10.5px] text-amber/80">
+                <span className="text-cream-subtle">{e.file}:</span> {e.msg}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="font-mono text-[9px] uppercase tracking-eyebrow text-cream-subtle">{label}</div>
+      <div className="font-display text-[18px] text-cream tabular-nums">{value}</div>
+    </div>
+  );
+}
+
+function ImportJobRow({ job }: { job: Record<string, unknown> }) {
+  const created = job.created_at as string;
+  const status = job.status as string;
+  const tone =
+    status === "complete" ? "text-teal-400" :
+    status === "running" ? "text-amber" :
+    status === "failed" ? "text-amber" :
+    "text-cream-subtle";
+  return (
+    <div className="flex items-center justify-between gap-3 px-3 py-2 rounded bg-white/[0.02] border border-white/[0.04] font-body text-[11.5px]">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[10px] uppercase tracking-eyebrow text-coral-300">{job.source as string}</span>
+          <span className={`font-mono text-[10px] ${tone}`}>· {status}</span>
+        </div>
+        <div className="text-cream-dim truncate">{(job.source_detail as string) ?? "—"}</div>
+      </div>
+      <div className="text-right shrink-0">
+        <div className="font-mono text-[10.5px] text-cream">
+          {(job.processed_records as number) ?? 0} / {(job.total_records as number) ?? 0}
+        </div>
+        <div className="font-mono text-[9.5px] text-cream-subtle">
+          {created ? new Date(created).toLocaleString() : "—"}
+        </div>
+      </div>
+    </div>
+  );
+}

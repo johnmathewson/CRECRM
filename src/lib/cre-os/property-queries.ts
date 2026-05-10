@@ -186,7 +186,10 @@ export interface PropertyDetail {
 export async function loadPropertyList(filters: PropertyListFilters = {}): Promise<PropertyCard[]> {
   const sb = createServerSupabase();
 
-  // Pull base records with the filters applied
+  // Pull base records with the filters applied. Cold inventory (status='prospect')
+  // is hidden by default — those live in the Prospector. The user can still pass
+  // filters.status='prospect' explicitly if they want to drag a cold property out
+  // of cold storage manually.
   let q = sb
     .from("properties")
     .select(
@@ -196,7 +199,11 @@ export async function loadPropertyList(filters: PropertyListFilters = {}): Promi
     .order("created_at", { ascending: false });
 
   if (filters.assetType) q = q.eq("asset_type", filters.assetType);
-  if (filters.status) q = q.eq("status", filters.status);
+  if (filters.status) {
+    q = q.eq("status", filters.status);
+  } else {
+    q = q.neq("status", "prospect");
+  }
   if (filters.yourRole) q = q.eq("your_role", filters.yourRole);
   if (filters.q && filters.q.trim()) {
     const term = `%${filters.q.trim()}%`;

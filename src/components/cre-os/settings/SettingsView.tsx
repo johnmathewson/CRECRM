@@ -92,10 +92,35 @@ export function SettingsView() {
           </p>
         </header>
 
+        <DataImportsSection />
         <GmailSection />
         <ExtensionKeysSection />
       </div>
     </AppShell>
+  );
+}
+
+function DataImportsSection() {
+  return (
+    <Panel
+      eyebrow="Data imports"
+      num={0}
+      title="CoStar & PropStream uploads"
+      actions={
+        <a
+          href="/cre-os/settings/data-imports"
+          className="px-3 py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] hover:bg-coral-400/[0.18] font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-coral-300 transition-colors"
+        >
+          Open uploader →
+        </a>
+      }
+    >
+      <p className="font-body text-[12px] text-cream-dim leading-relaxed">
+        Drop CoStar exports to seed the cold universe. Drop PropStream weekly exports to layer
+        foreclosure, refi-maturity, and tax-delinquency signals onto matched properties.
+        Properties in your warm pipeline are never modified.
+      </p>
+    </Panel>
   );
 }
 
