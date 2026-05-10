@@ -94,6 +94,12 @@ export async function POST(req: NextRequest) {
       updated: number;
       skipped: number;
       errors: string[];
+      /** Every column header found in the file (so we can debug alias gaps) */
+      headers?: string[];
+      /** Logical fields we couldn't find in the file's headers */
+      unmatchedFields?: string[];
+      /** % of rows where critical fields landed (apn, county, assetType, ownerName) */
+      coverage?: Record<string, number>;
     }> = [];
 
     for (const file of files) {
@@ -102,8 +108,18 @@ export async function POST(req: NextRequest) {
       totalParsed += rows.length;
       const A = COSTAR_ALIASES;
 
-      const apnCol = pickColumn(headers, A.apn);
-      const addrCol = pickColumn(headers, A.address);
+      // Resolve every logical field's matched header up front — surfaces
+      // exactly which fields couldn't be located, so users can see what
+      // CoStar called the column we didn't recognize.
+      const matchedFields: Record<string, string | null> = {};
+      const unmatchedFields: string[] = [];
+      for (const [key, aliases] of Object.entries(A) as Array<[keyof typeof A, string[]]>) {
+        const found = pickColumn(headers, aliases);
+        matchedFields[key] = found;
+        if (!found) unmatchedFields.push(key);
+      }
+      const apnCol = matchedFields.apn;
+      const addrCol = matchedFields.address;
       if (!apnCol && !addrCol) {
         fileResults.push({
           fileName: file.name,
@@ -112,9 +128,10 @@ export async function POST(req: NextRequest) {
           updated: 0,
           skipped: rows.length,
           errors: [
-            "Could not locate either APN or Address columns. Expected one of: " +
-              [...A.apn, ...A.address].join(", "),
+            "Could not locate either APN or Address columns. Add the column name to import-helpers.ts COSTAR_ALIASES.",
           ],
+          headers,
+          unmatchedFields,
         });
         continue;
       }
@@ -265,35 +282,43 @@ export async function POST(req: NextRequest) {
 
       const byNormAddr = new Map<string, ExistingRow>();
       if (addressLookups.length > 0) {
-        // Group by state so we can do one IN-list per state
+        // Group by state. The address ilike-OR query gets expensive when
+        // the OR clause has many prefixes against a state with many rows
+        // (each ilike is a sequential scan). Chunk into batches of 25
+        // prefixes so individual queries stay fast.
+        const ADDR_LOOKUP_CHUNK = 25;
         const byState = new Map<string, string[]>();
         for (const x of addressLookups) {
           const list = byState.get(x.row.state) ?? [];
           list.push(x.row.address!);
           byState.set(x.row.state, list);
         }
-        // For each state, pull all properties whose address starts with any of
-        // the prefixes we care about. Keeps it to one query per state.
-        const stateBuckets = Array.from(byState.entries());
-        for (const [state, addrs] of stateBuckets) {
-          // Use first 30 chars of each address as ilike prefix
-          const orClause = addrs
-            .slice(0, 200) // safety cap on URL length
-            .map((a) => `address.ilike.${a.slice(0, 30).replace(/[,()]/g, "")}%`)
-            .join(",");
-          if (!orClause) continue;
-          const { data: rowsByAddr, error: addrErr } = await supabase
-            .from("properties")
-            .select("id, status, apn, state, address")
-            .eq("organization_id", ORG_ID)
-            .eq("state", state)
-            .or(orClause);
-          if (addrErr) {
-            errors.push(`Bulk address lookup failed for state ${state}: ${addrErr.message}`);
-            continue;
-          }
-          for (const r of (rowsByAddr ?? []) as ExistingRow[]) {
-            if (r.address) byNormAddr.set(`${normalizeAddress(r.address)}::${state}`, r);
+        for (const [state, addrs] of Array.from(byState.entries())) {
+          for (let i = 0; i < addrs.length; i += ADDR_LOOKUP_CHUNK) {
+            const chunk = addrs.slice(i, i + ADDR_LOOKUP_CHUNK);
+            const orClause = chunk
+              .map((a) => `address.ilike.${a.slice(0, 30).replace(/[,()]/g, "")}%`)
+              .join(",");
+            if (!orClause) continue;
+            const { data: rowsByAddr, error: addrErr } = await supabase
+              .from("properties")
+              .select("id, status, apn, state, address")
+              .eq("organization_id", ORG_ID)
+              .eq("state", state)
+              .or(orClause)
+              .limit(500);
+            if (addrErr) {
+              // Address lookup is a best-effort match; if it times out or
+              // errors, fall through and let those rows get inserted as
+              // new (de-duping by APN already happened). Don't propagate.
+              errors.push(
+                `Address fallback chunk ${i}-${i + chunk.length} for state ${state} (${addrErr.message}); rows will fall through to insert path`
+              );
+              continue;
+            }
+            for (const r of (rowsByAddr ?? []) as ExistingRow[]) {
+              if (r.address) byNormAddr.set(`${normalizeAddress(r.address)}::${state}`, r);
+            }
           }
         }
       }
@@ -395,6 +420,19 @@ export async function POST(req: NextRequest) {
       totalInserted += inserted;
       totalUpdated += updated;
       totalSkipped += skipped;
+
+      // Coverage: for the four most diagnostic fields, what % of the
+      // prepared rows actually got a non-null value? If apn coverage is
+      // 0% and the file says "Tax ID" or whatever, our aliases missed it.
+      const sampleSize = Math.min(dedupedPrepared.length, 100);
+      const sample = dedupedPrepared.slice(0, sampleSize);
+      const coverage = {
+        apn: sampleSize === 0 ? 0 : Math.round(100 * sample.filter((p) => !!p.apn).length / sampleSize),
+        address: sampleSize === 0 ? 0 : Math.round(100 * sample.filter((p) => !!p.address).length / sampleSize),
+        county: sampleSize === 0 ? 0 : Math.round(100 * sample.filter((p) => !!(p.payload.county)).length / sampleSize),
+        owner: sampleSize === 0 ? 0 : Math.round(100 * sample.filter((p) => !!(p.payload.owner_name_raw)).length / sampleSize),
+      };
+
       fileResults.push({
         fileName: file.name,
         parsed: rows.length,
@@ -402,6 +440,9 @@ export async function POST(req: NextRequest) {
         updated,
         skipped,
         errors: errors.slice(0, 25),
+        headers,
+        unmatchedFields,
+        coverage,
       });
     }
 

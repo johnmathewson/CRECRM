@@ -285,6 +285,7 @@ export async function POST(req: NextRequest) {
       const byNormAddr = new Map<string, ExistingRow>();
 
       if (addressLookups.length > 0) {
+        const ADDR_LOOKUP_CHUNK = 25;
         const byState = new Map<string, string[]>();
         for (const x of addressLookups) {
           const list = byState.get(x.state) ?? [];
@@ -292,23 +293,28 @@ export async function POST(req: NextRequest) {
           byState.set(x.state, list);
         }
         for (const [state, addrs] of Array.from(byState.entries())) {
-          const orClause = addrs
-            .slice(0, 200)
-            .map((a) => `address.ilike.${a.slice(0, 30).replace(/[,()]/g, "")}%`)
-            .join(",");
-          if (!orClause) continue;
-          const { data, error: addrErr } = await supabase
-            .from("properties")
-            .select("id, status, apn, state, address, prospector_signal_flags")
-            .eq("organization_id", ORG_ID)
-            .eq("state", state)
-            .or(orClause);
-          if (addrErr) {
-            errors.push(`Bulk address lookup (${state}): ${addrErr.message}`);
-            continue;
-          }
-          for (const r of (data ?? []) as ExistingRow[]) {
-            if (r.address) byNormAddr.set(`${normalizeAddress(r.address)}::${state}`, r);
+          for (let i = 0; i < addrs.length; i += ADDR_LOOKUP_CHUNK) {
+            const chunk = addrs.slice(i, i + ADDR_LOOKUP_CHUNK);
+            const orClause = chunk
+              .map((a) => `address.ilike.${a.slice(0, 30).replace(/[,()]/g, "")}%`)
+              .join(",");
+            if (!orClause) continue;
+            const { data, error: addrErr } = await supabase
+              .from("properties")
+              .select("id, status, apn, state, address, prospector_signal_flags")
+              .eq("organization_id", ORG_ID)
+              .eq("state", state)
+              .or(orClause)
+              .limit(500);
+            if (addrErr) {
+              errors.push(
+                `Address fallback chunk ${i}-${i + chunk.length} for state ${state} (${addrErr.message}); rows will fall through to insert path`
+              );
+              continue;
+            }
+            for (const r of (data ?? []) as ExistingRow[]) {
+              if (r.address) byNormAddr.set(`${normalizeAddress(r.address)}::${state}`, r);
+            }
           }
         }
       }

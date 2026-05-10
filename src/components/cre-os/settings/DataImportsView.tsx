@@ -27,6 +27,9 @@ interface ImportResult {
     signals?: number;
     skipped: number;
     errors: string[];
+    headers?: string[];
+    unmatchedFields?: string[];
+    coverage?: Record<string, number>;
   }>;
 }
 
@@ -431,6 +434,21 @@ function ErrorBanner({ msg }: { msg: string }) {
 
 function ImportResultPanel({ result, source }: { result: ImportResult; source: ImportSource }) {
   const errors = result.fileResults.flatMap((f) => f.errors.map((e) => ({ file: f.fileName, msg: e })));
+
+  // Aggregate coverage across files. If apn/county/owner coverage is low,
+  // it likely means our column aliases don't match the file's headers —
+  // surface that prominently so we can fix.
+  const coverageFiles = result.fileResults.filter((f) => f.coverage);
+  const avgCoverage = coverageFiles.length === 0 ? null : {
+    apn: Math.round(coverageFiles.reduce((s, f) => s + (f.coverage?.apn ?? 0), 0) / coverageFiles.length),
+    address: Math.round(coverageFiles.reduce((s, f) => s + (f.coverage?.address ?? 0), 0) / coverageFiles.length),
+    county: Math.round(coverageFiles.reduce((s, f) => s + (f.coverage?.county ?? 0), 0) / coverageFiles.length),
+    owner: Math.round(coverageFiles.reduce((s, f) => s + (f.coverage?.owner ?? 0), 0) / coverageFiles.length),
+  };
+  const lowCoverage = avgCoverage && (
+    avgCoverage.apn < 80 || avgCoverage.county < 80 || avgCoverage.owner < 80
+  );
+
   return (
     <div className="rounded border border-coral-400/25 bg-coral-400/[0.04] px-4 py-3 space-y-2">
       <div className="flex items-center gap-2">
@@ -452,6 +470,40 @@ function ImportResultPanel({ result, source }: { result: ImportResult; source: I
         )}
         <Stat label={source === "propstream" ? "Signals" : "Skipped"} value={(source === "propstream" ? result.totalSignals ?? 0 : result.totalSkipped).toLocaleString()} />
       </div>
+
+      {avgCoverage && (
+        <div className={`mt-2 rounded border px-3 py-2 ${
+          lowCoverage
+            ? "border-amber/40 bg-amber/[0.06]"
+            : "border-teal-400/30 bg-teal-400/[0.04]"
+        }`}>
+          <div className={`font-mono text-[10px] uppercase tracking-eyebrow ${lowCoverage ? "text-amber" : "text-teal-300"}`}>
+            {lowCoverage ? "Low field coverage — column aliases may need updating" : "Field coverage"}
+          </div>
+          <div className="mt-1 grid grid-cols-4 gap-3 font-mono text-[11px]">
+            <CoverageStat label="APN" pct={avgCoverage.apn} />
+            <CoverageStat label="Address" pct={avgCoverage.address} />
+            <CoverageStat label="County" pct={avgCoverage.county} />
+            <CoverageStat label="Owner" pct={avgCoverage.owner} />
+          </div>
+          {lowCoverage && result.fileResults[0]?.headers && (
+            <details className="mt-2">
+              <summary className="font-mono text-[9.5px] text-cream-subtle cursor-pointer hover:text-cream">
+                See actual file headers ▾
+              </summary>
+              <div className="mt-1 font-mono text-[10px] text-cream-dim leading-relaxed max-h-24 overflow-y-auto">
+                {result.fileResults[0].headers.join(" · ")}
+              </div>
+              {result.fileResults[0].unmatchedFields && result.fileResults[0].unmatchedFields.length > 0 && (
+                <div className="mt-1 font-mono text-[10px] text-amber/80">
+                  Unmatched fields: {result.fileResults[0].unmatchedFields.join(", ")}
+                </div>
+              )}
+            </details>
+          )}
+        </div>
+      )}
+
       {errors.length > 0 && (
         <details className="pt-2">
           <summary className="font-mono text-[10px] uppercase tracking-eyebrow text-amber cursor-pointer hover:text-amber/80">
@@ -466,6 +518,16 @@ function ImportResultPanel({ result, source }: { result: ImportResult; source: I
           </ul>
         </details>
       )}
+    </div>
+  );
+}
+
+function CoverageStat({ label, pct }: { label: string; pct: number }) {
+  const tone = pct >= 80 ? "text-teal-300" : pct >= 30 ? "text-amber" : "text-amber/70";
+  return (
+    <div>
+      <div className="text-cream-subtle text-[9.5px]">{label}</div>
+      <div className={`${tone} text-[14px] tabular-nums`}>{pct}%</div>
     </div>
   );
 }

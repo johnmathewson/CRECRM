@@ -332,39 +332,112 @@ export function normalizeState(v: unknown): string | null {
 
 // ── CoStar field aliases ──────────────────────────────────────────────────
 
+/**
+ * CoStar column aliases. CoStar Property Search exports use varying
+ * column names depending on the user's license tier and which fields
+ * they pinned. The aliases below cover the common variants observed
+ * in real exports + the ones documented in CoStar's export schema.
+ *
+ * If your export has a column we don't recognize, look at the
+ * `headers` array surfaced in the import response and add it to the
+ * matching list here.
+ */
 export const COSTAR_ALIASES = {
-  apn: ["apn", "tax id", "parcel id", "parcel number", "tax parcel id", "parcel #"],
-  name: ["property name", "building name"],
-  address: ["property address", "street address", "address", "location address"],
-  city: ["city", "property city"],
-  state: ["state", "property state"],
-  zip: ["zip", "zip code", "postal code", "property zip"],
-  county: ["county", "property county"],
-  assetType: [
-    "property type", "building type", "primary property type", "asset type",
-    "property type id",
+  apn: [
+    "apn", "apn number", "parcel apn", "tax parcel apn",
+    "tax id", "tax id number", "tax id #", "tax #",
+    "parcel id", "parcel id number", "parcel #", "parcel number",
+    "tax parcel id", "tax parcel number", "tax parcel #",
+    "assessor id", "assessor parcel number", "assessor's parcel number",
+    "property id", "primary parcel id", "primary apn",
   ],
-  subType: ["secondary type", "property sub type", "sub type"],
-  sqft: ["building sf", "rba", "rentable building area", "bldg sf", "building size", "gross sf"],
-  acreage: ["land area (ac)", "land area", "lot size (ac)", "acreage", "acres"],
-  yearBuilt: ["year built"],
-  units: ["number of units", "# of units", "unit count", "units"],
+  name: [
+    "property name", "building name", "name", "primary property name",
+  ],
+  address: [
+    "property address", "street address", "address", "location address",
+    "primary address", "site address",
+  ],
+  city: ["city", "property city", "site city"],
+  state: ["state", "property state", "site state"],
+  zip: ["zip", "zip code", "postal code", "property zip", "site zip"],
+  county: [
+    "county", "property county", "county name", "site county",
+    "primary county",
+  ],
+  assetType: [
+    "property type", "primary property type", "building type",
+    "asset type", "property type id",
+  ],
+  subType: [
+    "secondary type", "secondary property type", "property sub type",
+    "sub type", "subtype",
+  ],
+  sqft: [
+    "building sf", "bldg sf", "building square feet", "building size",
+    "rba", "rentable building area", "gross sf", "gross square feet",
+    "total building sf", "total building size",
+  ],
+  acreage: [
+    "land area (ac)", "land area", "lot size (ac)", "lot size",
+    "acreage", "acres",
+  ],
+  yearBuilt: ["year built", "yr built"],
+  units: [
+    "number of units", "# of units", "unit count", "units",
+    "# of multifamily units", "total units",
+  ],
   ownerName: [
     "true owner name", "owner name", "primary owner name", "recorded owner",
-    "current owner",
+    "current owner", "owner 1 name", "true owner",
   ],
-  ownerAddress: ["true owner address", "owner address", "owner mailing address"],
-  ownerCity: ["true owner city", "owner city"],
-  ownerState: ["true owner state", "owner state"],
-  ownerZip: ["true owner zip", "owner zip"],
-  lastSaleDate: ["last sale date", "sale date", "recorded sale date"],
-  lastSalePrice: ["last sale price", "sale price", "recorded sale price"],
-  estimatedValue: ["estimated value", "market value", "true tax assessed value"],
-  loanAmount: ["loan amount", "mortgage amount", "current loan amount"],
-  loanLender: ["lender name", "current lender", "loan originator"],
-  loanOriginationDate: ["loan origination date", "loan date", "mortgage date"],
-  loanMaturityDate: ["loan maturity date", "loan maturity", "mortgage maturity date"],
-  listingStatus: ["sale status", "for sale status", "status"],
+  ownerAddress: [
+    "true owner address", "owner address", "owner mailing address",
+    "owner 1 address", "true owner mailing address",
+  ],
+  ownerCity: [
+    "true owner city", "owner city", "owner mailing city",
+    "owner 1 city",
+  ],
+  ownerState: [
+    "true owner state", "owner state", "owner mailing state",
+    "owner 1 state",
+  ],
+  ownerZip: [
+    "true owner zip", "owner zip", "owner mailing zip", "owner 1 zip",
+  ],
+  lastSaleDate: [
+    "last sale date", "sale date", "recorded sale date",
+    "most recent sale date", "primary sale date",
+  ],
+  lastSalePrice: [
+    "last sale price", "sale price", "recorded sale price",
+    "most recent sale price", "primary sale price",
+  ],
+  estimatedValue: [
+    "estimated value", "market value", "true tax assessed value",
+    "assessed value", "appraised value",
+  ],
+  loanAmount: [
+    "loan amount", "mortgage amount", "current loan amount",
+    "primary loan amount", "primary mortgage amount",
+  ],
+  loanLender: [
+    "lender name", "current lender", "loan originator",
+    "primary lender", "primary loan lender",
+  ],
+  loanOriginationDate: [
+    "loan origination date", "loan date", "mortgage date",
+    "primary loan date", "loan recorded date",
+  ],
+  loanMaturityDate: [
+    "loan maturity date", "loan maturity", "mortgage maturity date",
+    "primary loan maturity",
+  ],
+  listingStatus: [
+    "sale status", "for sale status", "status",
+    "for sale", "for lease",
+  ],
 };
 
 // ── PropStream field aliases ──────────────────────────────────────────────
