@@ -352,34 +352,23 @@ export async function POST(req: NextRequest) {
       let signalCount = 0;
 
       if (!dryRun) {
-        // ── Phase 4a: bulk insert new properties ─────────────────────────
+        // ── Phase 4a: bulk insert new properties (with row-by-row fallback) ──
         if (inserts.length > 0) {
           for (let i = 0; i < inserts.length; i += 100) {
             const chunk = inserts.slice(i, i + 100);
-            // Strip the helper sidecar fields before insert
             const cleanChunk = chunk.map((c) => {
               const { __new_flags__, __raw_row__, ...rest } = c as Record<string, unknown>;
               void __new_flags__; void __raw_row__;
               return rest;
             });
-            const { data: insData, error: insErr } = await supabase
-              .from("properties")
-              .insert(cleanChunk)
-              .select("id, apn, address, state");
-            if (insErr) {
-              errors.push(`Bulk insert chunk ${i}-${i + chunk.length}: ${insErr.message}`);
-            } else {
-              created += chunk.length;
-              // Stitch signals to the new IDs by re-matching APN+state
-              const insertedRows = (insData ?? []) as Array<{ id: string; apn: string | null; address: string | null; state: string | null }>;
-              for (let j = 0; j < chunk.length; j++) {
-                const original = chunk[j];
+
+            const tryStitch = (insertedRows: Array<{ id: string }>, originals: Record<string, unknown>[]) => {
+              for (let j = 0; j < originals.length; j++) {
+                const original = originals[j];
                 const flags = (original.__new_flags__ as string[]) ?? [];
                 const rawRow = (original.__raw_row__ as Record<string, unknown>) ?? {};
-                if (flags.length === 0) continue;
-                // The j-th inserted row corresponds to the j-th chunk row
                 const insertedId = insertedRows[j]?.id;
-                if (!insertedId) continue;
+                if (!insertedId || flags.length === 0) continue;
                 for (const flag of flags) {
                   signalRows.push({
                     organization_id: ORG_ID,
@@ -392,6 +381,43 @@ export async function POST(req: NextRequest) {
                     source_detail: laneTag ?? file.name,
                     raw_data: rawRow,
                   });
+                }
+              }
+            };
+
+            const { data: insData, error: insErr } = await supabase
+              .from("properties")
+              .insert(cleanChunk)
+              .select("id");
+            if (!insErr) {
+              created += chunk.length;
+              tryStitch((insData ?? []) as Array<{ id: string }>, chunk);
+              continue;
+            }
+            errors.push(
+              `Chunk ${i}-${i + chunk.length} bulk insert failed (${insErr.message}); retrying row-by-row`
+            );
+            for (let j = 0; j < chunk.length; j += 25) {
+              const rowBatchOrig = chunk.slice(j, j + 25);
+              const rowBatchClean = cleanChunk.slice(j, j + 25);
+              const results = await Promise.all(
+                rowBatchClean.map((row, k) =>
+                  supabase
+                    .from("properties")
+                    .insert(row)
+                    .select("id")
+                    .single()
+                    .then((r) => ({ original: rowBatchOrig[k], data: r.data, error: r.error }))
+                )
+              );
+              for (const r of results) {
+                if (r.error || !r.data) {
+                  const apn = (r.original as Record<string, unknown>).apn;
+                  const addr = (r.original as Record<string, unknown>).address;
+                  errors.push(`Row [APN=${apn ?? "—"} addr=${addr ?? "—"}]: ${r.error?.message ?? "insert returned no row"}`);
+                } else {
+                  created++;
+                  tryStitch([{ id: r.data.id as string }], [r.original]);
                 }
               }
             }

@@ -128,41 +128,113 @@ export function asBoolean(v: unknown): boolean | null {
 
 // ── Asset-type normalization ──────────────────────────────────────────────
 
+/**
+ * Map raw CoStar / PropStream asset-type strings to the values our
+ * properties.asset_type CHECK constraint accepts. Keys are post-`normalize()`
+ * (lowercase + alphanumeric only) so "Health Care", "HEALTH-CARE", and
+ * "health_care" all match the same key `healthcare`.
+ *
+ * Anything unmapped falls through to 'other' rather than the raw input —
+ * critical for CoStar exports, which use long-tail subcategories ("Sports
+ * & Entertainment", "Distribution Warehouse", etc.) that the constraint
+ * rejects.
+ */
 const ASSET_TYPE_MAP: Record<string, string> = {
+  // Multifamily
   multifamily: "multifamily",
-  multi_family: "multifamily",
+  multifamily7: "multifamily",
+  multifamilyhouse: "multifamily",
   apartment: "multifamily",
   apartments: "multifamily",
+  garden: "multifamily",
+  highrise: "multifamily",
+  midrise: "multifamily",
+  studenthousing: "multifamily",
+  seniorhousing: "multifamily",
+  // Retail
   retail: "retail",
-  shopping_center: "retail",
-  strip_center: "retail",
+  shoppingcenter: "retail",
+  stripcenter: "retail",
+  freestanding: "retail",
+  restaurant: "retail",
+  fastfood: "retail",
+  bigbox: "retail",
+  conveniencestore: "retail",
+  generalretail: "retail",
+  storefront: "retail",
+  // Industrial
   industrial: "industrial",
   warehouse: "industrial",
+  distributionwarehouse: "industrial",
   flex: "industrial",
+  flexrd: "industrial",
   manufacturing: "industrial",
+  rd: "industrial",
+  truckterminal: "industrial",
+  refrigerationcoldstorage: "industrial",
+  servicemaintenance: "industrial",
+  // Office
   office: "office",
-  medicaloffice: "office",
+  creativeloftoffice: "office",
+  governmentoffice: "office",
+  // Medical
+  medical: "medical",
+  healthcare: "medical",
+  medicaloffice: "medical",
+  // Hospitality
   hospitality: "hospitality",
   hotel: "hospitality",
   motel: "hospitality",
+  resort: "hospitality",
+  // Self storage
   selfstorage: "self_storage",
   storage: "self_storage",
+  // Mixed use
   mixeduse: "mixed_use",
-  mixed_use: "mixed_use",
-  specialpurpose: "special_use",
-  specialty: "special_use",
+  // Land
   land: "land",
   vacantland: "land",
   agricultural: "land",
-  health_care: "medical",
-  medical: "medical",
+  rawland: "land",
+  // Special use — anything else CoStar tags as a non-mainstream type
+  specialpurpose: "special_use",
+  specialty: "special_use",
+  sports: "special_use",
+  sportsentertainment: "special_use",
+  entertainment: "special_use",
+  religious: "special_use",
+  church: "special_use",
+  school: "special_use",
+  education: "special_use",
+  daycare: "special_use",
+  parking: "special_use",
+  parkinggarage: "special_use",
+  marina: "special_use",
+  golf: "special_use",
+  golfcourse: "special_use",
+  funeralhome: "special_use",
+  cemetery: "special_use",
+  auto: "special_use",
+  autoservice: "special_use",
+  carwash: "special_use",
+  servicestation: "special_use",
+  gasstation: "special_use",
+  theater: "special_use",
+  theatre: "special_use",
 };
 
 export function normalizeAssetType(v: unknown): string | null {
   const s = asString(v);
   if (!s) return null;
   const k = normalize(s);
-  return ASSET_TYPE_MAP[k] ?? s.toLowerCase();
+  // Direct hit
+  if (ASSET_TYPE_MAP[k]) return ASSET_TYPE_MAP[k];
+  // Substring fallback — handles "Office Building", "Industrial Park", etc.
+  for (const key of Object.keys(ASSET_TYPE_MAP)) {
+    if (k.includes(key)) return ASSET_TYPE_MAP[key];
+  }
+  // Unmapped — keep the row, but tag as 'other' so it satisfies the constraint
+  return "other";
 }
 
 // ── Owner-type heuristic ──────────────────────────────────────────────────

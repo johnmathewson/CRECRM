@@ -308,16 +308,38 @@ export async function POST(req: NextRequest) {
       let updated = 0;
 
       if (!dryRun) {
-        // ── Phase 4a: bulk insert ────────────────────────────────────────
+        // ── Phase 4a: bulk insert with row-by-row fallback ──────────────
+        // Postgres rolls back the entire chunk on any constraint violation.
+        // If the chunk fails, retry rows individually so one bad row can't
+        // kill 199 good ones. The retry is parallel-batched.
         if (inserts.length > 0) {
-          // Insert in chunks of 200 to stay under any per-statement limits
           for (let i = 0; i < inserts.length; i += 200) {
             const chunk = inserts.slice(i, i + 200);
             const { error: insErr } = await supabase.from("properties").insert(chunk);
-            if (insErr) {
-              errors.push(`Bulk insert chunk ${i}-${i + chunk.length}: ${insErr.message}`);
-            } else {
+            if (!insErr) {
               inserted += chunk.length;
+              continue;
+            }
+            // Chunk failed — retry one row at a time, in parallel batches
+            errors.push(
+              `Chunk ${i}-${i + chunk.length} bulk insert failed (${insErr.message}); retrying row-by-row`
+            );
+            for (let j = 0; j < chunk.length; j += 25) {
+              const rowBatch = chunk.slice(j, j + 25);
+              const results = await Promise.all(
+                rowBatch.map((row) =>
+                  supabase.from("properties").insert(row).then((r) => ({ row, error: r.error }))
+                )
+              );
+              for (const r of results) {
+                if (r.error) {
+                  const apn = (r.row as Record<string, unknown>).apn;
+                  const addr = (r.row as Record<string, unknown>).address;
+                  errors.push(`Row [APN=${apn ?? "—"} addr=${addr ?? "—"}]: ${r.error.message}`);
+                } else {
+                  inserted++;
+                }
+              }
             }
           }
         }
