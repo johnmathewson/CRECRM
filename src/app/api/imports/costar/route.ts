@@ -65,8 +65,9 @@ export async function POST(req: NextRequest) {
     );
 
     let jobId: string | null = null;
+    let jobInsertWarning: string | null = null;
     if (!dryRun) {
-      const { data: job } = await supabase
+      const { data: job, error: jobErr } = await supabase
         .from("import_jobs")
         .insert({
           organization_id: ORG_ID,
@@ -77,6 +78,7 @@ export async function POST(req: NextRequest) {
         })
         .select("id")
         .single();
+      if (jobErr) jobInsertWarning = `import_jobs insert: ${jobErr.message}`;
       jobId = job?.id ?? null;
     }
 
@@ -382,6 +384,7 @@ export async function POST(req: NextRequest) {
       totalUpdated,
       totalSkipped,
       fileResults,
+      ...(jobInsertWarning ? { warning: jobInsertWarning } : {}),
     });
   } catch (err) {
     console.error("CoStar import error:", err);
