@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
           organization_id: ORG_ID,
           source: "costar",
           source_detail: files.map((f) => f.name).join(", "),
-          status: "running",
+          status: "processing",
           started_at: new Date().toISOString(),
         })
         .select("id")
@@ -366,7 +366,7 @@ export async function POST(req: NextRequest) {
       await supabase
         .from("import_jobs")
         .update({
-          status: "complete",
+          status: "completed",
           total_records: totalParsed,
           processed_records: totalInserted + totalUpdated,
           failed_records: totalSkipped,

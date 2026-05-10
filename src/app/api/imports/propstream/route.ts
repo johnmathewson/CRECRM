@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
           organization_id: ORG_ID,
           source: "propstream",
           source_detail: `${files.map((f) => f.name).join(", ")}${laneTag ? " · " + laneTag : ""}`,
-          status: "running",
+          status: "processing",
           started_at: new Date().toISOString(),
         })
         .select("id")
@@ -454,7 +454,7 @@ export async function POST(req: NextRequest) {
       await supabase
         .from("import_jobs")
         .update({
-          status: "complete",
+          status: "completed",
           total_records: totalParsed,
           processed_records: totalMatched + totalCreated,
           failed_records: totalSkipped,
