@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/cre-os/AppShell";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { Panel } from "@/components/cre-os/Panel";
+import { SendTouchDialog } from "@/components/cre-os/prospector/SendTouchDialog";
 import type { RailSection } from "@/components/cre-os/InsightsRail";
 import type {
   InboxSnapshot,
@@ -59,6 +60,7 @@ export function ProspectorInboxView({
   const [selected, setSelected] = useState<InboxTouch | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [searchInput, setSearchInput] = useState(activeFilters.q ?? "");
+  const [composeOpen, setComposeOpen] = useState(false);
 
   // Live refresh — pulls fresh snapshot every 30s while the page is open.
   useEffect(() => {
@@ -145,16 +147,27 @@ export function ProspectorInboxView({
   return (
     <AppShell rail={rail}>
       <div className="space-y-5">
-        <header>
-          <Eyebrow tone="coral">Prospector · Inbox</Eyebrow>
-          <Link href="/cre-os/prospector" className="mt-1 inline-block font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle hover:text-cream">
-            ← Back to Prospector
-          </Link>
-          <h1 className="mt-1 font-display font-medium text-2xl text-cream">Agent's outbound + replies</h1>
-          <p className="mt-2 font-heading text-[13px] text-cream-dim leading-relaxed max-w-3xl">
-            Every cadence touch the agent has sent — and every reply that's come back. Replies still
-            land on the property timeline; this view lets you see the stream live before drilling in.
-          </p>
+        <header className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <Eyebrow tone="coral">Prospector · Inbox</Eyebrow>
+            <Link href="/cre-os/prospector" className="mt-1 inline-block font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle hover:text-cream">
+              ← Back to Prospector
+            </Link>
+            <h1 className="mt-1 font-display font-medium text-2xl text-cream">Agent's outbound + replies</h1>
+            <p className="mt-2 font-heading text-[13px] text-cream-dim leading-relaxed max-w-3xl">
+              Every cadence touch the agent has sent — and every reply that's come back. Replies still
+              land on the property timeline; this view lets you see the stream live before drilling in.
+            </p>
+          </div>
+          <button
+            onClick={() => setComposeOpen(true)}
+            className="shrink-0 px-4 py-2.5 rounded border border-coral-400/40 bg-coral-400/[0.12] hover:bg-coral-400/[0.20] font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-coral-300 flex items-center gap-2"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" className="w-4 h-4">
+              <path d="M12 4v16M4 12h16" strokeLinecap="round" />
+            </svg>
+            Compose
+          </button>
         </header>
 
         {/* Filter chips */}
@@ -238,6 +251,11 @@ export function ProspectorInboxView({
         {/* Detail drawer (below the list rather than side-by-side, for simplicity) */}
         {selected && <TouchDetailPanel touch={selected} onClose={() => setSelected(null)} />}
       </div>
+
+      <SendTouchDialog
+        open={composeOpen}
+        onClose={() => setComposeOpen(false)}
+      />
     </AppShell>
   );
 }
