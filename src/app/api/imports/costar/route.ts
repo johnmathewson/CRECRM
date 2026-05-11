@@ -30,6 +30,7 @@ import {
   inferOwnerType,
   normalizeAddress,
   makeSlug,
+  parseCityStateZip,
   COSTAR_ALIASES,
 } from "@/lib/cre-os/import-helpers";
 
@@ -141,6 +142,7 @@ export async function POST(req: NextRequest) {
       for (let idx = 0; idx < rows.length; idx++) {
         const row = rows[idx];
         try {
+          // ── Identifiers ────────────────────────────────────────────────
           const apn = asString(getCell(row, headers, A.apn));
           const address = asString(getCell(row, headers, A.address));
           const city = asString(getCell(row, headers, A.city));
@@ -148,37 +150,118 @@ export async function POST(req: NextRequest) {
           const zip = asString(getCell(row, headers, A.zip));
           const county = asString(getCell(row, headers, A.county));
           const name = asString(getCell(row, headers, A.name)) ?? address ?? `Parcel ${apn ?? idx + 1}`;
+
+          if (!apn && !address) continue;
+
+          // ── Property core ─────────────────────────────────────────────
           const assetType = normalizeAssetType(getCell(row, headers, A.assetType));
           const subType = asString(getCell(row, headers, A.subType));
-          const sqft = asInteger(getCell(row, headers, A.sqft));
+          // sqft prefers RBA but falls back to Land Area (SF) for land
+          let sqft = asInteger(getCell(row, headers, A.sqft));
+          if (sqft == null) sqft = asInteger(getCell(row, headers, A.landAreaSf));
           const acreage = asNumber(getCell(row, headers, A.acreage));
           const yearBuilt = asInteger(getCell(row, headers, A.yearBuilt));
           const units = asInteger(getCell(row, headers, A.units));
+          const rooms = asInteger(getCell(row, headers, A.rooms));
+
+          // ── Owners — three variants ───────────────────────────────────
+          // Standard owner (LLC name as recorded)
           const ownerName = asString(getCell(row, headers, A.ownerName));
+          const ownerPhone = asString(getCell(row, headers, A.ownerPhone));
+          const ownerContact = asString(getCell(row, headers, A.ownerContact));
           const ownerAddress = asString(getCell(row, headers, A.ownerAddress));
-          const ownerCity = asString(getCell(row, headers, A.ownerCity));
-          const ownerState = normalizeState(getCell(row, headers, A.ownerState));
-          const ownerZip = asString(getCell(row, headers, A.ownerZip));
+          const ownerCSZ = parseCityStateZip(getCell(row, headers, A.ownerCityStateZip));
+
+          // True Owner (CoStar's LLC unmask)
+          const trueOwnerName = asString(getCell(row, headers, A.trueOwnerName));
+          const trueOwnerPhone = asString(getCell(row, headers, A.trueOwnerPhone));
+          const trueOwnerContact = asString(getCell(row, headers, A.trueOwnerContact));
+          const trueOwnerAddress = asString(getCell(row, headers, A.trueOwnerAddress));
+          const trueOwnerCSZ = parseCityStateZip(getCell(row, headers, A.trueOwnerCityStateZip));
+
+          // Recorded owner (third variant)
+          const recordedOwnerName = asString(getCell(row, headers, A.recordedOwnerName));
+          const recordedOwnerPhone = asString(getCell(row, headers, A.recordedOwnerPhone));
+          const recordedOwnerAddress = asString(getCell(row, headers, A.recordedOwnerAddress));
+
+          // ── Sale history ───────────────────────────────────────────────
           const lastSaleDate = asDate(getCell(row, headers, A.lastSaleDate));
           const lastSalePrice = asNumber(getCell(row, headers, A.lastSalePrice));
-          const estimatedValue = asNumber(getCell(row, headers, A.estimatedValue));
-          const loanLender = asString(getCell(row, headers, A.loanLender));
-          const loanOrigDate = asDate(getCell(row, headers, A.loanOriginationDate));
-          const loanMatDate = asDate(getCell(row, headers, A.loanMaturityDate));
-          const loanAmount = asNumber(getCell(row, headers, A.loanAmount));
-
-          if (!apn && !address) continue; // unprocessable row, silently skip
-
           let yearsOwned: number | null = null;
           if (lastSaleDate) {
             const yrs = (Date.now() - new Date(lastSaleDate).getTime()) / (1000 * 3600 * 24 * 365.25);
             if (Number.isFinite(yrs) && yrs >= 0) yearsOwned = Math.floor(yrs);
           }
 
-          const ownerType = inferOwnerType(ownerName);
+          // ── Loan / debt ────────────────────────────────────────────────
+          const loanMatDate = asDate(getCell(row, headers, A.loanMaturityDate));
+          const loanOrigDate = asDate(getCell(row, headers, A.loanOriginationDate));
+          const loanAmount = asNumber(getCell(row, headers, A.loanAmount));
+          const loanLender = asString(getCell(row, headers, A.loanLender));
+          const loanInterestRate = asNumber(getCell(row, headers, A.loanInterestRate));
+          const loanInterestRateType = asString(getCell(row, headers, A.loanInterestRateType));
+          const loanType = asString(getCell(row, headers, A.loanType));
+          const loanCollateralType = asString(getCell(row, headers, A.loanCollateralType));
+
+          // ── Listing state ──────────────────────────────────────────────
+          const forSalePrice = asNumber(getCell(row, headers, A.forSalePrice));
+          const forSaleStatus = asString(getCell(row, headers, A.forSaleStatus));
+          const daysOnMarket = asInteger(getCell(row, headers, A.daysOnMarket));
+
+          // ── Performance ────────────────────────────────────────────────
+          const capRate = asNumber(getCell(row, headers, A.capRate));
+          const percentLeased = asNumber(getCell(row, headers, A.percentLeased));
+          const vacancyPct = asNumber(getCell(row, headers, A.vacancyPct));
+          const rentPerSfYr = asNumber(getCell(row, headers, A.rentPerSfYr));
+
+          // ── Building / market ──────────────────────────────────────────
+          const buildingClass = asString(getCell(row, headers, A.buildingClass));
+          const marketName = asString(getCell(row, headers, A.marketName));
+          const submarket = asString(getCell(row, headers, A.submarket));
+          const submarketCluster = asString(getCell(row, headers, A.submarketCluster));
+          const tenancy = asString(getCell(row, headers, A.tenancy));
+          const totalBuildings = asInteger(getCell(row, headers, A.totalBuildings));
+          const numberOfStories = asInteger(getCell(row, headers, A.numberOfStories));
+          const zoning = asString(getCell(row, headers, A.zoning));
+
+          // ── Tax ────────────────────────────────────────────────────────
+          const taxYear = asInteger(getCell(row, headers, A.taxYear));
+          const taxTotal = asNumber(getCell(row, headers, A.taxTotal));
+          const taxPerSf = asNumber(getCell(row, headers, A.taxPerSf));
+
+          // ── Service contacts ──────────────────────────────────────────
+          const propertyManagerName = asString(getCell(row, headers, A.propertyManagerName));
+          const propertyManagerPhone = asString(getCell(row, headers, A.propertyManagerPhone));
+          const propertyManagerAddress = asString(getCell(row, headers, A.propertyManagerAddress));
+          const salesCompanyName = asString(getCell(row, headers, A.salesCompanyName));
+          const salesContactName = asString(getCell(row, headers, A.salesContactName));
+          const salesContactPhone = asString(getCell(row, headers, A.salesContactPhone));
+          const leasingCompanyName = asString(getCell(row, headers, A.leasingCompanyName));
+          const leasingContactName = asString(getCell(row, headers, A.leasingContactName));
+          const leasingContactPhone = asString(getCell(row, headers, A.leasingContactPhone));
+
+          // ── Hospitality-specific ───────────────────────────────────────
+          const hotelBrand = asString(getCell(row, headers, A.hotelBrand));
+          const hotelClass = asString(getCell(row, headers, A.hotelClass));
+
+          // ── Geo ────────────────────────────────────────────────────────
+          const latitude = asNumber(getCell(row, headers, A.latitude));
+          const longitude = asNumber(getCell(row, headers, A.longitude));
+
+          // ── Best-of owner identity ────────────────────────────────────
+          // Prefer True Owner (unmasked) when present, else fall back to Owner.
+          const primaryOwnerName = trueOwnerName ?? ownerName ?? recordedOwnerName ?? null;
+          const ownerType = inferOwnerType(primaryOwnerName);
+          // owner_state used for lane filters — prefer the True Owner's state
+          // since that's the actual decision-maker location.
+          const primaryOwnerState =
+            normalizeState(trueOwnerCSZ.state ?? null)
+            ?? normalizeState(ownerCSZ.state ?? null)
+            ?? null;
 
           const payload: Record<string, unknown> = {
             organization_id: ORG_ID,
+            // Identifiers
             apn: apn ?? null,
             name,
             address: address ?? null,
@@ -186,33 +269,96 @@ export async function POST(req: NextRequest) {
             state,
             zip: zip ?? null,
             county: county ?? null,
+            // Property core
             asset_type: assetType,
             sub_type: subType,
             sqft,
             acreage,
             year_built: yearBuilt,
             units,
-            owner_name_raw: ownerName,
+            rooms,
+            zoning,
+            // Owner (primary — populated for legacy code paths)
+            owner_name_raw: primaryOwnerName,
             owner_type: ownerType,
-            owner_state: ownerState,
-            owner_mailing_address: ownerAddress,
-            owner_mailing_city: ownerCity,
-            owner_mailing_state: ownerState,
-            owner_mailing_zip: ownerZip,
+            owner_state: primaryOwnerState,
+            owner_mailing_address: trueOwnerAddress ?? ownerAddress ?? null,
+            owner_mailing_city: trueOwnerCSZ.city ?? ownerCSZ.city ?? null,
+            owner_mailing_state: trueOwnerCSZ.state ?? ownerCSZ.state ?? null,
+            owner_mailing_zip: trueOwnerCSZ.zip ?? ownerCSZ.zip ?? null,
+            owner_phone: ownerPhone,
+            owner_contact_name: ownerContact,
+            // True Owner (LLC unmask)
+            true_owner_name: trueOwnerName,
+            true_owner_phone: trueOwnerPhone,
+            true_owner_contact_name: trueOwnerContact,
+            true_owner_address: trueOwnerAddress,
+            true_owner_city: trueOwnerCSZ.city,
+            true_owner_state: trueOwnerCSZ.state,
+            true_owner_zip: trueOwnerCSZ.zip,
+            // Recorded owner
+            recorded_owner_name: recordedOwnerName,
+            recorded_owner_phone: recordedOwnerPhone,
+            recorded_owner_address: recordedOwnerAddress,
+            // Sale history
             last_sale_date: lastSaleDate,
             last_sale_price: lastSalePrice,
             years_owned: yearsOwned,
-            estimated_value: estimatedValue,
-            mortgage_lender: loanLender,
+            // Loan
             mortgage_origination_date: loanOrigDate,
             mortgage_maturity_date: loanMatDate,
             mortgage_balance: loanAmount,
+            mortgage_lender: loanLender,
+            loan_interest_rate: loanInterestRate,
+            loan_interest_rate_type: loanInterestRateType,
+            loan_type: loanType,
+            loan_collateral_type: loanCollateralType,
+            loan_originator: loanLender,
+            // Listing state
+            for_sale_price: forSalePrice,
+            for_sale_status: forSaleStatus,
+            days_on_market: daysOnMarket,
+            // Performance
+            cap_rate: capRate,
+            percent_leased: percentLeased,
+            vacancy_pct: vacancyPct,
+            occupancy_pct: percentLeased,
+            rent_per_sf_yr: rentPerSfYr,
+            // Building / market
+            building_class: buildingClass,
+            market_name: marketName,
+            submarket: submarket,
+            submarket_cluster: submarketCluster,
+            tenancy,
+            total_buildings: totalBuildings,
+            number_of_stories: numberOfStories,
+            // Tax
+            tax_year: taxYear,
+            tax_total: taxTotal,
+            tax_per_sf: taxPerSf,
+            // Service contacts
+            property_manager_name: propertyManagerName,
+            property_manager_phone: propertyManagerPhone,
+            property_manager_address: propertyManagerAddress,
+            sales_company_name: salesCompanyName,
+            sales_contact_name: salesContactName,
+            sales_contact_phone: salesContactPhone,
+            leasing_company_name: leasingCompanyName,
+            leasing_contact_name: leasingContactName,
+            leasing_contact_phone: leasingContactPhone,
+            // Hospitality
+            hotel_brand: hotelBrand,
+            hotel_class: hotelClass,
+            // Geo
+            latitude,
+            longitude,
+            // Provenance
             data_source: "costar",
             source_import: "costar_bulk",
           };
 
           prepared.push({
-            spreadsheetRow: idx + 2, // +2 because user-facing row 1 is the header
+            spreadsheetRow: idx + 2,
             apn,
             state,
             address,

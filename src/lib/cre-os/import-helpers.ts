@@ -333,112 +333,191 @@ export function normalizeState(v: unknown): string | null {
 // ── CoStar field aliases ──────────────────────────────────────────────────
 
 /**
- * CoStar column aliases. CoStar Property Search exports use varying
- * column names depending on the user's license tier and which fields
- * they pinned. The aliases below cover the common variants observed
- * in real exports + the ones documented in CoStar's export schema.
+ * CoStar column aliases — comprehensive map to the actual columns CoStar's
+ * Property Search export emits. Built from a real header audit of 37
+ * separate exports across all property types (Office, Industrial, Retail,
+ * Land, Hospitality, Healthcare, etc.).
  *
- * If your export has a column we don't recognize, look at the
- * `headers` array surfaced in the import response and add it to the
- * matching list here.
+ * Aliases are matched after both sides go through normalize() — lowercase +
+ * alphanumeric only. So "Maturity Date" matches "maturitydate" matches
+ * "MATURITY-DATE" all the same.
  */
 export const COSTAR_ALIASES = {
+  // ── Identifiers ──────────────────────────────────────────────────────────
   apn: [
+    // CoStar's actual column is "Parcel Number 1(Min)" — there's a second
+    // for "Parcel Number 2(Max)" for multi-parcel properties.
+    "parcel number 1 min", "parcel number 1(min)", "parcel number 1",
+    "parcel number 2 max", "parcel number 2(max)", "parcel number 2",
     "apn", "apn number", "parcel apn", "tax parcel apn",
-    "tax id", "tax id number", "tax id #", "tax #",
+    "tax id", "tax id number",
     "parcel id", "parcel id number", "parcel #", "parcel number",
-    "tax parcel id", "tax parcel number", "tax parcel #",
-    "assessor id", "assessor parcel number", "assessor's parcel number",
-    "property id", "primary parcel id", "primary apn",
+    "tax parcel id", "tax parcel number",
+    "assessor id", "assessor parcel number",
+    "property id", "propertyid",
   ],
-  name: [
-    "property name", "building name", "name", "primary property name",
-  ],
+  // ── Property core ────────────────────────────────────────────────────────
+  name: ["property name", "building name", "name"],
   address: [
-    "property address", "street address", "address", "location address",
-    "primary address", "site address",
+    "property address", "street address", "address", "primary address",
   ],
-  city: ["city", "property city", "site city"],
-  state: ["state", "property state", "site state"],
-  zip: ["zip", "zip code", "postal code", "property zip", "site zip"],
-  county: [
-    "county", "property county", "county name", "site county",
-    "primary county",
-  ],
+  city: ["city", "property city"],
+  state: ["state", "property state"],
+  zip: ["zip", "zip code", "postal code", "property zip"],
+  county: ["county name", "county", "property county"],
   assetType: [
-    "property type", "primary property type", "building type",
-    "asset type", "property type id",
+    "property type", "primary property type", "building type", "asset type",
   ],
   subType: [
-    "secondary type", "secondary property type", "property sub type",
-    "sub type", "subtype",
+    "secondary type", "secondary property type", "property sub type", "sub type",
   ],
+  // CoStar uses "RBA" for office/retail/industrial; "Land Area (SF)" for land;
+  // hospitality reports rooms separately. The importer picks per-row.
   sqft: [
-    "building sf", "bldg sf", "building square feet", "building size",
-    "rba", "rentable building area", "gross sf", "gross square feet",
-    "total building sf", "total building size",
+    "rba", "rentable building area", "building sf", "bldg sf",
+    "building square feet", "building size",
+    "gross sf", "total building sf",
   ],
   acreage: [
-    "land area (ac)", "land area", "lot size (ac)", "lot size",
-    "acreage", "acres",
+    "land area (ac)", "land area ac", "land area", "lot size (ac)",
+    "lot size ac", "acreage", "acres",
   ],
+  landAreaSf: ["land area (sf)", "land area sf"],
   yearBuilt: ["year built", "yr built"],
+  yearRenovated: ["year renovated", "yr renovated"],
   units: [
-    "number of units", "# of units", "unit count", "units",
-    "# of multifamily units", "total units",
+    "number of units", "# of units", "unit count", "units", "total units",
   ],
-  ownerName: [
-    "true owner name", "owner name", "primary owner name", "recorded owner",
-    "current owner", "owner 1 name", "true owner",
-  ],
-  ownerAddress: [
-    "true owner address", "owner address", "owner mailing address",
-    "owner 1 address", "true owner mailing address",
-  ],
-  ownerCity: [
-    "true owner city", "owner city", "owner mailing city",
-    "owner 1 city",
-  ],
-  ownerState: [
-    "true owner state", "owner state", "owner mailing state",
-    "owner 1 state",
-  ],
-  ownerZip: [
-    "true owner zip", "owner zip", "owner mailing zip", "owner 1 zip",
-  ],
-  lastSaleDate: [
-    "last sale date", "sale date", "recorded sale date",
-    "most recent sale date", "primary sale date",
-  ],
-  lastSalePrice: [
-    "last sale price", "sale price", "recorded sale price",
-    "most recent sale price", "primary sale price",
-  ],
-  estimatedValue: [
-    "estimated value", "market value", "true tax assessed value",
-    "assessed value", "appraised value",
-  ],
-  loanAmount: [
-    "loan amount", "mortgage amount", "current loan amount",
-    "primary loan amount", "primary mortgage amount",
-  ],
-  loanLender: [
-    "lender name", "current lender", "loan originator",
-    "primary lender", "primary loan lender",
-  ],
-  loanOriginationDate: [
-    "loan origination date", "loan date", "mortgage date",
-    "primary loan date", "loan recorded date",
-  ],
-  loanMaturityDate: [
-    "loan maturity date", "loan maturity", "mortgage maturity date",
-    "primary loan maturity",
-  ],
-  listingStatus: [
-    "sale status", "for sale status", "status",
-    "for sale", "for lease",
-  ],
+  rooms: ["rooms", "number of rooms", "# of rooms"],
+
+  // ── Owner (three variants in CoStar; True Owner is the LLC unmask) ──────
+  ownerName: ["owner name", "owner 1 name", "owner1 name"],
+  ownerAddress: ["owner address", "owner mailing address"],
+  ownerCityStateZip: ["owner city state zip", "owner city/state/zip"],
+  ownerPhone: ["owner phone"],
+  ownerContact: ["owner contact"],
+
+  trueOwnerName: ["true owner name", "true owner"],
+  trueOwnerAddress: ["true owner address", "true owner mailing address"],
+  trueOwnerCityStateZip: ["true owner city state zip", "true owner city/state/zip"],
+  trueOwnerPhone: ["true owner phone"],
+  trueOwnerContact: ["true owner contact"],
+
+  recordedOwnerName: ["recorded owner name", "recorded owner"],
+  recordedOwnerAddress: ["recorded owner address"],
+  recordedOwnerCityStateZip: ["recorded owner city state zip"],
+  recordedOwnerPhone: ["recorded owner phone"],
+
+  // ── Sale history ─────────────────────────────────────────────────────────
+  lastSaleDate: ["last sale date", "sale date"],
+  lastSalePrice: ["last sale price", "sale price"],
+
+  // ── Loan / debt ──────────────────────────────────────────────────────────
+  loanMaturityDate: ["maturity date", "loan maturity date", "loan maturity"],
+  loanOriginationDate: ["origination date", "loan origination date"],
+  loanAmount: ["origination amount", "loan amount", "mortgage amount"],
+  loanLender: ["originator", "lender name", "current lender", "loan originator"],
+  loanInterestRate: ["interest rate"],
+  loanInterestRateType: ["interest rate type"],
+  loanType: ["loan type"],
+  loanCollateralType: ["collateral type"],
+
+  // ── Listing state ────────────────────────────────────────────────────────
+  forSalePrice: ["for sale price"],
+  forSaleStatus: ["for sale status", "sale status"],
+  daysOnMarket: ["days on market"],
+
+  // ── Performance ──────────────────────────────────────────────────────────
+  capRate: ["cap rate"],
+  percentLeased: ["percent leased", "% leased"],
+  vacancyPct: ["vacancy %", "vacancy percent", "vacancy pct"],
+  rentPerSfYr: ["rent/sf/yr", "rent per sf per year", "asking rent"],
+
+  // ── Building / market ────────────────────────────────────────────────────
+  buildingClass: ["building class"],
+  marketName: ["market name", "market"],
+  submarket: ["submarket name", "submarket"],
+  submarketCluster: ["submarket cluster"],
+  tenancy: ["tenancy"],
+  totalBuildings: ["total buildings", "# of buildings"],
+  numberOfStories: ["number of stories", "stories", "# of stories"],
+
+  // ── Tax ──────────────────────────────────────────────────────────────────
+  taxYear: ["tax year"],
+  taxTotal: ["taxes total", "total taxes"],
+  taxPerSf: ["taxes per sf"],
+
+  // ── Service contacts (CoStar provides listing broker + manager) ─────────
+  propertyManagerName: ["property manager name"],
+  propertyManagerPhone: ["property manager phone"],
+  propertyManagerAddress: ["property manager address"],
+  salesCompanyName: ["sale company name", "sales company"],
+  salesContactName: ["sale company contact", "sales contact"],
+  salesContactPhone: ["sale company phone", "sales contact phone"],
+  leasingCompanyName: ["leasing company name"],
+  leasingContactName: ["leasing company contact"],
+  leasingContactPhone: ["leasing company phone"],
+
+  // ── Hospitality-specific (only populated for hotel rows) ─────────────────
+  hotelBrand: ["brand"],
+  hotelClass: ["hotel class", "scale"],
+
+  // ── Geographic precision ────────────────────────────────────────────────
+  latitude: ["latitude"],
+  longitude: ["longitude"],
+
+  // ── Zoning ──────────────────────────────────────────────────────────────
+  zoning: ["zoning"],
+
+  // ── Legacy alias keys (kept so older code keeps compiling) ──────────────
+  estimatedValue: ["estimated value", "market value", "assessed value"],
+  listingStatus: ["for sale status", "sale status"],
 };
+
+/**
+ * Parse CoStar's combined "City, ST Zip" field — e.g.
+ *   "CROWN POINT, IN 46307-2315"
+ *   "Indianapolis, IN 46201"
+ *   "Chicago, IL 60601"
+ * Returns city + state + zip separately. Returns nulls if unparseable.
+ */
+export function parseCityStateZip(v: unknown): {
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+} {
+  const s = asString(v);
+  if (!s) return { city: null, state: null, zip: null };
+
+  // Common shapes:
+  //   "CITY, ST ZIP"
+  //   "CITY, ST ZIP-EXT"
+  //   "CITY, ST"
+  //   "CITY ST ZIP" (no comma — rare)
+  const trimmed = s.trim();
+  const m = trimmed.match(/^(.+?),\s*([A-Z]{2})\s*(\d{5}(?:-\d{4})?)?$/i);
+  if (m) {
+    return {
+      city: m[1].trim() || null,
+      state: m[2]?.toUpperCase() || null,
+      zip: m[3] ? m[3].split("-")[0] : null,
+    };
+  }
+  // Fallback: try splitting on whitespace from the right
+  const parts = trimmed.split(/\s+/);
+  if (parts.length >= 3) {
+    const lastCandidate = parts[parts.length - 1];
+    const stateCandidate = parts[parts.length - 2];
+    if (/^\d{5}(-\d{4})?$/.test(lastCandidate) && /^[A-Z]{2}$/i.test(stateCandidate)) {
+      return {
+        city: parts.slice(0, -2).join(" ").replace(/,$/, "").trim() || null,
+        state: stateCandidate.toUpperCase(),
+        zip: lastCandidate.split("-")[0],
+      };
+    }
+  }
+  return { city: trimmed || null, state: null, zip: null };
+}
 
 // ── PropStream field aliases ──────────────────────────────────────────────
 

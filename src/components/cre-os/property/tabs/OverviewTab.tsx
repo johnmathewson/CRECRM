@@ -19,6 +19,13 @@ const fmtMoney = (n: number | null) => {
  * leads + linked deals stack on the right.
  */
 export function OverviewTab({ p }: { p: PropertyDetail }) {
+  // Show the CoStar-derived owner/loan/listing panel only when we have any
+  // of those fields populated (cold prospects mostly; warm assets may have
+  // a subset).
+  const hasOwnershipData = !!(p.trueOwnerName || p.ownerNameRaw || p.ownerPhone || p.trueOwnerPhone);
+  const hasLoanData = !!(p.mortgageMaturityDate || p.mortgageLender || p.mortgageBalance);
+  const hasMarketData = !!(p.forSaleStatus || p.daysOnMarket || p.percentLeased || p.buildingClass);
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <div className="lg:col-span-2 space-y-6">
@@ -34,6 +41,12 @@ export function OverviewTab({ p }: { p: PropertyDetail }) {
             </div>
           )}
         </Panel>
+
+        {(hasOwnershipData || hasLoanData || hasMarketData) && (
+          <Panel eyebrow="Ownership & debt" num={2} title="What CoStar knows">
+            <OwnerLoanPanel p={p} />
+          </Panel>
+        )}
 
         <Panel eyebrow="Key contacts" num={2} title="People on this asset">
           {p.keyContacts.length === 0 ? (
@@ -170,6 +183,163 @@ function KeyFactsGrid({ p }: { p: PropertyDetail }) {
           <div className="mt-0.5 font-heading text-[14px] text-cream">{v ?? <span className="text-cream-subtle">—</span>}</div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ── Owner / Loan / Market panel ─────────────────────────────────────────
+// Surfaces the rich CoStar-derived data (LLC unmask, debt, listing state,
+// market context) on the property workspace. Populated for cold prospects
+// from the CoStar import; partially populated for warm assets where the
+// CoStar fields were carried over.
+function OwnerLoanPanel({ p }: { p: PropertyDetail }) {
+  const refiYears = p.mortgageMaturityDate
+    ? (new Date(p.mortgageMaturityDate).getTime() - Date.now()) / (1000 * 3600 * 24 * 365.25)
+    : null;
+  return (
+    <div className="space-y-5">
+      {/* Owner */}
+      {(p.trueOwnerName || p.ownerNameRaw) && (
+        <section>
+          <Eyebrow tone="muted">Owner</Eyebrow>
+          <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {p.trueOwnerName && (
+              <OwnerCard
+                label="True Owner (LLC unmask)"
+                name={p.trueOwnerName}
+                contactName={p.trueOwnerContactName}
+                phone={p.trueOwnerPhone}
+                address={p.trueOwnerAddress}
+                city={p.trueOwnerCity}
+                state={p.trueOwnerState}
+                zip={p.trueOwnerZip}
+                tone="coral"
+              />
+            )}
+            {p.ownerNameRaw && p.ownerNameRaw !== p.trueOwnerName && (
+              <OwnerCard
+                label="Recorded Owner"
+                name={p.ownerNameRaw}
+                contactName={p.ownerContactName}
+                phone={p.ownerPhone}
+                address={p.ownerMailingAddress}
+                city={p.ownerMailingCity}
+                state={p.ownerMailingState}
+                zip={p.ownerMailingZip}
+              />
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* Debt */}
+      {(p.mortgageMaturityDate || p.mortgageLender || p.mortgageBalance) && (
+        <section>
+          <Eyebrow tone="muted">Debt</Eyebrow>
+          <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
+            <Fact label="Loan maturity" value={p.mortgageMaturityDate ? new Date(p.mortgageMaturityDate).toLocaleDateString() : null} tone={refiYears != null && refiYears < 2 ? "coral" : "default"} />
+            <Fact label="Refi window" value={refiYears != null ? `${refiYears.toFixed(1)} yrs` : null} tone={refiYears != null && refiYears < 2 ? "coral" : "default"} />
+            <Fact label="Origination" value={p.mortgageOriginationDate ? new Date(p.mortgageOriginationDate).toLocaleDateString() : null} />
+            <Fact label="Origination amount" value={p.mortgageBalance ? fmtMoney(p.mortgageBalance) : null} />
+            <Fact label="Lender" value={p.mortgageLender} />
+            <Fact label="Rate" value={p.loanInterestRate != null ? `${p.loanInterestRate}%` : null} />
+            <Fact label="Rate type" value={p.loanInterestRateType} />
+            <Fact label="Loan type" value={p.loanType} />
+          </div>
+        </section>
+      )}
+
+      {/* Listing / market */}
+      {(p.forSaleStatus || p.daysOnMarket != null || p.percentLeased != null || p.buildingClass) && (
+        <section>
+          <Eyebrow tone="muted">Listing & market</Eyebrow>
+          <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
+            <Fact label="For-sale status" value={p.forSaleStatus} tone="coral" />
+            <Fact label="For-sale price" value={p.forSalePrice ? fmtMoney(p.forSalePrice) : null} />
+            <Fact label="Days on market" value={p.daysOnMarket?.toString() ?? null} />
+            <Fact label="Last sale" value={p.lastSaleDate ? new Date(p.lastSaleDate).toLocaleDateString() : null} />
+            <Fact label="Last sale price" value={p.lastSalePrice ? fmtMoney(p.lastSalePrice) : null} />
+            <Fact label="Years held" value={p.yearsOwned != null ? `${p.yearsOwned}y` : null} />
+            <Fact label="% Leased" value={p.percentLeased != null ? `${p.percentLeased}%` : null} />
+            <Fact label="Vacancy" value={p.vacancyPct != null ? `${p.vacancyPct}%` : null} />
+            <Fact label="Bldg class" value={p.buildingClass} />
+            <Fact label="Tenancy" value={p.tenancy} />
+            <Fact label="Submarket" value={p.submarket} />
+            <Fact label="Market" value={p.marketName} />
+          </div>
+        </section>
+      )}
+
+      {/* Service contacts (property manager / listing broker on CoStar's record) */}
+      {(p.propertyManagerName || p.salesContactName || p.leasingContactName) && (
+        <section>
+          <Eyebrow tone="muted">Service contacts</Eyebrow>
+          <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {p.propertyManagerName && (
+              <ContactCard label="Property Mgr" name={p.propertyManagerName} phone={p.propertyManagerPhone} />
+            )}
+            {p.salesContactName && (
+              <ContactCard label="Sales Contact" name={p.salesContactName} phone={p.salesContactPhone} />
+            )}
+            {p.leasingContactName && (
+              <ContactCard label="Leasing Contact" name={p.leasingContactName} phone={p.leasingContactPhone} />
+            )}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function OwnerCard({
+  label, name, contactName, phone, address, city, state, zip, tone = "default",
+}: {
+  label: string;
+  name: string;
+  contactName?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+  tone?: "default" | "coral";
+}) {
+  const border = tone === "coral" ? "border-coral-400/30 bg-coral-400/[0.04]" : "border-white/[0.06] bg-white/[0.02]";
+  const labelColor = tone === "coral" ? "text-coral-300" : "text-cream-subtle";
+  return (
+    <div className={`rounded border ${border} p-3`}>
+      <div className={`font-mono text-[9.5px] uppercase tracking-eyebrow ${labelColor}`}>{label}</div>
+      <div className="mt-1 font-heading text-[13px] text-cream font-semibold">{name}</div>
+      {contactName && <div className="font-body text-[11.5px] text-cream-dim">c/o {contactName}</div>}
+      {phone && <div className="mt-1 font-mono text-[11px] text-teal-300">📞 {phone}</div>}
+      {(address || city || state || zip) && (
+        <div className="mt-1 font-body text-[11px] text-cream-subtle leading-snug">
+          {address && <div>{address}</div>}
+          <div>{[city, state, zip].filter(Boolean).join(", ")}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ContactCard({ label, name, phone }: { label: string; name: string; phone?: string | null }) {
+  return (
+    <div className="rounded border border-white/[0.05] bg-white/[0.02] p-3">
+      <div className="font-mono text-[9.5px] uppercase tracking-eyebrow text-cream-subtle">{label}</div>
+      <div className="mt-1 font-heading text-[12.5px] text-cream font-semibold truncate">{name}</div>
+      {phone && <div className="mt-0.5 font-mono text-[10.5px] text-teal-300">📞 {phone}</div>}
+    </div>
+  );
+}
+
+function Fact({ label, value, tone = "default" }: { label: string; value: string | null | undefined; tone?: "default" | "coral" }) {
+  const color = tone === "coral" ? "text-coral-300" : "text-cream";
+  return (
+    <div>
+      <div className="font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle">{label}</div>
+      <div className={`mt-0.5 font-heading text-[13px] ${color}`}>
+        {value ?? <span className="text-cream-subtle">—</span>}
+      </div>
     </div>
   );
 }

@@ -117,6 +117,29 @@ export interface ColdProperty {
   prospectorScore: number | null;
   /** Lanes this property is currently enrolled in (active only) */
   activeLanes: { id: string; name: string }[];
+
+  // New richer fields (CoStar full-extraction)
+  buildingClass: string | null;
+  submarket: string | null;
+  tenancy: string | null;
+  percentLeased: number | null;
+  capRate: number | null;
+  daysOnMarket: number | null;
+  forSaleStatus: string | null;
+  forSalePrice: number | null;
+  lastSaleDate: string | null;
+  lastSalePrice: number | null;
+  // Loan summary for at-a-glance
+  loanLender: string | null;
+  loanAmount: number | null;
+  loanInterestRate: number | null;
+  // True owner (LLC unmask)
+  trueOwnerName: string | null;
+  trueOwnerPhone: string | null;
+  trueOwnerState: string | null;
+  // Best-available phone (true owner > owner > prop manager > sales contact)
+  bestPhone: string | null;
+  bestPhoneSource: string | null;
 }
 
 export interface HotReply {
@@ -335,7 +358,13 @@ export async function loadColdInventory(filters: ColdInventoryFilters = {}): Pro
     id, slug, name, address, city, state, county, apn, asset_type, sub_type,
     sqft, units, year_built, estimated_value, owner_name_raw, owner_type,
     owner_state, years_owned, mortgage_maturity_date, prospector_signal_flags,
-    prospector_score
+    prospector_score,
+    building_class, submarket, tenancy, percent_leased, cap_rate,
+    days_on_market, for_sale_status, for_sale_price,
+    last_sale_date, last_sale_price,
+    mortgage_lender, mortgage_balance, loan_interest_rate,
+    true_owner_name, true_owner_phone, true_owner_state,
+    owner_phone, property_manager_phone, sales_contact_phone
   `, { count: "exact" })
     .eq("organization_id", ORG_ID)
     .eq("status", "prospect");
@@ -377,30 +406,63 @@ export async function loadColdInventory(filters: ColdInventoryFilters = {}): Pro
 
   return {
     total: count ?? 0,
-    rows: rows.map((r) => ({
-      id: r.id as string,
-      slug: (r.slug as string) ?? null,
-      name: (r.name as string) ?? null,
-      address: (r.address as string) ?? null,
-      city: (r.city as string) ?? null,
-      state: (r.state as string) ?? null,
-      county: (r.county as string) ?? null,
-      apn: (r.apn as string) ?? null,
-      assetType: (r.asset_type as string) ?? null,
-      subType: (r.sub_type as string) ?? null,
-      sqft: (r.sqft as number) ?? null,
-      units: (r.units as number) ?? null,
-      yearBuilt: (r.year_built as number) ?? null,
-      estimatedValue: (r.estimated_value as number) ?? null,
-      ownerNameRaw: (r.owner_name_raw as string) ?? null,
-      ownerType: (r.owner_type as string) ?? null,
-      ownerOutOfState: !!r.owner_state && r.owner_state !== r.state,
-      yearsOwned: (r.years_owned as number) ?? null,
-      mortgageMaturity: (r.mortgage_maturity_date as string) ?? null,
-      signalFlags: ((r.prospector_signal_flags as string[]) ?? []),
-      prospectorScore: (r.prospector_score as number) ?? null,
-      activeLanes: enrollmentMap.get(r.id as string) ?? [],
-    })),
+    rows: rows.map((r): ColdProperty => {
+      // Best phone: true owner > regular owner > property manager > sales contact
+      const trueOwnerPhone = (r.true_owner_phone as string) ?? null;
+      const ownerPhone = (r.owner_phone as string) ?? null;
+      const pmPhone = (r.property_manager_phone as string) ?? null;
+      const salesPhone = (r.sales_contact_phone as string) ?? null;
+      let bestPhone: string | null = null;
+      let bestPhoneSource: string | null = null;
+      if (trueOwnerPhone) { bestPhone = trueOwnerPhone; bestPhoneSource = "True Owner"; }
+      else if (ownerPhone) { bestPhone = ownerPhone; bestPhoneSource = "Owner"; }
+      else if (pmPhone) { bestPhone = pmPhone; bestPhoneSource = "Property Manager"; }
+      else if (salesPhone) { bestPhone = salesPhone; bestPhoneSource = "Sales Contact"; }
+
+      return {
+        id: r.id as string,
+        slug: (r.slug as string) ?? null,
+        name: (r.name as string) ?? null,
+        address: (r.address as string) ?? null,
+        city: (r.city as string) ?? null,
+        state: (r.state as string) ?? null,
+        county: (r.county as string) ?? null,
+        apn: (r.apn as string) ?? null,
+        assetType: (r.asset_type as string) ?? null,
+        subType: (r.sub_type as string) ?? null,
+        sqft: (r.sqft as number) ?? null,
+        units: (r.units as number) ?? null,
+        yearBuilt: (r.year_built as number) ?? null,
+        estimatedValue: (r.estimated_value as number) ?? null,
+        ownerNameRaw: (r.owner_name_raw as string) ?? null,
+        ownerType: (r.owner_type as string) ?? null,
+        ownerOutOfState: !!r.owner_state && r.owner_state !== r.state,
+        yearsOwned: (r.years_owned as number) ?? null,
+        mortgageMaturity: (r.mortgage_maturity_date as string) ?? null,
+        signalFlags: ((r.prospector_signal_flags as string[]) ?? []),
+        prospectorScore: (r.prospector_score as number) ?? null,
+        activeLanes: enrollmentMap.get(r.id as string) ?? [],
+        // New richer fields
+        buildingClass: (r.building_class as string) ?? null,
+        submarket: (r.submarket as string) ?? null,
+        tenancy: (r.tenancy as string) ?? null,
+        percentLeased: (r.percent_leased as number) ?? null,
+        capRate: (r.cap_rate as number) ?? null,
+        daysOnMarket: (r.days_on_market as number) ?? null,
+        forSaleStatus: (r.for_sale_status as string) ?? null,
+        forSalePrice: (r.for_sale_price as number) ?? null,
+        lastSaleDate: (r.last_sale_date as string) ?? null,
+        lastSalePrice: (r.last_sale_price as number) ?? null,
+        loanLender: (r.mortgage_lender as string) ?? null,
+        loanAmount: (r.mortgage_balance as number) ?? null,
+        loanInterestRate: (r.loan_interest_rate as number) ?? null,
+        trueOwnerName: (r.true_owner_name as string) ?? null,
+        trueOwnerPhone,
+        trueOwnerState: (r.true_owner_state as string) ?? null,
+        bestPhone,
+        bestPhoneSource,
+      };
+    }),
   };
 }
 
