@@ -126,6 +126,27 @@ export function LaneConfiguratorView({ lane, facets }: { lane: Lane; facets: Fac
     else alert("Delete failed");
   }
 
+  const [running, setRunning] = useState(false);
+  async function runCadence(dryRun: boolean) {
+    setRunning(true);
+    try {
+      const r = await fetch("/api/cron/run-cadence", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ laneId: lane.id, dryRun }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error ?? "Cadence run failed");
+      const note = dryRun ? "DRY RUN — no touches actually sent.\n\n" : "";
+      alert(`${note}Processed ${data.enrollmentsProcessed} enrollment(s)\nSent: ${data.touchesSent}\nQueued: ${data.touchesQueued}\nSkipped: ${data.touchesSkipped}\nExited: ${data.enrollmentsExited}${data.errors?.length ? "\nErrors:\n" + data.errors.slice(0, 5).join("\n") : ""}`);
+      router.refresh();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Cadence run failed");
+    } finally {
+      setRunning(false);
+    }
+  }
+
   const rail: RailSection[] = [
     {
       eyebrow: "Live preview",
@@ -141,13 +162,27 @@ export function LaneConfiguratorView({ lane, facets }: { lane: Lane; facets: Fac
             <div className="font-mono text-[9px] uppercase tracking-eyebrow text-cream-subtle">Currently enrolled</div>
             <div className="mt-1 font-display text-2xl text-cream tabular-nums">{lane.liveEnrolled}</div>
           </div>
-          <div className="pt-1 border-t border-white/[0.04]">
+          <div className="pt-1 border-t border-white/[0.04] space-y-1.5">
             <button
               onClick={enroll}
               disabled={enrolling || (preview?.count ?? 0) === 0}
               className="w-full px-3 py-2.5 lg:py-2 rounded border border-coral-400/40 bg-coral-400/[0.12] hover:bg-coral-400/[0.20] font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-coral-300 disabled:opacity-40"
             >
               {enrolling ? "Enrolling…" : `Enroll up to ${weeklyEnrollmentCap}`}
+            </button>
+            <button
+              onClick={() => runCadence(false)}
+              disabled={running || lane.liveEnrolled === 0}
+              className="w-full px-3 py-2.5 lg:py-2 rounded border border-white/[0.10] bg-white/[0.02] hover:bg-white/[0.06] font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-cream-dim hover:text-cream disabled:opacity-40"
+            >
+              {running ? "Running…" : "Run cadence now"}
+            </button>
+            <button
+              onClick={() => runCadence(true)}
+              disabled={running || lane.liveEnrolled === 0}
+              className="w-full px-3 py-1.5 rounded border border-white/[0.06] hover:bg-white/[0.03] font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle hover:text-cream disabled:opacity-40"
+            >
+              Dry-run (no sends)
             </button>
           </div>
         </div>

@@ -6,6 +6,7 @@ import { useState } from "react";
 import { AppShell } from "@/components/cre-os/AppShell";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { Panel } from "@/components/cre-os/Panel";
+import { SendTouchDialog } from "@/components/cre-os/prospector/SendTouchDialog";
 import type { ColdProperty } from "@/lib/cre-os/prospector-queries";
 
 interface Facets {
@@ -43,6 +44,7 @@ export function ColdInventoryView({
 }) {
   const router = useRouter();
   const [searchInput, setSearchInput] = useState(filters.q ?? "");
+  const [touchTarget, setTouchTarget] = useState<ColdProperty | null>(null);
 
   function applyFilter(patch: Partial<FilterState> & { page?: number }) {
     const next: Record<string, string> = {};
@@ -198,7 +200,13 @@ export function ColdInventoryView({
                           </div>
                         )}
                       </td>
-                      <td className="py-2.5 text-right">
+                      <td className="py-2.5 text-right whitespace-nowrap">
+                        <button
+                          onClick={() => setTouchTarget(p)}
+                          className="font-mono text-[10px] uppercase tracking-eyebrow text-cream-dim hover:text-coral-300 mr-3"
+                        >
+                          Send touch
+                        </button>
                         <Link
                           href={`/cre-os/properties/${p.slug ?? p.id}`}
                           className="font-mono text-[10px] uppercase tracking-eyebrow text-coral-300 hover:text-coral-200"
@@ -238,6 +246,19 @@ export function ColdInventoryView({
           )}
         </Panel>
       </div>
+
+      {touchTarget && (
+        <SendTouchDialog
+          property={{
+            id: touchTarget.id,
+            name: touchTarget.name,
+            address: touchTarget.address,
+            ownerNameRaw: touchTarget.ownerNameRaw,
+          }}
+          open={!!touchTarget}
+          onClose={() => setTouchTarget(null)}
+        />
+      )}
     </AppShell>
   );
 }

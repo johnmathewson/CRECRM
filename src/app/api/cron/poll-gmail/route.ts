@@ -27,6 +27,7 @@ import {
   extractBody,
   parseAddress,
 } from "@/lib/gmail";
+import { maybeRouteAsReply } from "@/lib/cre-os/match-reply-to-touch";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -143,6 +144,25 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
           if (fromEmail && fromEmail.toLowerCase() === token.email.toLowerCase()) continue;
 
           const { text, html } = extractBody(msg.payload);
+
+          // ── First try: is this a REPLY to a cadence touch the agent sent? ──
+          // If yes, route as reply (logs into lane_touches + flips enrollment
+          // to engaged + writes activity). If no, fall through to the normal
+          // unsolicited-lead intake path.
+          const replyResult = await maybeRouteAsReply(supabase, {
+            gmailMessageId: msg.id,
+            gmailThreadId: msg.threadId,
+            fromEmail,
+            fromName,
+            subject,
+            bodyText: text || "",
+            receivedAt: new Date().toISOString(),
+          });
+
+          if (replyResult.matched) {
+            dispatched += 1;
+            continue; // skip lead-intake — this was a reply
+          }
 
           const intakePayload = {
             source: "email",

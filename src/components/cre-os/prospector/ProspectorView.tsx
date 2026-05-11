@@ -58,8 +58,14 @@ export function ProspectorView({ snapshot }: { snapshot: ProspectorSnapshot }) {
       children: (
         <div className="space-y-1.5">
           <Link
-            href="/cre-os/settings/data-imports"
+            href="/cre-os/prospector/inbox"
             className="block px-3 py-2 rounded border border-coral-400/30 bg-coral-400/[0.05] hover:bg-coral-400/[0.10] font-body text-[11px] text-cream font-medium transition-colors"
+          >
+            Inbox · Agent stream →
+          </Link>
+          <Link
+            href="/cre-os/settings/data-imports"
+            className="block px-3 py-2 rounded border border-white/[0.08] bg-white/[0.02] hover:bg-white/[0.06] font-body text-[11px] text-cream-dim hover:text-cream transition-colors"
           >
             Upload CoStar / PropStream →
           </Link>
