@@ -187,6 +187,11 @@ export async function POST(req: NextRequest) {
             organization_id: ORG_ID,
             slug,
             status: "prospect",
+            // Cold inventory must never publish to the public marketing
+            // site. The properties.publish_to_website column defaults to
+            // TRUE — override so PropStream-discovered prospects don't
+            // leak onto stewardshipcre.com.
+            publish_to_website: false,
             apn,
             name,
             address,

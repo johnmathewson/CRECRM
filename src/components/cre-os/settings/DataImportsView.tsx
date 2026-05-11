@@ -135,14 +135,25 @@ export function DataImportsView({ jobs }: { jobs: Array<Record<string, unknown>>
         agg.currentFileName = f.name;
         setProgress({ ...agg });
 
-        const fd = new FormData();
-        fd.append("files", f);
-        for (const [k, v] of Object.entries(extra)) fd.append(k, v);
+        // Try up to 3 times for transient gateway errors (502 / 504).
+        // The function often DOES finish successfully and the response
+        // just drops in transit; retrying lands the same idempotent
+        // import. Real 4xx/5xx errors fail through immediately.
+        const attemptUpload = async (): Promise<Response> => {
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            const fdAttempt = new FormData();
+            fdAttempt.append("files", f);
+            for (const [k, v] of Object.entries(extra)) fdAttempt.append(k, v);
+            const resp = await fetch(endpoint, { method: "POST", body: fdAttempt });
+            if (resp.status !== 502 && resp.status !== 504) return resp;
+            if (attempt === 3) return resp;
+            // 1.2s, 2.4s backoff
+            await new Promise((res) => setTimeout(res, attempt * 1200));
+          }
+          throw new Error("upload retries exhausted");
+        };
 
-        const r = await fetch(endpoint, { method: "POST", body: fd });
-        // Always read body as text first, then try to JSON-parse — this
-        // way an HTML 500 from the runtime (e.g. function timeout) shows
-        // a useful message instead of "Unexpected token I…".
+        const r = await attemptUpload();
         const rawBody = await r.text();
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         let data: any;

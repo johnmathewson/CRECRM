@@ -346,6 +346,11 @@ export async function POST(req: NextRequest) {
             ...p.payload,
             slug: makeSlug(p.payload.name as string | null, p.address ?? p.apn ?? "prop"),
             status: "prospect",
+            // Critical: cold inventory must NEVER appear on the public
+            // marketing site. The properties.publish_to_website column
+            // defaults to TRUE, so without this override every CoStar
+            // prospect would publish itself.
+            publish_to_website: false,
           });
         }
       }
