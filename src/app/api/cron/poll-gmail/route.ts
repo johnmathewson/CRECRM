@@ -29,6 +29,21 @@ import {
 } from "@/lib/gmail";
 import { maybeRouteAsReply } from "@/lib/cre-os/match-reply-to-touch";
 
+// Walk a Gmail message payload tree looking for an attachment whose
+// filename matches the CREXi daily Lead Report pattern.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function hasLeadReportXlsx(payload: any): boolean {
+  if (!payload) return false;
+  const fn: string | undefined = payload.filename;
+  if (fn && /^Lead Report - .+\.xlsx$/i.test(fn)) return true;
+  if (Array.isArray(payload.parts)) {
+    for (const p of payload.parts) {
+      if (hasLeadReportXlsx(p)) return true;
+    }
+  }
+  return false;
+}
+
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
@@ -162,6 +177,29 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
           if (replyResult.matched) {
             dispatched += 1;
             continue; // skip lead-intake — this was a reply
+          }
+
+          // ── Second try: is this a CREXi daily Lead Report? ──
+          // Detected by attachment filename pattern "Lead Report - *.xlsx".
+          // If yes, route to the report parser instead of lead intake.
+          const hasCrexiReportAttachment = hasLeadReportXlsx(msg.payload);
+          if (hasCrexiReportAttachment) {
+            try {
+              const reportRes = await fetch(`${origin}/api/leads/crexi-report`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ gmail_message_id: msg.id }),
+              });
+              if (reportRes.ok) {
+                dispatched += 1;
+                continue;
+              }
+              // If report parse fails, fall through to normal lead intake
+              // so we don't drop the message entirely.
+              console.warn(`[poll-gmail] CREXi report parse failed for ${msg.id}, falling through to lead intake`);
+            } catch (err) {
+              console.error(`[poll-gmail] CREXi report dispatch error:`, err);
+            }
           }
 
           const intakePayload = {
