@@ -14,6 +14,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getActiveGmailToken } from "@/lib/gmail-auth";
+import * as XLSX from "xlsx";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -81,8 +82,9 @@ export async function GET(req: NextRequest) {
   }
   walk(msg.payload, "");
 
-  // Fetch each attachment that has an attachmentId — return first 2000
-  // chars of decoded content (for text formats) or just metadata for binary.
+  // Fetch each attachment that has an attachmentId. For XLSX files, parse
+  // and return the sheet structure + first rows so we can see what CREXi /
+  // LoopNet is actually sending.
   const attachments: Array<{
     filename: string;
     mimeType: string;
@@ -90,6 +92,14 @@ export async function GET(req: NextRequest) {
     preview: string | null;
     isText: boolean;
     firstBytesHex: string;
+    excel: null | {
+      sheetNames: string[];
+      sheets: Record<string, {
+        headers: string[];
+        rowCount: number;
+        sampleRows: Record<string, unknown>[];
+      }>;
+    };
   }> = [];
 
   for (const p of parts) {
@@ -108,6 +118,46 @@ export async function GET(req: NextRequest) {
       p.filename.endsWith(".csv") ||
       p.filename.endsWith(".tsv") ||
       p.filename.endsWith(".txt");
+
+    // Parse XLSX if applicable
+    let excel: null | {
+      sheetNames: string[];
+      sheets: Record<string, { headers: string[]; rowCount: number; sampleRows: Record<string, unknown>[] }>;
+    } = null;
+    if (p.filename.endsWith(".xlsx") || p.filename.endsWith(".xls")) {
+      try {
+        const wb = XLSX.read(buf, { type: "buffer" });
+        excel = { sheetNames: wb.SheetNames, sheets: {} };
+        for (const name of wb.SheetNames) {
+          const sheet = wb.Sheets[name];
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const matrix: any[][] = XLSX.utils.sheet_to_json(sheet, {
+            header: 1,
+            defval: null,
+            blankrows: false,
+          });
+          const headers = (matrix[0] ?? []).map((h: unknown) => String(h ?? "").trim());
+          const rows: Record<string, unknown>[] = [];
+          for (let i = 1; i < Math.min(matrix.length, 6); i++) {
+            const r = matrix[i];
+            if (!r) continue;
+            const obj: Record<string, unknown> = {};
+            for (let j = 0; j < headers.length; j++) obj[headers[j] || `col${j}`] = r[j];
+            rows.push(obj);
+          }
+          excel.sheets[name] = {
+            headers,
+            rowCount: matrix.length - 1,
+            sampleRows: rows,
+          };
+        }
+      } catch (err) {
+        excel = null;
+        // record failure separately if needed
+        console.error("XLSX parse failed:", err);
+      }
+    }
+
     attachments.push({
       filename: p.filename,
       mimeType: mime,
@@ -115,6 +165,7 @@ export async function GET(req: NextRequest) {
       preview: isText ? buf.toString("utf8").slice(0, 2000) : null,
       isText,
       firstBytesHex: buf.slice(0, 16).toString("hex"),
+      excel,
     });
   }
 
