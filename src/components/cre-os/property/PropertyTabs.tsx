@@ -11,9 +11,12 @@ import { PerformanceTab } from "./tabs/PerformanceTab";
 import { ActivityTab } from "./tabs/ActivityTab";
 import { OffersTab } from "./tabs/OffersTab";
 import { DocumentsTab } from "./tabs/DocumentsTab";
+import { LeadsTab } from "./tabs/LeadsTab";
+import type { PropertyLeadsSnapshot } from "@/lib/cre-os/property-leads-queries";
 
 const TABS = [
   { key: "overview",       label: "Overview" },
+  { key: "leads",          label: "Leads" },
   { key: "valuation",      label: "Valuation & Comps" },
   { key: "offers",         label: "Offers" },
   { key: "documents",      label: "Documents" },
@@ -28,7 +31,17 @@ type TabKey = (typeof TABS)[number]["key"];
  * tab renders its content below. Coral-underline active treatment matches
  * the editorial brand language.
  */
-export function PropertyTabs({ p, threads, perf }: { p: PropertyDetail; threads: ThreadSummary[]; perf: ListingPerformance }) {
+export function PropertyTabs({
+  p,
+  threads,
+  perf,
+  leads,
+}: {
+  p: PropertyDetail;
+  threads: ThreadSummary[];
+  perf: ListingPerformance;
+  leads?: PropertyLeadsSnapshot;
+}) {
   const [active, setActive] = useState<TabKey>("overview");
 
   return (
@@ -36,7 +49,10 @@ export function PropertyTabs({ p, threads, perf }: { p: PropertyDetail; threads:
       <div className="flex items-center gap-5 lg:gap-6 border-b border-white/[0.06] -mx-4 lg:-mx-1 px-4 lg:px-1 overflow-x-auto no-scrollbar">
         {TABS.map((t) => {
           const isActive = active === t.key;
-          const badge = t.key === "communications" && threads.length > 0 ? threads.length : null;
+          const badge =
+            t.key === "communications" && threads.length > 0 ? threads.length :
+            t.key === "leads" && leads && leads.totals.leadCount > 0 ? leads.totals.leadCount :
+            null;
           return (
             <button
               key={t.key}
@@ -59,6 +75,12 @@ export function PropertyTabs({ p, threads, perf }: { p: PropertyDetail; threads:
 
       <div className="mt-6">
         {active === "overview" && <OverviewTab p={p} />}
+        {active === "leads" && leads && <LeadsTab snapshot={leads} propertyId={p.id} propertyName={p.name} />}
+        {active === "leads" && !leads && (
+          <p className="font-body text-[12.5px] text-cream-subtle py-10 text-center italic">
+            Lead data unavailable for this property.
+          </p>
+        )}
         {active === "valuation" && <ValuationTab p={p} />}
         {active === "offers" && <OffersTab p={p} />}
         {active === "documents" && <DocumentsTab p={p} />}

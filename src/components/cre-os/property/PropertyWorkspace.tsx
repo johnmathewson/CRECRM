@@ -8,6 +8,7 @@ import { PropertyTabs } from "./PropertyTabs";
 import type { PropertyDetail } from "@/lib/cre-os/property-queries";
 import type { ThreadSummary } from "@/lib/cre-os/communications-queries";
 import type { ListingPerformance } from "@/lib/cre-os/listing-perf-queries";
+import type { PropertyLeadsSnapshot } from "@/lib/cre-os/property-leads-queries";
 
 /**
  * PropertyWorkspace — the full single-property page. Stack:
@@ -18,7 +19,17 @@ import type { ListingPerformance } from "@/lib/cre-os/listing-perf-queries";
  * Right rail: property-scoped insights derived from the same data the AI
  * summary used. One source of truth, two surfaces.
  */
-export function PropertyWorkspace({ p, threads, perf }: { p: PropertyDetail; threads: ThreadSummary[]; perf: ListingPerformance }) {
+export function PropertyWorkspace({
+  p,
+  threads,
+  perf,
+  leads,
+}: {
+  p: PropertyDetail;
+  threads: ThreadSummary[];
+  perf: ListingPerformance;
+  leads?: PropertyLeadsSnapshot;
+}) {
   const rail: RailSection[] = [
     {
       eyebrow: "Asset insights",
@@ -69,7 +80,7 @@ export function PropertyWorkspace({ p, threads, perf }: { p: PropertyDetail; thr
     <AppShell rail={rail}>
       <PropertyHeader p={p} />
       <PropertyAISummary p={p} />
-      <PropertyTabs p={p} threads={threads} perf={perf} />
+      <PropertyTabs p={p} threads={threads} perf={perf} leads={leads} />
     </AppShell>
   );
 }

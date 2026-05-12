@@ -3,12 +3,8 @@ import { PropertyWorkspace } from "@/components/cre-os/property/PropertyWorkspac
 import { loadPropertyDetail } from "@/lib/cre-os/property-queries";
 import { loadCommunicationsForProperty } from "@/lib/cre-os/communications-queries";
 import { loadListingPerformance } from "@/lib/cre-os/listing-perf-queries";
+import { loadPropertyLeads } from "@/lib/cre-os/property-leads-queries";
 
-/**
- * Phase 2 + 4 + 6 — Property workspace. Loads detail + threaded
- * communications + listing performance in parallel. Workspace tabs:
- * Overview / Valuation & Comps / Communications / Performance / Activity.
- */
 export const dynamic = "force-dynamic";
 
 export default async function PropertyDetailPage({
@@ -18,9 +14,10 @@ export default async function PropertyDetailPage({
 }) {
   const detail = await loadPropertyDetail(params.slug);
   if (!detail) notFound();
-  const [threads, perf] = await Promise.all([
+  const [threads, perf, leads] = await Promise.all([
     loadCommunicationsForProperty(detail.id),
     loadListingPerformance(detail.id),
+    loadPropertyLeads(detail.id),
   ]);
-  return <PropertyWorkspace p={detail} threads={threads} perf={perf} />;
+  return <PropertyWorkspace p={detail} threads={threads} perf={perf} leads={leads} />;
 }
