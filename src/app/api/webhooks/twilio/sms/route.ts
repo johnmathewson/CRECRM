@@ -25,6 +25,19 @@ export const dynamic = "force-dynamic";
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 const BRAND_NAME = "Stewardship CRE";
 
+/**
+ * GET handler — Twilio's URL validator hits this with GET when you save
+ * the webhook in the console. It expects a 200 OK to consider the URL
+ * valid. We return empty TwiML so the validator + a browser visit both
+ * look healthy without revealing internals.
+ */
+export async function GET() {
+  return new NextResponse(
+    `<?xml version="1.0" encoding="UTF-8"?><Response></Response>`,
+    { status: 200, headers: { "Content-Type": "text/xml; charset=utf-8" } }
+  );
+}
+
 function twiml(messageBody?: string): NextResponse {
   const body = messageBody
     ? `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escapeXml(messageBody)}</Message></Response>`
