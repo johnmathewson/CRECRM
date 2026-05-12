@@ -126,7 +126,7 @@ export function DocumentsView({ snapshot }: { snapshot: DocumentsSnapshot }) {
             <select
               value={propertyFilter}
               onChange={(e) => setPropertyFilter(e.target.value)}
-              className="bg-white/[0.03] border border-white/[0.06] rounded-md px-3 py-2 text-[12px] text-cream font-body outline-none focus:border-coral-400/40 transition-colors min-w-[200px]"
+              className="bg-white/[0.03] border border-white/[0.06] rounded-md px-3 py-2 text-base lg:text-[12px] text-cream font-body outline-none focus:border-coral-400/40 transition-colors min-w-[200px]"
             >
               <option value="all" className="bg-steward-base">All properties</option>
               {allProperties.map((p) => (
@@ -141,7 +141,7 @@ export function DocumentsView({ snapshot }: { snapshot: DocumentsSnapshot }) {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="File name, description, property…"
-              className="bg-white/[0.03] border border-white/[0.06] rounded-md px-3 py-2 text-[12px] text-cream font-body outline-none focus:border-coral-400/40 transition-colors"
+              className="bg-white/[0.03] border border-white/[0.06] rounded-md px-3 py-2 text-base lg:text-[12px] text-cream font-body outline-none focus:border-coral-400/40 transition-colors"
             />
           </div>
           {(propertyFilter !== "all" || search.trim()) && (
@@ -190,8 +190,8 @@ export function DocumentsView({ snapshot }: { snapshot: DocumentsSnapshot }) {
 // ── Sub-components ─────────────────────────────────────────────────────────
 function DocumentList({ rows }: { rows: PortfolioDocument[] }) {
   return (
-    <div className="rounded border border-white/[0.05] bg-steward-mid/30 overflow-hidden">
-      <table className="w-full text-[12px] font-body">
+    <div className="rounded border border-white/[0.05] bg-steward-mid/30 overflow-x-auto">
+      <table className="w-full min-w-[640px] text-[12px] font-body">
         <thead>
           <tr className="text-cream-subtle text-left bg-black/10">
             <th className="font-heading text-[10px] uppercase tracking-eyebrow font-semibold py-3 px-3">File</th>

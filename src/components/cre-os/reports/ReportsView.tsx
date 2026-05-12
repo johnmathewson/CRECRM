@@ -266,8 +266,8 @@ function StageTable({ rows }: { rows: StageRollupRow[] }) {
   const maxCount = Math.max(1, ...rows.map((r) => r.count));
 
   return (
-    <div className="rounded border border-white/[0.05] bg-steward-mid/30 overflow-hidden">
-      <table className="w-full text-[12px] font-body">
+    <div className="rounded border border-white/[0.05] bg-steward-mid/30 overflow-x-auto">
+      <table className="w-full min-w-[640px] text-[12px] font-body">
         <thead>
           <tr className="text-cream-subtle text-left bg-black/10">
             <th className="font-heading text-[10px] uppercase tracking-eyebrow font-semibold py-3 px-3 w-8"></th>
@@ -481,8 +481,8 @@ function ListingReachTable({ rows }: { rows: ListingReachRow[] }) {
   }
   const maxReach = Math.max(1, ...rows.map((r) => r.reach7d));
   return (
-    <div className="rounded border border-white/[0.05] bg-steward-mid/30 overflow-hidden">
-      <table className="w-full text-[12px] font-body">
+    <div className="rounded border border-white/[0.05] bg-steward-mid/30 overflow-x-auto">
+      <table className="w-full min-w-[640px] text-[12px] font-body">
         <thead>
           <tr className="text-cream-subtle text-left bg-black/10">
             <th className="font-heading text-[10px] uppercase tracking-eyebrow font-semibold py-3 px-3">Listing</th>

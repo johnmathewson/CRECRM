@@ -57,7 +57,7 @@ export function PropertyTabs({
             <button
               key={t.key}
               onClick={() => setActive(t.key)}
-              className={`relative py-3 font-heading text-[12px] uppercase tracking-eyebrow font-semibold transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+              className={`relative py-3.5 lg:py-3 font-heading text-[12px] uppercase tracking-eyebrow font-semibold transition-colors flex items-center gap-1.5 whitespace-nowrap ${
                 isActive ? "text-cream" : "text-cream-subtle hover:text-cream-dim"
               }`}
             >

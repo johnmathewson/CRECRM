@@ -172,7 +172,7 @@ export function RelationshipListView({ contacts }: { contacts: RelationshipCard[
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Search name, email, phone…"
-                className="w-full bg-white/[0.03] border border-white/[0.06] rounded-md px-3 py-2 text-[13px] text-cream placeholder:text-cream-subtle font-body outline-none focus:border-coral-400/40 focus:bg-white/[0.06] transition-colors"
+                className="w-full bg-white/[0.03] border border-white/[0.06] rounded-md px-3 py-2 text-base lg:text-[13px] text-cream placeholder:text-cream-subtle font-body outline-none focus:border-coral-400/40 focus:bg-white/[0.06] transition-colors"
               />
             </div>
             <FilterSelect label="Type" value={contactType} onChange={setContactType} options={CONTACT_TYPES} />
@@ -255,7 +255,7 @@ function FilterSelect({ label, value, onChange, options }: { label: string; valu
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="bg-white/[0.03] border border-white/[0.06] rounded-md px-3 py-2 text-[12px] text-cream font-body outline-none focus:border-coral-400/40 transition-colors"
+        className="bg-white/[0.03] border border-white/[0.06] rounded-md px-3 py-2 text-base lg:text-[12px] text-cream font-body outline-none focus:border-coral-400/40 transition-colors"
       >
         {options.map((o) => (
           <option key={o} value={o} className="bg-steward-base">

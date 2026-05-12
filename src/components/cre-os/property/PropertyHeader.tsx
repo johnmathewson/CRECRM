@@ -84,28 +84,28 @@ export function PropertyHeader({ p }: { p: PropertyDetail }) {
               modal that auto-attaches to this property. */}
           <button
             onClick={() => setLogActivityOpen(true)}
-            className="px-3 py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] text-coral-300 hover:bg-coral-400/[0.20] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
+            className="px-3.5 py-2.5 lg:px-3 lg:py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] text-coral-300 hover:bg-coral-400/[0.20] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
             title="Log a call, meeting, tour, or note against this property."
           >
             + Log activity
           </button>
           <button
             onClick={() => setTaskOpen(true)}
-            className="px-3 py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] text-coral-300 hover:bg-coral-400/[0.20] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
+            className="px-3.5 py-2.5 lg:px-3 lg:py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] text-coral-300 hover:bg-coral-400/[0.20] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
             title="Add a follow-up task against this property."
           >
             + Task
           </button>
           <button
             onClick={() => setEditOpen(true)}
-            className="px-3 py-2 rounded border border-white/10 bg-white/[0.03] text-cream hover:bg-white/[0.06] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
+            className="px-3.5 py-2.5 lg:px-3 lg:py-2 rounded border border-white/10 bg-white/[0.03] text-cream hover:bg-white/[0.06] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
             title="Edit address, pricing, sqft, NOI, cap rate, occupancy, parking, zoning, marketing copy, and notes."
           >
             Edit details
           </button>
           <a
             href={`/cre-os/valuate?address=${encodeURIComponent(fullAddress || p.name)}`}
-            className="px-3 py-2 rounded border border-white/10 bg-white/[0.03] text-cream hover:bg-white/[0.06] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
+            className="px-3.5 py-2.5 lg:px-3 lg:py-2 rounded border border-white/10 bg-white/[0.03] text-cream hover:bg-white/[0.06] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
           >
             Run valuation
           </a>

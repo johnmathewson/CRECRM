@@ -209,7 +209,7 @@ export function MarketView({ snapshot }: { snapshot: MarketSnapshot }) {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Address, notes…"
-              className="bg-white/[0.03] border border-white/[0.06] rounded-md px-3 py-2 text-[12px] text-cream font-body outline-none focus:border-coral-400/40 transition-colors min-w-[180px]"
+              className="bg-white/[0.03] border border-white/[0.06] rounded-md px-3 py-2 text-base lg:text-[12px] text-cream font-body outline-none focus:border-coral-400/40 transition-colors min-w-[180px]"
             />
           </div>
           {filtersActive && (
@@ -311,7 +311,7 @@ function FilterSelect({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="bg-white/[0.03] border border-white/[0.06] rounded-md px-3 py-2 text-[12px] text-cream font-body outline-none focus:border-coral-400/40 transition-colors min-w-[120px]"
+        className="bg-white/[0.03] border border-white/[0.06] rounded-md px-3 py-2 text-base lg:text-[12px] text-cream font-body outline-none focus:border-coral-400/40 transition-colors min-w-[120px]"
       >
         {options.map((o) => (
           <option key={o} value={o} className="bg-steward-base">

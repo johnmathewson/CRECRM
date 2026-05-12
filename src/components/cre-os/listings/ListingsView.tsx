@@ -382,7 +382,7 @@ function SyndicationChip({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={`${label} URL`}
-          className="bg-transparent border-0 outline-none font-mono text-[10px] text-cream w-[200px] placeholder:text-cream-subtle"
+          className="bg-transparent border-0 outline-none font-mono text-base lg:text-[10px] text-cream w-full sm:w-[200px] placeholder:text-cream-subtle"
           autoFocus
         />
         <button

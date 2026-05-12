@@ -304,7 +304,7 @@ export function LeadDetail({ lead }: { lead: LeadDetailData }) {
               onChange={(e) => setDraft(e.target.value)}
               rows={Math.min(20, Math.max(8, draft.split("\n").length + 2))}
               placeholder="Draft your reply… or tap Regenerate to have the AI draft one."
-              className="w-full bg-black/20 border border-white/[0.06] rounded-md px-4 py-3 text-[13px] text-cream font-body leading-relaxed outline-none focus:border-coral-400/40 transition-colors min-h-[200px]"
+              className="w-full bg-black/20 border border-white/[0.06] rounded-md px-4 py-3 text-base lg:text-[13px] text-cream font-body leading-relaxed outline-none focus:border-coral-400/40 transition-colors min-h-[200px]"
             />
           )}
           {lead.draftAttachments && Array.isArray(lead.draftAttachments) && lead.draftAttachments.length > 0 && (

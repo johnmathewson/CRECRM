@@ -168,7 +168,7 @@ export function InboxView({ leads }: { leads: LeadCardData[] }) {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search sender, subject, message, property…"
-            className="w-full bg-white/[0.03] border border-white/[0.06] rounded-md px-3 py-2 text-[13px] text-cream placeholder:text-cream-subtle font-body outline-none focus:border-coral-400/40 focus:bg-white/[0.06] transition-colors"
+            className="w-full bg-white/[0.03] border border-white/[0.06] rounded-md px-3 py-2 text-base lg:text-[13px] text-cream placeholder:text-cream-subtle font-body outline-none focus:border-coral-400/40 focus:bg-white/[0.06] transition-colors"
           />
         </div>
 
