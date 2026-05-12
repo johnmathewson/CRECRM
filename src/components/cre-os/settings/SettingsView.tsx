@@ -116,6 +116,8 @@ interface TwilioStatus {
 function TwilioSection() {
   const [status, setStatus] = useState<TwilioStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -130,6 +132,29 @@ function TwilioSection() {
       }
     })();
   }, []);
+
+  async function sendTestSms() {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await fetch("/api/integrations/twilio/test-send", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        setTestResult({ ok: false, message: data.error ?? `HTTP ${res.status}` });
+      } else {
+        setTestResult({
+          ok: true,
+          message: `Sent to ${data.sent_to} · Message SID: ${data.message_sid} · Status: ${data.status}`,
+        });
+      }
+    } catch (err) {
+      setTestResult({ ok: false, message: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setTesting(false);
+      // Auto-clear after 12s
+      setTimeout(() => setTestResult(null), 12000);
+    }
+  }
 
   return (
     <Panel
@@ -152,14 +177,45 @@ function TwilioSection() {
       </p>
 
       {status?.connected ? (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <Stat label="Account SID" value={`…${status.accountSidSuffix ?? "????"}`} />
-          <Stat label="Messaging Service" value={status.messagingService?.friendlyName ?? "—"}
-            sub={status.messagingService?.sid.slice(0, 12) + "…"} />
-          <Stat label="From number" value={status.fromNumber ?? "(MG default)"} />
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <Stat label="Account SID" value={`…${status.accountSidSuffix ?? "????"}`} />
+            <Stat label="Messaging Service" value={status.messagingService?.friendlyName ?? "—"}
+              sub={status.messagingService?.sid.slice(0, 12) + "…"} />
+            <Stat label="From number" value={status.fromNumber ?? "(MG default)"} />
+          </div>
           {status.testMode && (
-            <div className="sm:col-span-3 rounded border border-amber/30 bg-amber/[0.08] px-3 py-2 font-body text-[11px] text-amber">
+            <div className="rounded border border-amber/30 bg-amber/[0.08] px-3 py-2 font-body text-[11px] text-amber">
               🧪 TEST MODE — all outbound SMS rerouted to {status.testDestination}
+            </div>
+          )}
+
+          {/* Test-send action — fires a real SMS through the same code
+              path the cadence runner uses. Confirms env → SDK → Twilio
+              → carrier → phone end-to-end. */}
+          <div className="flex items-center justify-between gap-3 pt-2 border-t border-white/[0.04]">
+            <div className="font-body text-[11.5px] text-cream-dim">
+              Send a test SMS to verify the full delivery path.
+              {status.testMode && (
+                <span className="text-cream-subtle"> Will arrive at {status.testDestination}.</span>
+              )}
+            </div>
+            <button
+              onClick={sendTestSms}
+              disabled={testing}
+              className="px-4 py-2 rounded border border-coral-400/40 bg-coral-400/[0.12] hover:bg-coral-400/[0.20] font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-coral-300 disabled:opacity-40 shrink-0"
+            >
+              {testing ? "Sending…" : "Send test SMS"}
+            </button>
+          </div>
+
+          {testResult && (
+            <div className={`rounded border px-3 py-2 font-body text-[11.5px] ${
+              testResult.ok
+                ? "border-teal-400/30 bg-teal-400/[0.05] text-teal-300"
+                : "border-red-400/30 bg-red-500/[0.08] text-red-300"
+            }`}>
+              {testResult.ok ? "✓ " : "✗ "}{testResult.message}
             </div>
           )}
         </div>
