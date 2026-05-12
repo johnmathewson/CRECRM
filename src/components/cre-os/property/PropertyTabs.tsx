@@ -64,7 +64,9 @@ export function PropertyTabs({ p, threads, perf }: { p: PropertyDetail; threads:
         {active === "documents" && <DocumentsTab p={p} />}
         {active === "communications" && <CommunicationsTab threads={threads} propertyName={p.name} />}
         {active === "performance" && <PerformanceTab p={p} perf={perf} />}
-        {active === "activity" && <ActivityTab p={p} />}
+        {active === "activity" && (
+          <ActivityTab p={p} onSwitchTab={(t) => setActive(t)} />
+        )}
       </div>
     </div>
   );

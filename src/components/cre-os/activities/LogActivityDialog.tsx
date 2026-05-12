@@ -14,6 +14,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 
 interface Props {
@@ -88,6 +89,8 @@ export function LogActivityDialog({
   }, [open, onClose]);
 
   if (!open) return null;
+  // SSR-safe portal target — only valid on the client.
+  if (typeof document === "undefined") return null;
 
   const typeMeta = TYPE_OPTIONS.find((t) => t.value === activityType) ?? TYPE_OPTIONS[0];
   const showDuration = typeMeta.needsDuration;
@@ -129,9 +132,13 @@ export function LogActivityDialog({
     }
   }
 
-  return (
+  // Portal to document.body so the dialog escapes any ancestor that
+  // creates a containing block (e.g. PropertyHeader's backdrop-blur-md).
+  // Without this, fixed inset-0 anchors inside the blurred ancestor instead
+  // of the viewport, and the dialog appears tucked into the header area.
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto"
+      className="fixed inset-0 z-[60] flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto"
       onClick={onClose}
     >
       <div
@@ -245,7 +252,8 @@ export function LogActivityDialog({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

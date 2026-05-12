@@ -1,16 +1,32 @@
 "use client";
 
+import { useState } from "react";
 import { Panel } from "@/components/cre-os/Panel";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { TaskRow } from "@/components/cre-os/tasks/TaskRow";
+import { LogActivityDialog } from "@/components/cre-os/activities/LogActivityDialog";
 import type { PropertyDetail } from "@/lib/cre-os/property-queries";
+
+type ActivityDefaultType = "call" | "meeting" | "note";
 
 /**
  * Activity tab — the asset's memory. Reverse-chronological feed of every
  * email / call / meeting / stage change / valuation run / doc upload tied
  * to this property. Tasks roll up here too as a side rail.
+ *
+ * The "Logging" panel surfaces shortcut buttons that open LogActivityDialog
+ * pre-set to the right activity type. "Upload a document" jumps to the
+ * Documents tab via the onSwitchTab callback wired by PropertyTabs.
  */
-export function ActivityTab({ p }: { p: PropertyDetail }) {
+export function ActivityTab({
+  p,
+  onSwitchTab,
+}: {
+  p: PropertyDetail;
+  onSwitchTab?: (tab: "documents") => void;
+}) {
+  const [logOpen, setLogOpen] = useState<ActivityDefaultType | null>(null);
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <Panel eyebrow="Activity timeline" num={1} title={`${p.activity.length} entries`} className="lg:col-span-2">
@@ -61,16 +77,32 @@ export function ActivityTab({ p }: { p: PropertyDetail }) {
 
         <Panel eyebrow="Logging" num={3} title="Add to timeline">
           <div className="space-y-2">
-            <button className="w-full text-left px-3 py-2 rounded border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.04] font-body text-[12px] text-cream-dim transition-colors">+ Log a call</button>
-            <button className="w-full text-left px-3 py-2 rounded border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.04] font-body text-[12px] text-cream-dim transition-colors">+ Log a meeting</button>
-            <button className="w-full text-left px-3 py-2 rounded border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.04] font-body text-[12px] text-cream-dim transition-colors">+ Add a note</button>
-            <button className="w-full text-left px-3 py-2 rounded border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.04] font-body text-[12px] text-cream-dim transition-colors">+ Upload a document</button>
+            <LoggingButton onClick={() => setLogOpen("call")}>+ Log a call</LoggingButton>
+            <LoggingButton onClick={() => setLogOpen("meeting")}>+ Log a meeting</LoggingButton>
+            <LoggingButton onClick={() => setLogOpen("note")}>+ Add a note</LoggingButton>
+            <LoggingButton onClick={() => onSwitchTab?.("documents")}>+ Upload a document</LoggingButton>
           </div>
-          <p className="mt-3 font-mono text-[10px] text-cream-subtle">
-            Logging endpoints arrive with Phase 4. For now these are read-only placeholders.
-          </p>
         </Panel>
       </div>
+
+      <LogActivityDialog
+        open={logOpen !== null}
+        onClose={() => setLogOpen(null)}
+        propertyId={p.id}
+        contextLabel={p.name}
+        defaultType={logOpen ?? "call"}
+      />
     </div>
+  );
+}
+
+function LoggingButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full text-left px-3 py-2 rounded border border-white/[0.06] bg-white/[0.02] hover:bg-coral-400/[0.06] hover:border-coral-400/30 font-body text-[12px] text-cream-dim hover:text-cream transition-colors"
+    >
+      {children}
+    </button>
   );
 }
