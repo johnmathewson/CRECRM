@@ -42,16 +42,32 @@ export interface TwilioConfig {
 
 export function getTwilioConfig(): { config: TwilioConfig; missing: string[] } {
   const accountSid = getEnv("TWILIO_ACCOUNT_SID");
-  const authToken = getEnv("TWILIO_AUTH_TOKEN") ?? getEnv("TWILIO_API_KEY_SECRET");
   const apiKeySid = getEnv("TWILIO_API_KEY_SID");
+  const apiKeySecret = getEnv("TWILIO_API_KEY_SECRET");
+  const authTokenRaw = getEnv("TWILIO_AUTH_TOKEN");
   const messagingServiceSid = getEnv("TWILIO_MESSAGING_SERVICE_SID");
   const fromNumber = getEnv("TWILIO_FROM_NUMBER");
   const testMode = getEnv("TWILIO_TEST_MODE")?.toLowerCase() === "true";
   const testDestination = getEnv("TWILIO_TEST_DESTINATION");
 
+  // Pick the correct auth-pair. API Keys MUST be paired with their own
+  // Secret — pairing an API Key SID with the Account Auth Token will fail
+  // Twilio authentication. Only fall back to Auth Token when no API Key
+  // SID is configured at all.
+  let authUser: string;
+  let authToken: string | null;
+  if (apiKeySid) {
+    authUser = apiKeySid;
+    authToken = apiKeySecret; // must be the API Key's own Secret
+  } else {
+    authUser = accountSid ?? "";
+    authToken = authTokenRaw;
+  }
+
   const missing: string[] = [];
   if (!accountSid) missing.push("TWILIO_ACCOUNT_SID");
-  if (!authToken) missing.push("TWILIO_AUTH_TOKEN (or TWILIO_API_KEY_SECRET)");
+  if (apiKeySid && !apiKeySecret) missing.push("TWILIO_API_KEY_SECRET (required when TWILIO_API_KEY_SID is set)");
+  if (!apiKeySid && !authTokenRaw) missing.push("TWILIO_AUTH_TOKEN (or set TWILIO_API_KEY_SID + TWILIO_API_KEY_SECRET)");
   if (!messagingServiceSid) missing.push("TWILIO_MESSAGING_SERVICE_SID");
   if (testMode && !testDestination) missing.push("TWILIO_TEST_DESTINATION (required when TWILIO_TEST_MODE=true)");
 
@@ -59,7 +75,7 @@ export function getTwilioConfig(): { config: TwilioConfig; missing: string[] } {
     config: {
       accountSid: accountSid ?? "",
       authToken: authToken ?? "",
-      authUser: apiKeySid ?? accountSid ?? "",
+      authUser,
       messagingServiceSid: messagingServiceSid ?? "",
       fromNumber,
       testMode,
@@ -69,14 +85,21 @@ export function getTwilioConfig(): { config: TwilioConfig; missing: string[] } {
   };
 }
 
+// Reset cached client when env changes (e.g. between requests on a hot reload)
+let _cachedConfigKey = "";
+
 let _client: ReturnType<typeof twilio> | null = null;
 function getClient(): { client: ReturnType<typeof twilio>; config: TwilioConfig } {
   const { config, missing } = getTwilioConfig();
   if (missing.length > 0) {
     throw new Error(`Twilio not configured. Missing env: ${missing.join(", ")}`);
   }
-  if (!_client) {
+  // Cache key includes auth pair so a credential swap invalidates the
+  // cached client (relevant when re-deploying with rotated keys).
+  const key = `${config.authUser}:${config.accountSid}`;
+  if (!_client || _cachedConfigKey !== key) {
     _client = twilio(config.authUser, config.authToken, { accountSid: config.accountSid });
+    _cachedConfigKey = key;
   }
   return { client: _client, config };
 }
