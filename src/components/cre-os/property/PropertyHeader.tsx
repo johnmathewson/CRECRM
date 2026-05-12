@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { StatusBadge } from "@/components/cre-os/StatusBadge";
 import { StatusEditor } from "./StatusEditor";
@@ -31,6 +31,27 @@ export function PropertyHeader({ p }: { p: PropertyDetail }) {
   const [editOpen, setEditOpen] = useState(false);
   const [logActivityOpen, setLogActivityOpen] = useState(false);
   const [taskOpen, setTaskOpen] = useState(false);
+  const [actionMenuOpen, setActionMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  // Close the mobile action menu on outside-click or Escape.
+  useEffect(() => {
+    if (!actionMenuOpen) return;
+    function onDown(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setActionMenuOpen(false);
+      }
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setActionMenuOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [actionMenuOpen]);
 
   const valuationCaption = [
     p.askingPrice ? fmtMoney(p.askingPrice) : null,
@@ -78,37 +99,73 @@ export function PropertyHeader({ p }: { p: PropertyDetail }) {
           )}
         </div>
 
-        <div className="flex items-center gap-2 shrink-0 flex-wrap">
-          {/* Log activity — primary daily action; coral accent puts it
-              ahead of Edit details and Run valuation. Opens a quick-capture
-              modal that auto-attaches to this property. */}
-          <button
-            onClick={() => setLogActivityOpen(true)}
-            className="px-3.5 py-2.5 lg:px-3 lg:py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] text-coral-300 hover:bg-coral-400/[0.20] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
-            title="Log a call, meeting, tour, or note against this property."
-          >
-            + Log activity
-          </button>
-          <button
-            onClick={() => setTaskOpen(true)}
-            className="px-3.5 py-2.5 lg:px-3 lg:py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] text-coral-300 hover:bg-coral-400/[0.20] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
-            title="Add a follow-up task against this property."
-          >
-            + Task
-          </button>
-          <button
-            onClick={() => setEditOpen(true)}
-            className="px-3.5 py-2.5 lg:px-3 lg:py-2 rounded border border-white/10 bg-white/[0.03] text-cream hover:bg-white/[0.06] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
-            title="Edit address, pricing, sqft, NOI, cap rate, occupancy, parking, zoning, marketing copy, and notes."
-          >
-            Edit details
-          </button>
-          <a
-            href={`/cre-os/valuate?address=${encodeURIComponent(fullAddress || p.name)}`}
-            className="px-3.5 py-2.5 lg:px-3 lg:py-2 rounded border border-white/10 bg-white/[0.03] text-cream hover:bg-white/[0.06] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
-          >
-            Run valuation
-          </a>
+        {/* Mobile (< md): collapse the 4 actions behind a single "Actions"
+            menu so the header doesn't wrap into two cluttered rows. The
+            full button row stays visible at md+ where there's space. */}
+        <div className="shrink-0">
+          {/* Mobile menu */}
+          <div className="md:hidden relative" ref={menuRef}>
+            <button
+              onClick={() => setActionMenuOpen((v) => !v)}
+              aria-haspopup="menu"
+              aria-expanded={actionMenuOpen}
+              className="px-4 py-2.5 rounded border border-coral-400/40 bg-coral-400/[0.10] text-coral-300 hover:bg-coral-400/[0.20] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors flex items-center gap-2"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
+                <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+              </svg>
+              Actions
+            </button>
+            {actionMenuOpen && (
+              <div
+                role="menu"
+                className="absolute right-0 top-full mt-2 z-30 w-56 rounded border border-white/[0.10] bg-steward-base shadow-panel-soft overflow-hidden"
+              >
+                <MenuItem onClick={() => { setLogActivityOpen(true); setActionMenuOpen(false); }} tone="coral">+ Log activity</MenuItem>
+                <MenuItem onClick={() => { setTaskOpen(true); setActionMenuOpen(false); }} tone="coral">+ Task</MenuItem>
+                <MenuItem onClick={() => { setEditOpen(true); setActionMenuOpen(false); }}>Edit details</MenuItem>
+                <a
+                  role="menuitem"
+                  href={`/cre-os/valuate?address=${encodeURIComponent(fullAddress || p.name)}`}
+                  onClick={() => setActionMenuOpen(false)}
+                  className="block w-full text-left px-4 py-3 font-heading text-[12px] uppercase tracking-eyebrow font-semibold text-cream-dim hover:bg-white/[0.04] hover:text-cream transition-colors"
+                >
+                  Run valuation
+                </a>
+              </div>
+            )}
+          </div>
+
+          {/* Desktop: full row, inline */}
+          <div className="hidden md:flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => setLogActivityOpen(true)}
+              className="px-3.5 py-2.5 lg:px-3 lg:py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] text-coral-300 hover:bg-coral-400/[0.20] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
+              title="Log a call, meeting, tour, or note against this property."
+            >
+              + Log activity
+            </button>
+            <button
+              onClick={() => setTaskOpen(true)}
+              className="px-3.5 py-2.5 lg:px-3 lg:py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] text-coral-300 hover:bg-coral-400/[0.20] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
+              title="Add a follow-up task against this property."
+            >
+              + Task
+            </button>
+            <button
+              onClick={() => setEditOpen(true)}
+              className="px-3.5 py-2.5 lg:px-3 lg:py-2 rounded border border-white/10 bg-white/[0.03] text-cream hover:bg-white/[0.06] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
+              title="Edit address, pricing, sqft, NOI, cap rate, occupancy, parking, zoning, marketing copy, and notes."
+            >
+              Edit details
+            </button>
+            <a
+              href={`/cre-os/valuate?address=${encodeURIComponent(fullAddress || p.name)}`}
+              className="px-3.5 py-2.5 lg:px-3 lg:py-2 rounded border border-white/10 bg-white/[0.03] text-cream hover:bg-white/[0.06] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
+            >
+              Run valuation
+            </a>
+          </div>
         </div>
       </div>
       <EditPropertyDialog open={editOpen} property={p} onClose={() => setEditOpen(false)} />
@@ -125,6 +182,29 @@ export function PropertyHeader({ p }: { p: PropertyDetail }) {
         contextLabel={p.name}
       />
     </div>
+  );
+}
+
+function MenuItem({
+  onClick,
+  children,
+  tone = "default",
+}: {
+  onClick: () => void;
+  children: React.ReactNode;
+  tone?: "default" | "coral";
+}) {
+  const color = tone === "coral"
+    ? "text-coral-300 hover:bg-coral-400/[0.08]"
+    : "text-cream-dim hover:bg-white/[0.04] hover:text-cream";
+  return (
+    <button
+      role="menuitem"
+      onClick={onClick}
+      className={`block w-full text-left px-4 py-3 font-heading text-[12px] uppercase tracking-eyebrow font-semibold transition-colors border-b border-white/[0.04] last:border-b-0 ${color}`}
+    >
+      {children}
+    </button>
   );
 }
 

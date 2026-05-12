@@ -176,15 +176,31 @@ export function LeadsTab({
           </div>
         )}
 
-        {/* Leads table */}
+        {/* Leads — card list on mobile, table on lg+ */}
         {filtered.length === 0 ? (
           <p className="font-body text-[12px] text-cream-subtle italic py-6 text-center">
             No leads match this filter.
           </p>
         ) : (
-          <div className="overflow-x-auto -mx-5 px-5">
-            <table className="w-full font-body text-[11.5px]">
-              <thead>
+          <>
+            {/* Mobile: stacked cards. Each lead is its own block with clear
+                tap targets — checkbox, name, interest chip, key data, action. */}
+            <div className="lg:hidden space-y-2">
+              {filtered.map((l) => (
+                <LeadCardMobile
+                  key={l.id}
+                  lead={l}
+                  selected={selected.has(l.id)}
+                  onToggleSelect={() => toggleOne(l.id)}
+                  onCompose={() => setComposeTarget(l)}
+                />
+              ))}
+            </div>
+
+            {/* Desktop: full data table */}
+            <div className="hidden lg:block overflow-x-auto -mx-5 px-5">
+              <table className="w-full font-body text-[11.5px]">
+                <thead>
                 <tr className="text-left font-mono text-[9px] uppercase tracking-eyebrow text-cream-subtle border-b border-white/[0.05]">
                   <th className="py-2 pr-2 w-6">
                     <input
@@ -261,9 +277,10 @@ export function LeadsTab({
                     </td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
-          </div>
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </Panel>
 
@@ -280,6 +297,109 @@ export function LeadsTab({
           }}
         />
       )}
+    </div>
+  );
+}
+
+// ── Mobile card — replaces the table row on phones ──────────────────────
+// Stacks the same information vertically with tap-friendly targets. The
+// checkbox is on the left edge and the Compose action is a real button
+// (not a tiny text link).
+
+function LeadCardMobile({
+  lead: l,
+  selected,
+  onToggleSelect,
+  onCompose,
+}: {
+  lead: PropertyLead;
+  selected: boolean;
+  onToggleSelect: () => void;
+  onCompose: () => void;
+}) {
+  return (
+    <div
+      className={`rounded border px-3 py-3 transition-colors ${
+        selected
+          ? "border-coral-400/40 bg-coral-400/[0.06]"
+          : "border-white/[0.05] bg-white/[0.02]"
+      }`}
+    >
+      <div className="flex items-start gap-3">
+        <button
+          onClick={onToggleSelect}
+          aria-label={selected ? "Deselect lead" : "Select lead"}
+          className="shrink-0 mt-0.5 w-6 h-6 rounded border border-white/[0.20] flex items-center justify-center accent-coral-400"
+        >
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggleSelect}
+            onClick={(e) => e.stopPropagation()}
+            className="accent-coral-400 w-4 h-4 pointer-events-none"
+            tabIndex={-1}
+          />
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline justify-between gap-2 flex-wrap">
+            <div className="font-heading text-[13.5px] text-cream font-semibold">
+              {l.name}
+              {l.signedNda && (
+                <span className="ml-1.5 font-mono text-[9px] uppercase tracking-eyebrow text-coral-300">📝 NDA</span>
+              )}
+            </div>
+            <span className={`font-mono text-[9px] uppercase tracking-eyebrow border px-1.5 py-0.5 rounded ${INTEREST_TONE[l.interest]}`}>
+              {INTEREST_LABEL[l.interest]}
+            </span>
+          </div>
+
+          {(l.company || l.role) && (
+            <div className="text-cream-subtle font-mono text-[10.5px] mt-0.5 truncate">
+              {[l.company, l.role].filter(Boolean).join(" · ")}
+            </div>
+          )}
+
+          {/* Contact rows — wrap so they don't overflow */}
+          <div className="mt-1.5 font-mono text-[11px] text-cream-dim space-y-0.5">
+            {l.email && (
+              <a href={`mailto:${l.email}`} className="block truncate hover:text-coral-300">
+                ✉ {l.email}
+              </a>
+            )}
+            {l.phone && (
+              <a href={`tel:${l.phone}`} className="block text-teal-300 hover:text-teal-200">
+                📞 {l.phone}
+              </a>
+            )}
+          </div>
+
+          <div className="mt-2 flex items-baseline justify-between gap-2 flex-wrap font-mono text-[10px] text-cream-subtle">
+            <div className="flex items-center gap-3">
+              {l.visitCount != null && l.visitCount > 0 && (
+                <span>{l.visitCount} visits</span>
+              )}
+              {l.lastActivityAt && (
+                <span>{fmtRelative(l.lastActivityAt)}</span>
+              )}
+              {l.respondedAt ? (
+                <span className="text-teal-300">✓ replied</span>
+              ) : (
+                <span className="text-amber">awaiting</span>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-2 pt-2 border-t border-white/[0.04]">
+            <button
+              disabled={!l.email}
+              onClick={onCompose}
+              className="w-full px-3 py-2 rounded border border-coral-400/40 bg-coral-400/[0.08] hover:bg-coral-400/[0.18] font-mono text-[10.5px] uppercase tracking-eyebrow text-coral-300 disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              {l.email ? "Compose follow-up" : "No email on file"}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
