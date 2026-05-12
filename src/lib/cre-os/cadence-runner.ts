@@ -24,6 +24,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { getActiveGmailToken } from "@/lib/gmail-auth";
 import { sendMessage } from "@/lib/gmail";
+import { sendSms, toE164, getTwilioConfig } from "@/lib/twilio";
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 const SEND_DISPLAY_NAME = "John Mathewson";
@@ -277,6 +278,36 @@ export async function runCadence(options: CadenceRunOptions = {}): Promise<Caden
         touchStatus = "sent"; // dry-run
         result.touchesSent += 1;
       }
+    } else if (mode === "auto" && step.channel === "sms") {
+      // Pre-flight: Twilio configured?
+      const { missing } = getTwilioConfig();
+      const e164 = toE164(contact?.phone ?? null);
+      if (missing.length > 0) {
+        result.errors.push(`Enrollment ${enr.id}: Twilio not configured (${missing.join(", ")})`);
+        touchStatus = "failed";
+      } else if (!e164) {
+        // No phone — skip and advance cadence
+        result.touchesSkipped += 1;
+        touchStatus = "skipped";
+      } else if (!options.dryRun) {
+        try {
+          // Keep body under 160 chars for single-segment delivery; let the
+          // template do that work. We don't truncate aggressively here so
+          // longer messages can still send (they'll segment).
+          const sent = await sendSms({ to: e164, body });
+          touchStatus = "sent";
+          sentAt = new Date().toISOString();
+          gmailMessageId = sent.messageSid; // store the Twilio MessageSid in the same slot
+          result.touchesSent += 1;
+          sentTodayByLane.set(lane.id, sentToday + 1);
+        } catch (err) {
+          result.errors.push(`Enrollment ${enr.id}: SMS send failed: ${err instanceof Error ? err.message : err}`);
+          touchStatus = "failed";
+        }
+      } else {
+        touchStatus = "sent"; // dry-run
+        result.touchesSent += 1;
+      }
     } else if (mode === "auto" && step.channel === "letter") {
       // Letters can be "auto" — they get written to a queue for the mail-merge
       // service. For now we just log them as 'queued' with a note.
@@ -308,8 +339,12 @@ export async function runCadence(options: CadenceRunOptions = {}): Promise<Caden
         body,
         metadata: {
           cadence_run: true,
-          gmail_message_id: gmailMessageId,
-          gmail_thread_id: gmailThreadId,
+          gmail_message_id: step.channel === "email" ? gmailMessageId : null,
+          gmail_thread_id: step.channel === "email" ? gmailThreadId : null,
+          // For SMS, the same field slot holds the Twilio MessageSid;
+          // store the to_phone too so the inbound webhook can match replies.
+          twilio_message_sid: step.channel === "sms" ? gmailMessageId : null,
+          to_phone: step.channel === "sms" ? toE164(contact?.phone ?? null) : null,
           template: step.template ?? null,
           approval_mode: mode,
         },

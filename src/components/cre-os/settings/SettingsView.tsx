@@ -94,9 +94,116 @@ export function SettingsView() {
 
         <DataImportsSection />
         <GmailSection />
+        <TwilioSection />
         <ExtensionKeysSection />
       </div>
     </AppShell>
+  );
+}
+
+interface TwilioStatus {
+  connected: boolean;
+  missing?: string[];
+  hint?: string;
+  error?: string;
+  accountSidSuffix?: string;
+  messagingService?: { sid: string; friendlyName: string; useCase: string | null };
+  fromNumber?: string | null;
+  testMode?: boolean;
+  testDestination?: string | null;
+}
+
+function TwilioSection() {
+  const [status, setStatus] = useState<TwilioStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/integrations/twilio/status", { cache: "no-store" });
+        const json = await res.json();
+        setStatus(json);
+      } catch (err) {
+        setStatus({ connected: false, error: err instanceof Error ? err.message : String(err) });
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  return (
+    <Panel
+      eyebrow="Twilio"
+      num={3}
+      title="SMS — outbound + inbound"
+      actions={
+        loading ? (
+          <span className="font-mono text-[10px] text-cream-subtle">Loading…</span>
+        ) : status?.connected ? (
+          <StatusBadge tone="teal" size="xs">Connected</StatusBadge>
+        ) : (
+          <StatusBadge tone="amber" size="xs">Not connected</StatusBadge>
+        )
+      }
+    >
+      <p className="font-body text-[12px] text-cream-dim mb-4 leading-relaxed">
+        Powers SMS cadence steps and the inbound reply webhook. 10DLC compliance is handled at
+        the Messaging Service level — STOP / HELP keywords are recognized automatically.
+      </p>
+
+      {status?.connected ? (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <Stat label="Account SID" value={`…${status.accountSidSuffix ?? "????"}`} />
+          <Stat label="Messaging Service" value={status.messagingService?.friendlyName ?? "—"}
+            sub={status.messagingService?.sid.slice(0, 12) + "…"} />
+          <Stat label="From number" value={status.fromNumber ?? "(MG default)"} />
+          {status.testMode && (
+            <div className="sm:col-span-3 rounded border border-amber/30 bg-amber/[0.08] px-3 py-2 font-body text-[11px] text-amber">
+              🧪 TEST MODE — all outbound SMS rerouted to {status.testDestination}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {status?.missing && status.missing.length > 0 && (
+            <div className="rounded border border-amber/30 bg-amber/[0.08] px-3 py-3 font-body text-[12px] text-amber space-y-2">
+              <div className="font-mono text-[10px] uppercase tracking-eyebrow">Missing env vars</div>
+              <ul className="list-disc list-inside text-[11.5px]">
+                {status.missing.map((m) => <li key={m}>{m}</li>)}
+              </ul>
+              {status.hint && <p className="text-[11px] opacity-80">{status.hint}</p>}
+            </div>
+          )}
+          {status?.error && (
+            <div className="rounded border border-red-400/30 bg-red-500/[0.08] px-3 py-2 font-body text-[11px] text-red-300">
+              {status.error}
+              {status.hint && <div className="mt-1 opacity-80">{status.hint}</div>}
+            </div>
+          )}
+        </div>
+      )}
+
+      <details className="mt-4 group">
+        <summary className="font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle cursor-pointer hover:text-cream">
+          Env vars reference ▾
+        </summary>
+        <div className="mt-2 font-mono text-[10.5px] text-cream-dim space-y-0.5 leading-relaxed">
+          <div>TWILIO_ACCOUNT_SID = AC…</div>
+          <div>TWILIO_AUTH_TOKEN = (32-char hex) <span className="text-cream-subtle">— or use:</span></div>
+          <div>TWILIO_API_KEY_SID = SK…</div>
+          <div>TWILIO_API_KEY_SECRET = (32-char mixed)</div>
+          <div>TWILIO_MESSAGING_SERVICE_SID = MG42619b300575246f3174599c26476e98</div>
+          <div>TWILIO_FROM_NUMBER = +13178041980 <span className="text-cream-subtle">(optional fallback)</span></div>
+          <div>TWILIO_TEST_MODE = true <span className="text-cream-subtle">(optional — reroutes all sends)</span></div>
+          <div>TWILIO_TEST_DESTINATION = +13125550100 <span className="text-cream-subtle">(your test phone)</span></div>
+        </div>
+        <p className="mt-3 font-body text-[11px] text-cream-subtle leading-relaxed">
+          Configure the inbound webhook in Twilio: Messaging Services →
+          your service → Integration → "When a message comes in" →
+          <code className="font-mono text-coral-300 mx-1">https://stewardship-crm.netlify.app/api/webhooks/twilio/sms</code>
+        </p>
+      </details>
+    </Panel>
   );
 }
 
