@@ -58,14 +58,20 @@ export async function POST(req: NextRequest) {
 
   // Verify signature (defensive against spoofed inbound). On signature
   // failure we still 200 OK to Twilio but log + drop the message.
-  const sigValid = verifyTwilioSignature({
-    signature: req.headers.get("x-twilio-signature"),
-    url: `${req.nextUrl.origin}${req.nextUrl.pathname}`,
-    params,
-  });
-  if (!sigValid) {
-    console.warn("[twilio-webhook] signature invalid — dropping inbound", { from, messageSid });
-    return twiml(); // still 200 so Twilio doesn't retry
+  // TWILIO_SKIP_WEBHOOK_SIGNATURE=true allows operating without an Auth
+  // Token set yet (e.g. when only API Key creds are configured during
+  // initial setup). Should be removed once Auth Token is configured.
+  const skipSig = process.env.TWILIO_SKIP_WEBHOOK_SIGNATURE === "true";
+  if (!skipSig) {
+    const sigValid = verifyTwilioSignature({
+      signature: req.headers.get("x-twilio-signature"),
+      url: `${req.nextUrl.origin}${req.nextUrl.pathname}`,
+      params,
+    });
+    if (!sigValid) {
+      console.warn("[twilio-webhook] signature invalid — dropping inbound", { from, messageSid });
+      return twiml(); // still 200 so Twilio doesn't retry
+    }
   }
 
   if (!from || !messageSid) {
