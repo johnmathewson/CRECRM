@@ -221,7 +221,7 @@ export function Sidebar({
         {/* Footer */}
         <div className="px-4 py-3 border-t border-white/[0.04]">
           <div className="font-mono text-[10px] lg:text-[9px] text-cream-subtle">
-            john@stewardshipcre.com
+            inquiries@stewardshipcre.com
           </div>
         </div>
       </aside>

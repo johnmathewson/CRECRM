@@ -151,7 +151,7 @@ export async function POST(req: NextRequest) {
   if (intent === "help") {
     return twiml(
       `${BRAND_NAME} — John Mathewson, broker. ` +
-      `Reply STOP to opt out. Questions: john@stewardshipcre.com`
+      `Reply STOP to opt out. Questions: inquiries@stewardshipcre.com`
     );
   }
 

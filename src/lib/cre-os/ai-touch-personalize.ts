@@ -106,7 +106,11 @@ export const DEFAULT_SENDER = {
   name: "John Mathewson",
   title: "Broker, Stewardship CRE",
   phone: "(219) 781-9547",
-  email: "john@stewardshipcre.com",
+  // Use the actual inbox we monitor. The Gmail OAuth send-as account is
+  // inquiries@stewardshipcre.com, and the poll-gmail cron reads replies from
+  // the same box. Signing with any other address creates a phantom mailbox
+  // recipients might reply to, breaking the reply loop.
+  email: "inquiries@stewardshipcre.com",
   brand: "Stewardship CRE",
 };
 
