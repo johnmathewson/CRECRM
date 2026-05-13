@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Panel } from "@/components/cre-os/Panel";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { SendTouchDialog } from "@/components/cre-os/prospector/SendTouchDialog";
@@ -56,6 +57,14 @@ export function LeadsTab({
   const [searchQ, setSearchQ] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [composeTarget, setComposeTarget] = useState<PropertyLead | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResult, setBulkResult] = useState<{
+    attempted: number; sent: number; skipped: number; failed: number;
+    sent_rows?: Array<{ email: string }>;
+    skipped_rows?: Array<{ email: string | null; reason: string }>;
+    failed_rows?: Array<{ email: string | null; error: string }>;
+  } | null>(null);
+  const router = useRouter();
 
   const filtered = useMemo(() => {
     let out = leads;
@@ -92,6 +101,56 @@ export function LeadsTab({
   function toggleAll() {
     if (selected.size === filtered.length) setSelected(new Set());
     else setSelected(new Set(filtered.map((l) => l.id)));
+  }
+
+  async function runBulkFollowup(dryRun: boolean) {
+    const targets = filtered.filter((l) => selected.has(l.id) && l.email);
+    if (targets.length === 0) return;
+    const confirmed = dryRun || window.confirm(
+      `Send AI-personalized follow-up emails to ${targets.length} ${
+        targets.length === 1 ? "recipient" : "recipients"
+      }?\n\nEach message is uniquely written for that person based on the property + their engagement.\n\nThis sends real emails. Continue?`
+    );
+    if (!confirmed) return;
+
+    setBulkBusy(true);
+    setBulkResult(null);
+    try {
+      const r = await fetch("/api/leads/bulk-ai-followup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          propertyId,
+          leadIds: targets.map((l) => l.id),
+          dryRun,
+        }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error ?? `HTTP ${r.status}`);
+      setBulkResult({
+        attempted: data.attempted,
+        sent: data.sent,
+        skipped: data.skipped_count,
+        failed: data.failed_count,
+        sent_rows: data.sent_rows,
+        skipped_rows: data.skipped,
+        failed_rows: data.failed,
+      });
+      if (!dryRun && data.sent > 0) {
+        setSelected(new Set()); // clear selection after a real send
+        router.refresh();
+      }
+    } catch (err) {
+      setBulkResult({
+        attempted: targets.length,
+        sent: 0,
+        skipped: 0,
+        failed: targets.length,
+        failed_rows: [{ email: null, error: err instanceof Error ? err.message : String(err) }],
+      });
+    } finally {
+      setBulkBusy(false);
+    }
   }
 
   const selectedLeads = filtered.filter((l) => selected.has(l.id));
@@ -158,21 +217,78 @@ export function LeadsTab({
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={() => setSelected(new Set())}
-                className="px-3 py-1.5 rounded border border-white/[0.08] bg-white/[0.02] hover:bg-white/[0.06] font-mono text-[10px] uppercase tracking-eyebrow text-cream-dim hover:text-cream"
+                disabled={bulkBusy}
+                className="px-3 py-1.5 rounded border border-white/[0.08] bg-white/[0.02] hover:bg-white/[0.06] font-mono text-[10px] uppercase tracking-eyebrow text-cream-dim hover:text-cream disabled:opacity-40"
               >
                 Clear
               </button>
               <button
-                disabled
-                title="Coming next: AI-personalized bulk follow-up"
-                className="px-4 py-1.5 rounded border border-coral-400/40 bg-coral-400/[0.12] font-mono text-[10px] uppercase tracking-eyebrow text-coral-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={() => runBulkFollowup(true)}
+                disabled={bulkBusy || selectedWithEmail.length === 0}
+                title="Preview without sending"
+                className="px-3 py-1.5 rounded border border-white/[0.08] bg-white/[0.02] hover:bg-white/[0.06] font-mono text-[10px] uppercase tracking-eyebrow text-cream-dim hover:text-cream disabled:opacity-40"
               >
-                Send AI follow-up ({selectedWithEmail.length})
+                Dry-run
+              </button>
+              <button
+                onClick={() => runBulkFollowup(false)}
+                disabled={bulkBusy || selectedWithEmail.length === 0}
+                title="Each recipient gets a uniquely written AI message"
+                className="px-4 py-1.5 rounded border border-coral-400/40 bg-coral-400/[0.12] hover:bg-coral-400/[0.20] font-mono text-[10px] uppercase tracking-eyebrow text-coral-300 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {bulkBusy ? "Sending…" : `Send AI follow-up (${selectedWithEmail.length})`}
               </button>
             </div>
+          </div>
+        )}
+
+        {/* Bulk result panel */}
+        {bulkResult && (
+          <div className="mb-3 rounded border border-teal-400/30 bg-teal-400/[0.04] px-4 py-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="font-mono text-[10px] uppercase tracking-eyebrow text-teal-300">
+                Bulk follow-up complete
+              </div>
+              <button
+                onClick={() => setBulkResult(null)}
+                className="font-mono text-[10px] text-cream-subtle hover:text-cream"
+              >
+                ✕ dismiss
+              </button>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono text-[11.5px]">
+              <div><span className="text-cream-subtle">Attempted</span><div className="font-display text-lg text-cream">{bulkResult.attempted}</div></div>
+              <div><span className="text-cream-subtle">Sent</span><div className="font-display text-lg text-teal-300">{bulkResult.sent}</div></div>
+              <div><span className="text-cream-subtle">Skipped</span><div className="font-display text-lg text-amber">{bulkResult.skipped}</div></div>
+              <div><span className="text-cream-subtle">Failed</span><div className={`font-display text-lg ${bulkResult.failed > 0 ? "text-red-300" : "text-cream-subtle"}`}>{bulkResult.failed}</div></div>
+            </div>
+            {(bulkResult.skipped_rows?.length ?? 0) > 0 && (
+              <details className="pt-1">
+                <summary className="font-mono text-[10px] text-amber cursor-pointer hover:text-amber/80">
+                  {bulkResult.skipped} skipped — see why ▾
+                </summary>
+                <ul className="mt-1.5 space-y-0.5 max-h-40 overflow-y-auto font-mono text-[10.5px] text-cream-dim">
+                  {bulkResult.skipped_rows!.map((r, i) => (
+                    <li key={i}>{r.email ?? "(no email)"} — {r.reason}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            {(bulkResult.failed_rows?.length ?? 0) > 0 && (
+              <details className="pt-1">
+                <summary className="font-mono text-[10px] text-red-300 cursor-pointer">
+                  {bulkResult.failed} failed ▾
+                </summary>
+                <ul className="mt-1.5 space-y-0.5 max-h-40 overflow-y-auto font-mono text-[10.5px] text-red-300">
+                  {bulkResult.failed_rows!.map((r, i) => (
+                    <li key={i}>{r.email ?? "(no email)"} — {r.error}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
           </div>
         )}
 

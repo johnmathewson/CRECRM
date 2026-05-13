@@ -25,6 +25,13 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { getActiveGmailToken } from "@/lib/gmail-auth";
 import { sendMessage } from "@/lib/gmail";
 import { sendSms, toE164, getTwilioConfig } from "@/lib/twilio";
+import {
+  personalizeTouch,
+  archetypeFromContext,
+  DEFAULT_SENDER,
+  type PersonalizationChannel,
+  type LaneArchetype,
+} from "./ai-touch-personalize";
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 const SEND_DISPLAY_NAME = "John Mathewson";
@@ -236,12 +243,57 @@ export async function runCadence(options: CadenceRunOptions = {}): Promise<Caden
       contact = candidates[0] ?? null;
     }
 
-    // Apply template substitutions
-    const subject = applyTemplate(step.subject ?? defaultSubject(step.channel, property), property, contact);
-    const body = applyTemplate(step.body ?? defaultBody(step.channel, property, contact), property, contact);
-
-    // Approval mode for this channel
+    // Approval mode for this channel — drives whether we use AI or templates.
+    // Auto-send paths (email/SMS) use Claude for per-recipient
+    // personalization. Queued/drafted/manual paths use templates so a human
+    // edits before send (also faster + cheaper for high-volume preview).
     const mode = lane.approval_mode[step.channel] ?? "queue";
+    const useAI =
+      mode === "auto" &&
+      (step.channel === "email" || step.channel === "sms") &&
+      !options.dryRun;
+
+    let subject: string;
+    let body: string;
+
+    if (useAI) {
+      try {
+        const personalized = await personalizeTouch({
+          channel: step.channel as PersonalizationChannel,
+          archetype: lane.id ? archetypeFromContext({ laneTriggerType: (lane as Lane & { trigger_type?: string }).trigger_type ?? null }) as LaneArchetype : "generic",
+          stepIndex: enr.current_step,
+          property: {
+            address: property.address,
+            city: property.city,
+            state: property.state,
+            assetType: null, // intentionally pulled from properties if needed; PropertyMin doesn't have it yet
+            sqft: null,
+            yearsOwned: property.years_owned ?? null,
+            mortgageMaturityDate: property.mortgage_maturity_date ?? null,
+            mortgageLender: null,
+            estimatedValue: property.estimated_value ?? null,
+            name: property.name,
+          },
+          recipient: {
+            name: contact?.full_name ?? property.owner_name_raw,
+            role: null,
+            company: null,
+          },
+          sender: DEFAULT_SENDER,
+        });
+        subject = personalized.subject || defaultSubject(step.channel, property);
+        body = personalized.body;
+      } catch (err) {
+        // AI failed — log it, fall back to template so the cadence still progresses
+        result.errors.push(`Enrollment ${enr.id}: AI personalization failed (${err instanceof Error ? err.message : err}); falling back to template`);
+        subject = applyTemplate(step.subject ?? defaultSubject(step.channel, property), property, contact);
+        body = applyTemplate(step.body ?? defaultBody(step.channel, property, contact), property, contact);
+      }
+    } else {
+      // Template substitution — used for queued/drafted/manual paths
+      subject = applyTemplate(step.subject ?? defaultSubject(step.channel, property), property, contact);
+      body = applyTemplate(step.body ?? defaultBody(step.channel, property, contact), property, contact);
+    }
 
     let touchStatus: string = "queued";
     let sentAt: string | null = null;
