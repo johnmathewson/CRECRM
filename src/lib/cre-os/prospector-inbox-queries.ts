@@ -64,6 +64,16 @@ export interface InboxTouch {
   gmailThreadId: string | null;
   /** If this is a reply, the original outbound touch it replied to */
   parentTouchId: string | null;
+
+  // ── Reply intelligence (populated only on inbound replies) ──────────
+  /** AI-classified intent of the reply */
+  classification?: {
+    intent: "interested" | "question" | "declined" | "hostile" | "unsubscribe" | "out_of_office" | "unclear";
+    confidence: number;
+    summary: string;
+    suggestedReply: string;
+    nextAction?: string;
+  } | null;
 }
 
 export interface InboxSnapshot {
@@ -178,6 +188,7 @@ export async function loadProspectorInbox(
       createdAt: r.created_at as string,
       gmailThreadId: (metadata.gmail_thread_id as string) ?? null,
       parentTouchId: (metadata.parent_touch_id as string) ?? null,
+      classification: (metadata.classification as InboxTouch["classification"]) ?? null,
     };
   });
 
@@ -238,6 +249,7 @@ export async function loadTouchDetail(id: string): Promise<InboxTouch | null> {
     createdAt: data.created_at as string,
     gmailThreadId: (metadata.gmail_thread_id as string) ?? null,
     parentTouchId: (metadata.parent_touch_id as string) ?? null,
+    classification: (metadata.classification as InboxTouch["classification"]) ?? null,
   };
 }
 

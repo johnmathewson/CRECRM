@@ -33,6 +33,27 @@ const STATUS_TONE: Record<string, string> = {
   skipped: "text-cream-subtle border-white/[0.06]",
 };
 
+// AI-classified reply intents — short label + tone for badge rendering
+const INTENT_LABEL: Record<string, string> = {
+  interested: "Interested",
+  question: "Question",
+  declined: "Declined",
+  hostile: "Hostile",
+  unsubscribe: "Unsubscribe",
+  out_of_office: "OOO",
+  unclear: "Unclear",
+};
+
+const INTENT_TONE: Record<string, string> = {
+  interested: "text-teal-300 border-teal-400/40 bg-teal-400/[0.10]",
+  question: "text-amber border-amber/40 bg-amber/[0.10]",
+  declined: "text-cream-dim border-white/[0.12] bg-white/[0.04]",
+  hostile: "text-coral-300 border-coral-400/50 bg-coral-400/[0.12]",
+  unsubscribe: "text-coral-300 border-coral-400/40 bg-coral-400/[0.08]",
+  out_of_office: "text-cream-subtle border-white/[0.08] bg-white/[0.02]",
+  unclear: "text-cream-subtle border-white/[0.06] bg-white/[0.02]",
+};
+
 const fmtRelative = (iso: string | null): string => {
   if (!iso) return "—";
   const ms = Date.now() - new Date(iso).getTime();
@@ -306,6 +327,17 @@ function TouchRow({
           <div className="font-body text-[11.5px] text-cream-dim truncate mb-1.5">
             {touch.bodyPreview ?? <span className="italic text-cream-subtle">No body</span>}
           </div>
+          {/* AI-read summary on inbound replies — surfaces intent at a glance */}
+          {isReply && touch.classification && touch.classification.intent !== "unclear" && (
+            <div className="mb-1.5 flex items-start gap-2">
+              <span className={`shrink-0 font-mono text-[9px] uppercase tracking-eyebrow border px-1.5 py-0.5 rounded ${INTENT_TONE[touch.classification.intent]}`}>
+                {INTENT_LABEL[touch.classification.intent]}
+              </span>
+              <span className="font-body text-[11px] text-cream-dim italic truncate">
+                AI read: {touch.classification.summary}
+              </span>
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-2 font-mono text-[9.5px] uppercase tracking-eyebrow">
             {touch.laneName && (
               <span className="px-1.5 py-0.5 rounded border border-white/[0.08] bg-white/[0.02] text-cream-dim">
@@ -340,6 +372,15 @@ function TouchDetailPanel({ touch, onClose }: { touch: InboxTouch; onClose: () =
   const [fullBody, setFullBody] = useState<string | null>(touch.bodyFull ?? null);
   const [loading, setLoading] = useState(false);
 
+  // Suggested-reply editor state (only relevant for inbound replies w/ a draft)
+  const isReply = touch.direction === "inbound";
+  const draft = touch.classification?.suggestedReply ?? "";
+  const [replyBody, setReplyBody] = useState<string>(draft);
+  const [sending, setSending] = useState(false);
+  const [sendResult, setSendResult] = useState<
+    { ok: true; sentAt: string } | { ok: false; error: string } | null
+  >(null);
+
   useEffect(() => {
     if (touch.bodyFull) return;
     setLoading(true);
@@ -351,9 +392,38 @@ function TouchDetailPanel({ touch, onClose }: { touch: InboxTouch; onClose: () =
       .finally(() => setLoading(false));
   }, [touch.id, touch.bodyFull]);
 
+  // Reset reply editor whenever a different touch is selected
+  useEffect(() => {
+    setReplyBody(touch.classification?.suggestedReply ?? "");
+    setSendResult(null);
+  }, [touch.id, touch.classification?.suggestedReply]);
+
+  async function handleSendReply() {
+    if (!replyBody.trim() || sending) return;
+    setSending(true);
+    setSendResult(null);
+    try {
+      const r = await fetch(`/api/lane-touches/${touch.id}/send-reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: replyBody }),
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        setSendResult({ ok: false, error: data?.error ?? `HTTP ${r.status}` });
+      } else {
+        setSendResult({ ok: true, sentAt: data.sent_at });
+      }
+    } catch (err) {
+      setSendResult({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setSending(false);
+    }
+  }
+
   return (
     <Panel
-      eyebrow={touch.direction === "inbound" ? "Reply received" : "Sent"}
+      eyebrow={isReply ? "Reply received" : "Sent"}
       num={2}
       title={touch.subject ?? "(no subject)"}
       actions={
@@ -381,6 +451,29 @@ function TouchDetailPanel({ touch, onClose }: { touch: InboxTouch; onClose: () =
           <Meta label="Replied" value={touch.respondedAt ? new Date(touch.respondedAt).toLocaleString() : "—"} />
         </div>
 
+        {/* AI classification block — only on inbound replies */}
+        {isReply && touch.classification && (
+          <div className="rounded border border-coral-400/25 bg-coral-400/[0.04] p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <span className={`font-mono text-[9.5px] uppercase tracking-eyebrow border px-1.5 py-0.5 rounded ${INTENT_TONE[touch.classification.intent] ?? INTENT_TONE.unclear}`}>
+                {INTENT_LABEL[touch.classification.intent] ?? "Unclear"}
+              </span>
+              <span className="font-mono text-[9.5px] uppercase tracking-eyebrow text-cream-subtle">
+                Confidence {(touch.classification.confidence * 100).toFixed(0)}%
+              </span>
+            </div>
+            <div className="font-body text-[12px] text-cream-dim leading-relaxed italic">
+              {touch.classification.summary}
+            </div>
+            {touch.classification.nextAction && (
+              <div className="mt-2 font-body text-[11.5px] text-cream">
+                <span className="font-mono text-[9.5px] uppercase tracking-eyebrow text-cream-subtle">Next →</span>{" "}
+                {touch.classification.nextAction}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="rounded border border-white/[0.05] bg-white/[0.02] p-4">
           <div className="font-mono text-[9.5px] uppercase tracking-eyebrow text-cream-subtle mb-2">Body</div>
           {loading && <div className="text-cream-subtle text-[11.5px] italic">Loading…</div>}
@@ -390,6 +483,60 @@ function TouchDetailPanel({ touch, onClose }: { touch: InboxTouch; onClose: () =
             </pre>
           )}
         </div>
+
+        {/* Suggested-reply editor — only when there's a draft to act on */}
+        {isReply && draft && (
+          <div className="rounded border border-teal-400/25 bg-teal-400/[0.03] p-4">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <div className="font-mono text-[9.5px] uppercase tracking-eyebrow text-teal-300">
+                AI suggested reply · edit before sending
+              </div>
+              {replyBody.trim() !== draft.trim() && (
+                <div className="font-mono text-[9px] uppercase tracking-eyebrow text-amber">edited</div>
+              )}
+            </div>
+            <textarea
+              value={replyBody}
+              onChange={(e) => setReplyBody(e.target.value)}
+              rows={Math.min(14, Math.max(6, replyBody.split("\n").length + 1))}
+              className="w-full px-3 py-2 rounded bg-steward-surface/60 border border-white/[0.06] focus:border-teal-400/40 focus:outline-none font-body text-base lg:text-[12.5px] text-cream placeholder:text-cream-subtle leading-relaxed resize-y"
+              placeholder="The AI couldn't draft a reply — write your own."
+              disabled={sending || sendResult?.ok === true}
+            />
+            <div className="mt-2 flex items-center justify-between gap-3 flex-wrap">
+              <div className="font-mono text-[9.5px] uppercase tracking-eyebrow text-cream-subtle">
+                → {touch.contactName ?? touch.contactEmail ?? "owner"}
+                {touch.contactEmail && touch.contactName && (
+                  <span className="text-cream-subtle/60"> · {touch.contactEmail}</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {replyBody.trim() !== draft.trim() && !sending && sendResult?.ok !== true && (
+                  <button
+                    onClick={() => setReplyBody(draft)}
+                    className="px-3 py-1.5 rounded border border-white/[0.08] hover:bg-white/[0.04] font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle hover:text-cream"
+                  >
+                    Reset to AI draft
+                  </button>
+                )}
+                <button
+                  onClick={handleSendReply}
+                  disabled={!replyBody.trim() || sending || sendResult?.ok === true}
+                  className="px-4 py-1.5 rounded border border-teal-400/50 bg-teal-400/[0.10] hover:bg-teal-400/[0.18] disabled:opacity-40 disabled:cursor-not-allowed font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-teal-300"
+                >
+                  {sending ? "Sending…" : sendResult?.ok ? "Sent ✓" : "Send reply"}
+                </button>
+              </div>
+            </div>
+            {sendResult && (
+              <div className={`mt-2 font-body text-[11.5px] ${sendResult.ok ? "text-teal-300" : "text-coral-300"}`}>
+                {sendResult.ok
+                  ? `Sent at ${new Date(sendResult.sentAt).toLocaleTimeString()} — threaded under the original reply in Gmail.`
+                  : `Send failed: ${sendResult.error}`}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </Panel>
   );
