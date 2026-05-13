@@ -32,6 +32,11 @@ export type LaneArchetype =
   | "below_market_rent"
   | "probate"
   | "warm_lead_followup"
+  // NEW — buyer-side. This person looked at OUR active listing. We're the
+  // listing broker representing the seller. They're a prospective BUYER.
+  // Distinct from warm_lead_followup, which historically conflated buyer-
+  // and owner-side warm leads and caused mis-framed cold-acquisition copy.
+  | "listing_inquiry_followup"
   | "generic";
 
 export interface PersonalizationContext {
@@ -134,6 +139,15 @@ function archetypeAngle(archetype: LaneArchetype): string {
       return `This property is in probate or recently transferred via inheritance. The heirs may want to sell quickly to settle the estate. Lead with discretion and respect for the family situation. The value prop is a clean, tax-efficient sale that simplifies estate settlement.`;
     case "warm_lead_followup":
       return `This person already engaged with one of our active listings (viewed, downloaded OM, signed CA, or inquired). They've shown intent. Lead with their specific engagement and pick up the conversation. The value prop is helping them get the info or answer they need to make a decision.`;
+    case "listing_inquiry_followup":
+      return `CRITICAL FRAMING — read carefully:
+        - The PROPERTY listed below is being SOLD by the sender (John, Stewardship CRE is the LISTING BROKER representing the seller).
+        - The RECIPIENT below is a PROSPECTIVE BUYER who engaged with the listing on CREXi (signed a confidentiality agreement, downloaded the OM, requested information, or visited the listing page multiple times).
+        - The recipient came to US. We did NOT cold-prospect them. DO NOT use cold-outreach language like "I came across [property]", "wanted to start a conversation", "would you be open to a 5-minute call". That framing is wrong and will burn the lead.
+        - Instead: open by referencing their SPECIFIC engagement signal (e.g. "Saw you signed the CA on Liberty Square Tuesday", "Noticed you've been back to the listing a few times", "Thanks for downloading the OM on [property]").
+        - The value prop is helping them get the underwriting answers or property access they need to MAKE AN OFFER. Offer one concrete next step: a walk-through tour, a Q&A call on the rent roll / cap rate / deferred maintenance, an introduction to the asset manager, or the data room.
+        - DO NOT pitch them on selling their OWN property. They are the buyer side here. Confusing the direction will read as bot-generated and destroy trust.
+        - Sign off as John Mathewson, the listing broker.`;
     case "generic":
     default:
       return `Generic outreach to a property owner or prospect. Keep it brief and specific to whatever property data is available.`;
@@ -265,6 +279,9 @@ export async function personalizeTouch(ctx: PersonalizationContext): Promise<Per
 export function archetypeFromContext(opts: {
   laneTriggerType?: string | null;
   leadInterestLevel?: string | null;
+  /** Set true when the recipient engaged with our LISTING (we're selling, they're a buyer).
+   *  Routes to listing_inquiry_followup instead of the ambiguous warm_lead_followup. */
+  propertyIsListing?: boolean | null;
 }): LaneArchetype {
   if (opts.laneTriggerType) {
     const valid: LaneArchetype[] = [
@@ -275,7 +292,11 @@ export function archetypeFromContext(opts: {
       return opts.laneTriggerType as LaneArchetype;
     }
   }
-  // For warm leads (any engagement signal), use the followup archetype
+  // Listing-side warm lead: they engaged with our active listing → buyer-side ask.
+  if (opts.propertyIsListing && opts.leadInterestLevel) {
+    return "listing_inquiry_followup";
+  }
+  // Generic warm lead (no listing context — could be owner-side or buyer-side)
   if (opts.leadInterestLevel) {
     return "warm_lead_followup";
   }

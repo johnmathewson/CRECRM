@@ -10,6 +10,24 @@ interface PropertyHint {
   ownerNameRaw: string | null;
 }
 
+/**
+ * Lead context — optional. When the dialog is opened from a property's Leads
+ * tab on a specific warm lead, pass this so we can:
+ *   1. Pre-fill the To: field with their actual email
+ *   2. Generate a properly-framed AI draft that anchors on their engagement
+ *      (e.g. "Saw you signed the CA on Liberty Square Tuesday")
+ */
+export interface LeadContext {
+  name: string | null;
+  email: string | null;
+  role: string | null;
+  company: string | null;
+  /** CREXi level_of_interest — "Executed CA", "Viewed listing", etc. */
+  levelOfInterest: string | null;
+  visitCount: number | null;
+  lastActivityDate: string | null;
+}
+
 interface PropertySearchResult {
   id: string;
   slug: string | null;
@@ -26,8 +44,12 @@ function defaultSubject(p: PropertyHint | null): string {
   return `About ${p?.address ?? p?.name ?? "your property"}`;
 }
 function defaultBody(p: PropertyHint | null, toName: string): string {
+  // Placeholder text. The user is expected to click "Generate AI draft" or
+  // hand-write before sending. We do NOT auto-send this static template —
+  // it produced direction-wrong copy in the past (cold-prospecting framing
+  // on listing-side warm leads).
   const first = toName ? " " + toName.split(" ")[0] : "";
-  return `Hi${first},\n\nI represent Stewardship CRE in Northwest Indiana. I came across ${p?.address ?? p?.name ?? "your property"} and wanted to start a brief conversation.\n\nWould you be open to a 5-minute call this week?\n\n— John Mathewson\nStewardship CRE`;
+  return `Hi${first},\n\n[ Click "Generate AI draft" above to have the AI write a properly-framed message based on this recipient's engagement with ${p?.address ?? p?.name ?? "this property"}, or type your own. ]\n\n— John Mathewson\nStewardship CRE`;
 }
 
 /**
@@ -41,22 +63,31 @@ function defaultBody(p: PropertyHint | null, toName: string): string {
  */
 export function SendTouchDialog({
   property,
+  leadContext,
   open,
   onClose,
 }: {
   property?: PropertyHint | null;
+  /** Optional warm-lead context — when present, To: is pre-filled and the
+   *  "Generate AI draft" button anchors on their actual engagement. */
+  leadContext?: LeadContext | null;
   open: boolean;
   onClose: () => void;
 }) {
   const router = useRouter();
   const [selectedProperty, setSelectedProperty] = useState<PropertyHint | null>(property ?? null);
-  const [to, setTo] = useState("");
-  const [toName, setToName] = useState(property?.ownerNameRaw ?? "");
+  const [to, setTo] = useState(leadContext?.email ?? "");
+  const [toName, setToName] = useState(leadContext?.name ?? property?.ownerNameRaw ?? "");
   const [subject, setSubject] = useState(defaultSubject(property ?? null));
-  const [bodyText, setBodyText] = useState(defaultBody(property ?? null, property?.ownerNameRaw ?? ""));
+  const [bodyText, setBodyText] = useState(defaultBody(property ?? null, leadContext?.name ?? property?.ownerNameRaw ?? ""));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState<{ messageId: string } | null>(null);
+
+  // AI draft state
+  const [generating, setGenerating] = useState(false);
+  const [draftArchetype, setDraftArchetype] = useState<string | null>(null);
+  const [draftRationale, setDraftRationale] = useState<string | null>(null);
 
   // Property search state (only used when no property is preselected)
   const [searchQuery, setSearchQuery] = useState("");
@@ -67,13 +98,15 @@ export function SendTouchDialog({
   useEffect(() => {
     if (!open) return;
     setSelectedProperty(property ?? null);
-    setToName(property?.ownerNameRaw ?? "");
+    setToName(leadContext?.name ?? property?.ownerNameRaw ?? "");
     setSubject(defaultSubject(property ?? null));
-    setBodyText(defaultBody(property ?? null, property?.ownerNameRaw ?? ""));
-    setTo("");
+    setBodyText(defaultBody(property ?? null, leadContext?.name ?? property?.ownerNameRaw ?? ""));
+    setTo(leadContext?.email ?? "");
     setError(null);
     setSent(null);
-  }, [open, property]);
+    setDraftArchetype(null);
+    setDraftRationale(null);
+  }, [open, property, leadContext]);
 
   // Debounced property search
   useEffect(() => {
@@ -108,6 +141,48 @@ export function SendTouchDialog({
   }
 
   if (!open) return null;
+
+  async function generateDraft() {
+    if (!selectedProperty) {
+      setError("Pick a property first.");
+      return;
+    }
+    setGenerating(true);
+    setError(null);
+    try {
+      const r = await fetch("/api/prospector/personalize-draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          propertyId: selectedProperty.id,
+          recipient: leadContext
+            ? {
+                name: leadContext.name,
+                email: leadContext.email,
+                role: leadContext.role,
+                company: leadContext.company,
+                levelOfInterest: leadContext.levelOfInterest,
+                visitCount: leadContext.visitCount,
+                lastActivityDate: leadContext.lastActivityDate,
+              }
+            : {
+                name: toName || null,
+                email: to || null,
+              },
+        }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error ?? `HTTP ${r.status}`);
+      setSubject(data.subject ?? defaultSubject(selectedProperty));
+      setBodyText(data.body ?? "");
+      setDraftArchetype(data.archetype ?? null);
+      setDraftRationale(data.rationale ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "AI draft failed");
+    } finally {
+      setGenerating(false);
+    }
+  }
 
   async function send() {
     if (!selectedProperty) {
@@ -286,13 +361,50 @@ export function SendTouchDialog({
           </div>
         ) : selectedProperty ? (
           <div className="px-6 py-5 space-y-3 max-h-[80vh] overflow-y-auto">
+            {/* Lead context banner — visible only when launched with a known warm lead */}
+            {leadContext && (
+              <div className="rounded border border-coral-400/25 bg-coral-400/[0.04] px-3 py-2 font-mono text-[10px] uppercase tracking-eyebrow text-coral-300">
+                Warm lead ·{" "}
+                <span className="text-cream-dim normal-case">
+                  {leadContext.name ?? leadContext.email ?? "(unnamed)"}
+                  {leadContext.company && <> · {leadContext.company}</>}
+                  {leadContext.levelOfInterest && <> · {leadContext.levelOfInterest}</>}
+                  {typeof leadContext.visitCount === "number" && leadContext.visitCount > 1 && (
+                    <> · {leadContext.visitCount} visits</>
+                  )}
+                </span>
+              </div>
+            )}
+
+            {/* Generate AI draft action — replaces hardcoded template with grounded copy */}
+            <div className="flex items-center justify-between gap-3 rounded border border-teal-400/25 bg-teal-400/[0.04] px-3 py-2">
+              <div className="font-mono text-[10px] uppercase tracking-eyebrow text-teal-300">
+                {draftArchetype
+                  ? <>AI draft ready · archetype: <span className="text-cream-dim normal-case">{draftArchetype}</span></>
+                  : "AI draft · grounds on listing status + recipient engagement"}
+              </div>
+              <button
+                onClick={generateDraft}
+                disabled={generating}
+                className="px-3 py-1.5 rounded border border-teal-400/40 bg-teal-400/[0.10] hover:bg-teal-400/[0.20] font-mono text-[10px] uppercase tracking-eyebrow text-teal-300 disabled:opacity-40"
+              >
+                {generating ? "Generating…" : draftArchetype ? "Regenerate" : "Generate AI draft"}
+              </button>
+            </div>
+
+            {draftRationale && (
+              <div className="rounded border border-white/[0.05] bg-white/[0.02] px-3 py-2 font-body text-[11px] text-cream-subtle italic">
+                Anchor: {draftRationale}
+              </div>
+            )}
+
             <Field label="To (email)">
               <input
                 type="email"
                 value={to}
                 onChange={(e) => setTo(e.target.value)}
                 placeholder="owner@example.com"
-                autoFocus
+                autoFocus={!leadContext}
                 className={inputCls}
               />
             </Field>

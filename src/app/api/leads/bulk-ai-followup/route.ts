@@ -90,6 +90,12 @@ interface SentRow {
   email: string;
   messageId: string;
   threadId: string;
+  /** Populated on dry-run (and real sends) so the UI can preview tone */
+  subject?: string;
+  body?: string;
+  rationale?: string;
+  /** Recipient name — for the preview header */
+  recipientName?: string | null;
 }
 
 export async function POST(req: NextRequest) {
@@ -231,12 +237,26 @@ export async function POST(req: NextRequest) {
       continue;
     }
 
+    // Detect listing-side vs owner-side. If the property has any active for-sale
+    // status, the CREXi-style engagement signal means this person is a BUYER who
+    // looked at our listing — route to listing_inquiry_followup, not the generic
+    // warm_lead_followup (which historically produced owner-side cold-prospect copy).
+    const propertyIsListing = !!(
+      prop.for_sale_status &&
+      ["active", "listed", "pending", "under_contract"].includes(
+        String(prop.for_sale_status).toLowerCase()
+      )
+    );
+
     // Generate personalized message
     let personalized;
     try {
       personalized = await personalizeTouch({
         channel: "email",
-        archetype: archetypeFromContext({ leadInterestLevel: lead.levelOfInterest }),
+        archetype: archetypeFromContext({
+          leadInterestLevel: lead.levelOfInterest,
+          propertyIsListing,
+        }),
         property: {
           address: prop.address,
           city: prop.city,
@@ -277,6 +297,10 @@ export async function POST(req: NextRequest) {
         email: lead.email,
         messageId: "(dry-run)",
         threadId: "(dry-run)",
+        subject: personalized.subject,
+        body: personalized.body,
+        rationale: personalized.rationale,
+        recipientName: lead.name,
       });
       // Add to touched set so subsequent same-email leads in this batch get skipped
       touchedEmails.add(emailLower);
@@ -329,6 +353,10 @@ export async function POST(req: NextRequest) {
         email: lead.email,
         messageId: sentResult.id,
         threadId: sentResult.threadId,
+        subject: personalized.subject,
+        body: personalized.body,
+        rationale: personalized.rationale,
+        recipientName: lead.name,
       });
       // Add to touched set so subsequent same-email leads in this batch get skipped
       touchedEmails.add(emailLower);

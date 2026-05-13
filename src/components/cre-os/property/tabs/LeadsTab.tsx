@@ -60,7 +60,14 @@ export function LeadsTab({
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkResult, setBulkResult] = useState<{
     attempted: number; sent: number; skipped: number; failed: number;
-    sent_rows?: Array<{ email: string }>;
+    dryRun?: boolean;
+    sent_rows?: Array<{
+      email: string;
+      subject?: string;
+      body?: string;
+      rationale?: string;
+      recipientName?: string | null;
+    }>;
     skipped_rows?: Array<{ email: string | null; reason: string }>;
     failed_rows?: Array<{ email: string | null; error: string }>;
   } | null>(null);
@@ -132,6 +139,7 @@ export function LeadsTab({
         sent: data.sent,
         skipped: data.skipped_count,
         failed: data.failed_count,
+        dryRun: data.dryRun,
         sent_rows: data.sent_rows,
         skipped_rows: data.skipped,
         failed_rows: data.failed,
@@ -250,7 +258,7 @@ export function LeadsTab({
           <div className="mb-3 rounded border border-teal-400/30 bg-teal-400/[0.04] px-4 py-3 space-y-2">
             <div className="flex items-center justify-between">
               <div className="font-mono text-[10px] uppercase tracking-eyebrow text-teal-300">
-                Bulk follow-up complete
+                {bulkResult.dryRun ? "Dry-run complete · nothing sent" : "Bulk follow-up complete"}
               </div>
               <button
                 onClick={() => setBulkResult(null)}
@@ -261,10 +269,42 @@ export function LeadsTab({
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono text-[11.5px]">
               <div><span className="text-cream-subtle">Attempted</span><div className="font-display text-lg text-cream">{bulkResult.attempted}</div></div>
-              <div><span className="text-cream-subtle">Sent</span><div className="font-display text-lg text-teal-300">{bulkResult.sent}</div></div>
+              <div><span className="text-cream-subtle">{bulkResult.dryRun ? "Would send" : "Sent"}</span><div className="font-display text-lg text-teal-300">{bulkResult.sent}</div></div>
               <div><span className="text-cream-subtle">Skipped</span><div className="font-display text-lg text-amber">{bulkResult.skipped}</div></div>
               <div><span className="text-cream-subtle">Failed</span><div className={`font-display text-lg ${bulkResult.failed > 0 ? "text-red-300" : "text-cream-subtle"}`}>{bulkResult.failed}</div></div>
             </div>
+
+            {/* Sample previews — show generated subject + body so the broker
+                can sniff-test tone BEFORE committing to a real send. We
+                surface up to 3 (first, middle, last) for tonal variety. */}
+            {(bulkResult.sent_rows?.length ?? 0) > 0 && bulkResult.sent_rows!.some(r => r.body) && (
+              <details className="pt-1" open={bulkResult.dryRun}>
+                <summary className="font-mono text-[10px] uppercase tracking-eyebrow text-teal-300 cursor-pointer hover:text-teal-200">
+                  Preview messages ▾ (read 3 samples)
+                </summary>
+                <div className="mt-2 space-y-3">
+                  {pickSamples(bulkResult.sent_rows!).map((r, i) => (
+                    <div key={i} className="rounded border border-white/[0.08] bg-steward-base/40 p-3">
+                      <div className="font-mono text-[9.5px] uppercase tracking-eyebrow text-cream-subtle mb-1">
+                        → {r.recipientName ?? r.email}
+                        {r.recipientName && <span className="text-cream-subtle/60 normal-case"> · {r.email}</span>}
+                      </div>
+                      <div className="font-heading text-[12.5px] text-cream font-semibold mb-1.5">
+                        {r.subject ?? "(no subject)"}
+                      </div>
+                      <pre className="font-body text-[12px] text-cream-dim leading-relaxed whitespace-pre-wrap">
+                        {r.body ?? "(no body)"}
+                      </pre>
+                      {r.rationale && (
+                        <div className="mt-2 pt-2 border-t border-white/[0.05] font-mono text-[10px] text-cream-subtle italic">
+                          Anchor: {r.rationale}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
             {(bulkResult.skipped_rows?.length ?? 0) > 0 && (
               <details className="pt-1">
                 <summary className="font-mono text-[10px] text-amber cursor-pointer hover:text-amber/80">
@@ -400,7 +440,8 @@ export function LeadsTab({
         )}
       </Panel>
 
-      {/* Individual compose dialog */}
+      {/* Individual compose dialog — pre-fills To: email and wires the
+          AI-draft button to anchor on this specific lead's engagement */}
       {composeTarget && (
         <SendTouchDialog
           open={!!composeTarget}
@@ -411,10 +452,31 @@ export function LeadsTab({
             address: null,
             ownerNameRaw: composeTarget.name,
           }}
+          leadContext={{
+            name: composeTarget.name,
+            email: composeTarget.email,
+            role: composeTarget.role,
+            company: composeTarget.company,
+            levelOfInterest: composeTarget.interestRaw,
+            visitCount: composeTarget.visitCount,
+            lastActivityDate: composeTarget.lastActivityAt,
+          }}
         />
       )}
     </div>
   );
+}
+
+// Pick up to 3 samples for the preview (first, middle, last). When the set
+// has fewer than 3 rows with bodies, returns whatever's available.
+function pickSamples<T extends { body?: string }>(rows: T[]): T[] {
+  const withBody = rows.filter((r) => !!r.body);
+  if (withBody.length <= 3) return withBody;
+  return [
+    withBody[0],
+    withBody[Math.floor(withBody.length / 2)],
+    withBody[withBody.length - 1],
+  ];
 }
 
 // ── Mobile card — replaces the table row on phones ──────────────────────
