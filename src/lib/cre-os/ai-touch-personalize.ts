@@ -106,6 +106,16 @@ export interface PersonalizationContext {
     lastAction?: string | null;     // e.g. "Executed CA", "Viewed 7 times", "Downloaded OM"
     lastActionDate?: string | null;
     visitCount?: number | null;
+    /** Recent prior emails sent to this recipient about OTHER properties.
+     *  When present, the personalizer is instructed to vary the angle,
+     *  opening, and phrasing so the recipient doesn't get a copy/paste
+     *  of the previous email with just a different property name. */
+    priorOutreach?: Array<{
+      propertyName: string;
+      sentAt: string;
+      subjectPreview: string | null;
+      bodyPreview: string | null;
+    }> | null;
   };
 
   /** John's signature info */
@@ -290,6 +300,31 @@ CRITICAL: Do NOT mention, offer to send, reference, attach, or describe ANY spec
 
 RECIPIENT:
 ${recipLines.length > 0 ? recipLines.join("\n") : "(unknown recipient — keep it general)"}
+${(ctx.recipient.priorOutreach && ctx.recipient.priorOutreach.length > 0)
+  ? `
+⚠ VARIATION REQUIRED — this recipient has received recent emails about OTHER listings.
+Do NOT write a near-identical email to what they got before. Vary the opening line,
+the structural pattern, the sentence rhythm, and the specific phrasing. The recipient
+must FEEL this is a fresh, distinct message — not a copy/paste of the prior touch
+with a different property pasted in.
+
+Recent prior emails to this recipient (most recent first):
+${ctx.recipient.priorOutreach
+  .slice(0, 3)
+  .map((p) => {
+    const ageDays = Math.floor((Date.now() - new Date(p.sentAt).getTime()) / 86400_000);
+    return `  - About "${p.propertyName}" (${ageDays}d ago)${p.subjectPreview ? ` — Subject: "${p.subjectPreview}"` : ""}${p.bodyPreview ? `\n    Prior body excerpt: "${p.bodyPreview.slice(0, 200).replace(/\s+/g, " ").trim()}..."` : ""}`;
+  })
+  .join("\n")}
+
+Rules for this draft:
+  - Do NOT reuse the opening line or greeting structure from the prior email(s)
+  - Do NOT repeat phrases or sentence shapes that appear in the excerpt(s) above
+  - You MAY briefly acknowledge they've looked at our other listings if it feels natural
+    (e.g. "Different asset class but on a similar buyer-profile") — but do not make it
+    the lead. Keep the email about THIS property.
+  - The body should read as if to a fresh recipient — not a follow-up.`
+  : ""}
 
 CADENCE STEP: ${ctx.stepIndex != null ? `Touch #${ctx.stepIndex + 1}` : "First contact"}
 ${ctx.stepIndex != null && ctx.stepIndex > 0 ? "(They have not yet replied to prior touches. Keep the tone respectful — no pressure escalation.)" : ""}

@@ -86,6 +86,40 @@ export async function POST(req: NextRequest) {
     propertyIsListing,
   });
 
+  // Load prior outreach to this email about OTHER properties in the last 30 days
+  // so the personalizer can vary the angle/language for this draft.
+  let priorOutreach: Array<{ propertyName: string; sentAt: string; subjectPreview: string | null; bodyPreview: string | null }> = [];
+  if (recip.email) {
+    const emailLower = recip.email.toLowerCase().trim();
+    const cutoff30 = new Date(Date.now() - 30 * 86400_000).toISOString();
+    const { data: priorComms } = await supabase
+      .from("communications")
+      .select("to_addresses, occurred_at, subject, body_preview, property_id, property:properties(name)")
+      .eq("organization_id", ORG_ID)
+      .eq("direction", "outbound")
+      .neq("property_id", body.propertyId)
+      .gte("occurred_at", cutoff30)
+      .order("occurred_at", { ascending: false });
+    type Row = {
+      to_addresses: string[] | null;
+      occurred_at: string;
+      subject: string | null;
+      body_preview: string | null;
+      property: { name?: string | null } | Array<{ name?: string | null }> | null;
+    };
+    const propName = (j: Row["property"]) =>
+      !j ? "(another listing)" : Array.isArray(j) ? (j[0]?.name ?? "(another listing)") : (j.name ?? "(another listing)");
+    for (const c of (priorComms ?? []) as Row[]) {
+      if (!(c.to_addresses ?? []).some((a) => a.toLowerCase().trim() === emailLower)) continue;
+      priorOutreach.push({
+        propertyName: propName(c.property),
+        sentAt: c.occurred_at,
+        subjectPreview: c.subject,
+        bodyPreview: c.body_preview,
+      });
+    }
+  }
+
   try {
     const personalized = await personalizeTouch({
       channel: "email",
@@ -118,6 +152,7 @@ export async function POST(req: NextRequest) {
         lastAction: recip.levelOfInterest ?? null,
         lastActionDate: recip.lastActivityDate ?? null,
         visitCount: recip.visitCount ?? null,
+        priorOutreach: priorOutreach.length > 0 ? priorOutreach : null,
       },
       sender: DEFAULT_SENDER,
     });

@@ -201,6 +201,54 @@ export async function POST(req: NextRequest) {
   }
   const touchedEmails = new Set(Array.from(touchedEmailToProperty.keys()));
 
+  // ── Prior-outreach context per recipient ─────────────────────────────
+  // For each email we MIGHT send to, build a list of recent prior touches
+  // (about OTHER properties — we don't want to remind about the same
+  // property since we're explicitly blasting again). This is passed to
+  // the personalizer so it knows "this person got an email about Super 8
+  // 3 days ago" and consciously varies the angle, opening, and language
+  // for THIS draft about Liberty Square.
+  const priorOutreachByEmail = new Map<string, Array<{ propertyName: string; sentAt: string; subjectPreview: string | null; bodyPreview: string | null }>>();
+  {
+    // Pull the last 30 days of outbound about OTHER properties, plus their names
+    const cutoff30 = new Date(Date.now() - 30 * 86400_000).toISOString();
+    const { data: priorComms } = await supabase
+      .from("communications")
+      .select("to_addresses, occurred_at, subject, body_preview, property_id, property:properties(name)")
+      .eq("organization_id", ORG_ID)
+      .eq("direction", "outbound")
+      .neq("property_id", body.propertyId)
+      .gte("occurred_at", cutoff30)
+      .order("occurred_at", { ascending: false });
+    type PriorRow = {
+      to_addresses: string[] | null;
+      occurred_at: string;
+      subject: string | null;
+      body_preview: string | null;
+      property_id: string | null;
+      property: { name?: string | null } | Array<{ name?: string | null }> | null;
+    };
+    const propName = (joined: PriorRow["property"]): string => {
+      if (!joined) return "(another listing)";
+      if (Array.isArray(joined)) return joined[0]?.name ?? "(another listing)";
+      return joined.name ?? "(another listing)";
+    };
+    for (const c of (priorComms ?? []) as PriorRow[]) {
+      const pname = propName(c.property);
+      for (const addr of c.to_addresses ?? []) {
+        const e = addr.toLowerCase().trim();
+        const existing = priorOutreachByEmail.get(e) ?? [];
+        existing.push({
+          propertyName: pname,
+          sentAt: c.occurred_at,
+          subjectPreview: c.subject,
+          bodyPreview: c.body_preview,
+        });
+        priorOutreachByEmail.set(e, existing);
+      }
+    }
+  }
+
   // Resolve property_id → name for nicer skip-reason messages
   const otherPropertyIds = new Set<string>();
   Array.from(touchedEmailToProperty.values()).forEach((v) => {
@@ -309,25 +357,21 @@ export async function POST(req: NextRequest) {
       skipped.push({ leadId: lead.id, email: null, reason: "no email on file" });
       continue;
     }
-    // Skip: already touched within lookback window (ORG-WIDE).
-    // Attribute the skip to the originating property so the broker can see
-    // "ah, I emailed this person about Super 8 two days ago — that's why
-    // they're not on the Liberty blast list."
+    // Skip rule (refined):
+    //   - Same property in last N days → BLOCK (no double-email about same listing)
+    //   - Different property recently → ALLOW, but pass prior context to the
+    //     AI so it varies the angle/language (handled below in personalizer call)
+    //
+    // This lets the broker re-engage a lead across listings (perfectly
+    // legitimate — they inquired on both) while preventing a back-to-back
+    // identical email about the same property.
     const emailLower = lead.email.toLowerCase().trim();
-    if (touchedEmails.has(emailLower)) {
-      const prev = touchedEmailToProperty.get(emailLower);
-      const isSameProperty = prev?.propertyId === body.propertyId;
-      const propName = prev?.propertyId
-        ? (isSameProperty
-            ? "this property"
-            : propertyNamesById.get(prev.propertyId) ?? "another property")
-        : "recent outbound";
+    const priorTouch = touchedEmailToProperty.get(emailLower);
+    if (priorTouch && priorTouch.propertyId === body.propertyId) {
       skipped.push({
         leadId: lead.id,
         email: lead.email,
-        reason: isSameProperty
-          ? `outbound sent within last ${skipDays} days (this property)`
-          : `outbound sent within last ${skipDays} days re: ${propName} — would double-email`,
+        reason: `already emailed about this property within last ${skipDays} days`,
       });
       continue;
     }
@@ -400,6 +444,7 @@ export async function POST(req: NextRequest) {
           lastAction: lead.levelOfInterest,
           lastActionDate: lead.lastActivityDate,
           visitCount: lead.visitCount,
+          priorOutreach: priorOutreachByEmail.get(emailLower) ?? null,
         },
         sender: DEFAULT_SENDER,
       });

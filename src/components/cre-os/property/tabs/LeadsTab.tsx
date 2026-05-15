@@ -548,15 +548,16 @@ function LeadStatusPip({ lead }: { lead: PropertyLead }) {
     );
   }
 
-  // Cross-property warning: this person was emailed about ANOTHER listing
-  // recently. Shown alongside the primary pip so the broker doesn't double-
-  // email when blasting from this property's Leads tab.
+  // Cross-property info chip: this person was emailed about ANOTHER listing
+  // recently. INFORMATIONAL, not a block — emailing them about THIS property
+  // is allowed (they inquired here too) but the AI will vary the angle and
+  // language so they don't get a copy/paste of the prior email.
   const cross = lead.crossPropertyTouch ? (
     <span
-      className={`${base} border-coral-400/50 bg-coral-400/[0.08] text-coral-300`}
-      title={`Emailed about ${lead.crossPropertyTouch.propertyName} on ${new Date(lead.crossPropertyTouch.at).toLocaleString()}`}
+      className={`${base} border-amber/40 bg-amber/[0.06] text-amber`}
+      title={`Emailed about ${lead.crossPropertyTouch.propertyName} on ${new Date(lead.crossPropertyTouch.at).toLocaleString()} — AI will vary the next email accordingly`}
     >
-      ⚠ Also touched re: {lead.crossPropertyTouch.propertyName} {fmtRelative(lead.crossPropertyTouch.at)}
+      Also re: {lead.crossPropertyTouch.propertyName} {fmtRelative(lead.crossPropertyTouch.at)}
     </span>
   ) : null;
 
