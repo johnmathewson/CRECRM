@@ -69,6 +69,13 @@ export function LeadsTab({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [composeTarget, setComposeTarget] = useState<PropertyLead | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
+  // Progress while a chunked bulk-followup is running. Null when idle.
+  const [bulkProgress, setBulkProgress] = useState<{
+    current: number;
+    total: number;
+    chunkIndex: number;
+    totalChunks: number;
+  } | null>(null);
   const [bulkResult, setBulkResult] = useState<{
     attempted: number; sent: number; skipped: number; failed: number;
     dryRun?: boolean;
@@ -132,6 +139,10 @@ export function LeadsTab({
     else setSelected(new Set(filtered.map((l) => l.id)));
   }
 
+  // Chunk size: ~8 leads per request keeps each call well under any
+  // function-timeout limit (8 leads × ~5sec/lead = ~40s, leaving headroom).
+  const CHUNK_SIZE = 8;
+
   async function runBulkFollowup(dryRun: boolean) {
     const targets = filtered.filter((l) => selected.has(l.id) && l.email);
     if (targets.length === 0) return;
@@ -144,42 +155,86 @@ export function LeadsTab({
 
     setBulkBusy(true);
     setBulkResult(null);
+
+    // Chunk the leadIds so each request stays well under the function timeout.
+    // For 60 leads at ~5sec/lead = 5 minutes; one request would die. Splitting
+    // into chunks of 8 keeps each call ~40s and lets us show real progress.
+    const allLeadIds = targets.map((l) => l.id);
+    const chunks: string[][] = [];
+    for (let i = 0; i < allLeadIds.length; i += CHUNK_SIZE) {
+      chunks.push(allLeadIds.slice(i, i + CHUNK_SIZE));
+    }
+
+    // Accumulator for combined results across all chunks
+    type SentRow = { email: string; subject?: string; body?: string; rationale?: string; recipientName?: string | null };
+    type SkippedRow = { email: string | null; reason: string };
+    type FailedRow = { email: string | null; error: string };
+    const combined = {
+      attempted: 0,
+      sent: 0,
+      skipped: 0,
+      failed: 0,
+      dryRun,
+      sent_rows: [] as SentRow[],
+      skipped_rows: [] as SkippedRow[],
+      failed_rows: [] as FailedRow[],
+    };
+
     try {
-      const r = await fetch("/api/leads/bulk-ai-followup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          propertyId,
-          leadIds: targets.map((l) => l.id),
-          dryRun,
-        }),
-      });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error ?? `HTTP ${r.status}`);
-      setBulkResult({
-        attempted: data.attempted,
-        sent: data.sent,
-        skipped: data.skipped_count,
-        failed: data.failed_count,
-        dryRun: data.dryRun,
-        sent_rows: data.sent_rows,
-        skipped_rows: data.skipped,
-        failed_rows: data.failed,
-      });
-      if (!dryRun && data.sent > 0) {
-        setSelected(new Set()); // clear selection after a real send
+      for (let i = 0; i < chunks.length; i++) {
+        // Update progress so the user sees "Sending 16 of 60..."
+        setBulkProgress({ current: i * CHUNK_SIZE, total: allLeadIds.length, chunkIndex: i, totalChunks: chunks.length });
+
+        const r = await fetch("/api/leads/bulk-ai-followup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            propertyId,
+            leadIds: chunks[i],
+            dryRun,
+          }),
+        });
+
+        // The server returns JSON on success or HTML on a function timeout /
+        // crash. Sniff content-type to give a useful error.
+        const ct = r.headers.get("content-type") ?? "";
+        if (!ct.includes("application/json")) {
+          const text = await r.text();
+          throw new Error(
+            `Server returned non-JSON (HTTP ${r.status}). This usually means the function timed out on a chunk of ${chunks[i].length} leads. First 100 chars: ${text.slice(0, 100)}`
+          );
+        }
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error ?? `HTTP ${r.status}`);
+
+        combined.attempted += data.attempted ?? 0;
+        combined.sent += data.sent ?? 0;
+        combined.skipped += data.skipped_count ?? 0;
+        combined.failed += data.failed_count ?? 0;
+        if (data.sent_rows) combined.sent_rows.push(...data.sent_rows);
+        if (data.skipped) combined.skipped_rows.push(...data.skipped);
+        if (data.failed) combined.failed_rows.push(...data.failed);
+      }
+
+      setBulkProgress({ current: allLeadIds.length, total: allLeadIds.length, chunkIndex: chunks.length, totalChunks: chunks.length });
+      setBulkResult(combined);
+      if (!dryRun && combined.sent > 0) {
+        setSelected(new Set());
         router.refresh();
       }
     } catch (err) {
       setBulkResult({
-        attempted: targets.length,
-        sent: 0,
-        skipped: 0,
-        failed: targets.length,
-        failed_rows: [{ email: null, error: err instanceof Error ? err.message : String(err) }],
+        ...combined,
+        attempted: combined.attempted || targets.length,
+        failed: combined.failed + 1,
+        failed_rows: [
+          ...combined.failed_rows,
+          { email: null, error: err instanceof Error ? err.message : String(err) },
+        ],
       });
     } finally {
       setBulkBusy(false);
+      setBulkProgress(null);
     }
   }
 
@@ -288,6 +343,11 @@ export function LeadsTab({
                   ({selectedWithEmail.length} have email — only those can be emailed)
                 </span>
               )}
+              {bulkProgress && (
+                <span className="ml-3 text-amber">
+                  · Processed {bulkProgress.current}/{bulkProgress.total} (chunk {bulkProgress.chunkIndex + 1}/{bulkProgress.totalChunks})
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <button
@@ -308,10 +368,12 @@ export function LeadsTab({
               <button
                 onClick={() => runBulkFollowup(false)}
                 disabled={bulkBusy || selectedWithEmail.length === 0}
-                title="Each recipient gets a uniquely written AI message"
+                title="Each recipient gets a uniquely written AI message. Sent in chunks of 8 to avoid function timeouts."
                 className="px-4 py-1.5 rounded border border-coral-400/40 bg-coral-400/[0.12] hover:bg-coral-400/[0.20] font-mono text-[10px] uppercase tracking-eyebrow text-coral-300 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {bulkBusy ? "Sending…" : `Send AI follow-up (${selectedWithEmail.length})`}
+                {bulkBusy
+                  ? (bulkProgress ? `Sending ${bulkProgress.current}/${bulkProgress.total}…` : "Sending…")
+                  : `Send AI follow-up (${selectedWithEmail.length})`}
               </button>
             </div>
           </div>

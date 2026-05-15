@@ -40,7 +40,12 @@ import {
 import { captureVoiceExample } from "@/lib/cre-os/voice-examples";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// Each lead takes ~3-5 sec (AI personalize + Gmail send + DB writes). For 60
+// leads that's ~3-5 minutes. Even with chunking on the client, we want a
+// generous server budget to handle a single chunk gracefully. Netlify Pro
+// supports up to 900s; 300s is a sensible default that covers a 60-lead
+// chunk worst-case while staying well under any plan ceiling.
+export const maxDuration = 300;
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 const SEND_DISPLAY_NAME = "John Mathewson";
