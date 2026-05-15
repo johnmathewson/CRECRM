@@ -154,18 +154,67 @@ export async function POST(req: NextRequest) {
   const foundDirect = (directRows ?? []) as DirectLeadRow[];
 
   // ── Pull recent outbound communications for double-touch check ───────
+  // CRITICAL: this is ORG-WIDE, not per-property. The same person may appear
+  // as a lead on multiple listings (e.g. a broker who looked at Liberty
+  // Square AND Super 8). If we sent them an email about Liberty yesterday,
+  // we cannot send them an email about Super 8 today — that's a brand
+  // killer. Skip anyone who got ANY of our outbound in the last N days,
+  // regardless of which property triggered it.
   const skipDays = body.skipIfTouchedWithinDays ?? 7;
   const cutoff = new Date(Date.now() - skipDays * 86400_000).toISOString();
-  const { data: recentOut } = await supabase
-    .from("communications")
-    .select("to_addresses, occurred_at")
-    .eq("organization_id", ORG_ID)
-    .eq("property_id", body.propertyId)
-    .eq("direction", "outbound")
-    .gte("occurred_at", cutoff);
-  const touchedEmails = new Set<string>();
-  for (const c of (recentOut ?? []) as Array<{ to_addresses: string[] | null }>) {
-    for (const a of c.to_addresses ?? []) touchedEmails.add(a.toLowerCase().trim());
+  const [{ data: recentCommsOut }, { data: recentLaneSends }] = await Promise.all([
+    // Source 1: communications (the bulk-followup path, send-reply path)
+    supabase
+      .from("communications")
+      .select("to_addresses, occurred_at, property_id")
+      .eq("organization_id", ORG_ID)
+      .eq("direction", "outbound")
+      .gte("occurred_at", cutoff),
+    // Source 2: lane_touches (the Compose path historically, now dual-written
+    // but still query both for safety across the transition window)
+    supabase
+      .from("lane_touches")
+      .select("metadata, sent_at, property_id")
+      .eq("organization_id", ORG_ID)
+      .eq("status", "sent")
+      .gte("sent_at", cutoff),
+  ]);
+
+  // Build: email -> { whenTouched, whichPropertyId }. Newest wins.
+  const touchedEmailToProperty = new Map<string, { at: string; propertyId: string | null }>();
+  for (const c of (recentCommsOut ?? []) as Array<{ to_addresses: string[] | null; occurred_at: string; property_id: string | null }>) {
+    for (const a of c.to_addresses ?? []) {
+      const e = a.toLowerCase().trim();
+      const prev = touchedEmailToProperty.get(e);
+      if (!prev || c.occurred_at > prev.at) {
+        touchedEmailToProperty.set(e, { at: c.occurred_at, propertyId: c.property_id });
+      }
+    }
+  }
+  for (const t of (recentLaneSends ?? []) as Array<{ metadata: Record<string, unknown> | null; sent_at: string | null; property_id: string | null }>) {
+    const toEmail = ((t.metadata?.to as string) ?? "").toLowerCase().trim();
+    if (!toEmail || !t.sent_at) continue;
+    const prev = touchedEmailToProperty.get(toEmail);
+    if (!prev || t.sent_at > prev.at) {
+      touchedEmailToProperty.set(toEmail, { at: t.sent_at, propertyId: t.property_id });
+    }
+  }
+  const touchedEmails = new Set(Array.from(touchedEmailToProperty.keys()));
+
+  // Resolve property_id → name for nicer skip-reason messages
+  const otherPropertyIds = new Set<string>();
+  Array.from(touchedEmailToProperty.values()).forEach((v) => {
+    if (v.propertyId && v.propertyId !== body.propertyId) otherPropertyIds.add(v.propertyId);
+  });
+  const propertyNamesById = new Map<string, string>();
+  if (otherPropertyIds.size > 0) {
+    const { data: propNames } = await supabase
+      .from("properties")
+      .select("id, name")
+      .in("id", Array.from(otherPropertyIds));
+    for (const p of (propNames ?? []) as Array<{ id: string; name: string }>) {
+      propertyNamesById.set(p.id, p.name);
+    }
   }
 
   // ── Opt-outs (CAN-SPAM) ──────────────────────────────────────────────
@@ -260,10 +309,26 @@ export async function POST(req: NextRequest) {
       skipped.push({ leadId: lead.id, email: null, reason: "no email on file" });
       continue;
     }
-    // Skip: already touched within lookback window
+    // Skip: already touched within lookback window (ORG-WIDE).
+    // Attribute the skip to the originating property so the broker can see
+    // "ah, I emailed this person about Super 8 two days ago — that's why
+    // they're not on the Liberty blast list."
     const emailLower = lead.email.toLowerCase().trim();
     if (touchedEmails.has(emailLower)) {
-      skipped.push({ leadId: lead.id, email: lead.email, reason: `outbound sent within last ${skipDays} days` });
+      const prev = touchedEmailToProperty.get(emailLower);
+      const isSameProperty = prev?.propertyId === body.propertyId;
+      const propName = prev?.propertyId
+        ? (isSameProperty
+            ? "this property"
+            : propertyNamesById.get(prev.propertyId) ?? "another property")
+        : "recent outbound";
+      skipped.push({
+        leadId: lead.id,
+        email: lead.email,
+        reason: isSameProperty
+          ? `outbound sent within last ${skipDays} days (this property)`
+          : `outbound sent within last ${skipDays} days re: ${propName} — would double-email`,
+      });
       continue;
     }
     // Skip: opted out (CAN-SPAM) — unconditional, never email

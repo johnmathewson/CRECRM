@@ -62,6 +62,10 @@ export interface PropertyLead {
   /** When did THIS lead actually reply to one of our outbound touches?
    *  Pulled from lane_touches.status='responded' rows matched by contact_id. */
   repliedAt: string | null;
+  /** If this lead's email was touched on a DIFFERENT property recently,
+   *  surface that here so the broker doesn't accidentally double-email.
+   *  Null = not touched elsewhere recently. */
+  crossPropertyTouch: { propertyName: string; at: string } | null;
   /** Whether they signed an NDA */
   signedNda: boolean;
   /** Aggregate vault visits */
@@ -116,7 +120,7 @@ function normalizeInterest(s: string | null | undefined): LeadInterestLevel {
 export async function loadPropertyLeads(propertyId: string): Promise<PropertyLeadsSnapshot> {
   const sb = createServerSupabase();
 
-  const [crexiRes, leadsRes, ndaRes, vaultRes, latestReportRes, outboundRes, inboundRepliesRes, sentTouchesRes] = await Promise.all([
+  const [crexiRes, leadsRes, ndaRes, vaultRes, latestReportRes, outboundRes, inboundRepliesRes, sentTouchesRes, crossPropCommsRes, crossPropLaneRes] = await Promise.all([
     sb.from("crexi_leads_state")
       .select("id, name, email, phone, company, role, level_of_interest, number_of_visits, last_activity_date, first_seen_at, raw_panel, contact_id")
       .eq("organization_id", ORG_ID)
@@ -176,6 +180,23 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       .eq("property_id", propertyId)
       .eq("status", "sent")
       .order("sent_at", { ascending: false }),
+
+    // CROSS-PROPERTY touches — outbound communications + lane_touches sent
+    // about OTHER properties in the last 30 days. Surfaces a warning on
+    // each lead row so the broker doesn't double-email someone about
+    // Liberty Square if we already emailed them about Super 8.
+    sb.from("communications")
+      .select("to_addresses, occurred_at, property_id, property:properties(name)")
+      .eq("organization_id", ORG_ID)
+      .eq("direction", "outbound")
+      .neq("property_id", propertyId)
+      .gte("occurred_at", new Date(Date.now() - 30 * 86400_000).toISOString()),
+    sb.from("lane_touches")
+      .select("metadata, sent_at, property_id, property:properties(name)")
+      .eq("organization_id", ORG_ID)
+      .eq("status", "sent")
+      .neq("property_id", propertyId)
+      .gte("sent_at", new Date(Date.now() - 30 * 86400_000).toISOString()),
   ]);
 
   // ── Build the email → lastTouchedAt map (outbound we sent) ──
@@ -207,6 +228,47 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
     if (t.contact_id) {
       const prev = touchedByContactId.get(t.contact_id);
       if (!prev || t.sent_at > prev) touchedByContactId.set(t.contact_id, t.sent_at);
+    }
+  }
+
+  // ── Build the email → cross-property touch map ──
+  // For each email touched on a DIFFERENT property recently, record when
+  // and on which property. Surfaces a warning chip on the lead's row.
+  const crossPropByEmail = new Map<string, { propertyName: string; at: string }>();
+  // Supabase nested foreign join returns `property` as either an array or
+  // an object depending on cardinality — normalize both shapes here.
+  type Joined = { name?: string | null } | Array<{ name?: string | null }> | null | undefined;
+  const propName = (joined: Joined): string => {
+    if (!joined) return "(another listing)";
+    if (Array.isArray(joined)) return joined[0]?.name ?? "(another listing)";
+    return joined.name ?? "(another listing)";
+  };
+  for (const c of (crossPropCommsRes.data ?? []) as Array<{
+    to_addresses: string[] | null;
+    occurred_at: string;
+    property: Joined;
+  }>) {
+    const pname = propName(c.property);
+    for (const addr of c.to_addresses ?? []) {
+      const e = addr.toLowerCase().trim();
+      const prev = crossPropByEmail.get(e);
+      if (!prev || c.occurred_at > prev.at) {
+        crossPropByEmail.set(e, { propertyName: pname, at: c.occurred_at });
+      }
+    }
+  }
+  for (const t of (crossPropLaneRes.data ?? []) as Array<{
+    metadata: Record<string, unknown> | null;
+    sent_at: string | null;
+    property: Joined;
+  }>) {
+    if (!t.sent_at) continue;
+    const toEmail = ((t.metadata?.to as string) ?? "").toLowerCase().trim();
+    if (!toEmail) continue;
+    const pname = propName(t.property);
+    const prev = crossPropByEmail.get(toEmail);
+    if (!prev || t.sent_at > prev.at) {
+      crossPropByEmail.set(toEmail, { propertyName: pname, at: t.sent_at });
     }
   }
 
@@ -312,6 +374,7 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       ? (byEmailVal > byContactVal ? byEmailVal : byContactVal)
       : (byEmailVal ?? byContactVal);
     const repliedAt = c.contact_id ? repliedByContactId.get(c.contact_id) ?? null : null;
+    const crossPropertyTouch = email ? crossPropByEmail.get(email) ?? null : null;
     const signedNda = email ? ndaByEmail.has(email) : false;
     addLead({
       id: c.id,
@@ -330,6 +393,7 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       respondedAt: lastTouchedAt, // back-compat alias
       lastTouchedAt,
       repliedAt,
+      crossPropertyTouch,
       signedNda,
       vaultVisits: 0,
       notes,
@@ -372,6 +436,7 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       respondedAt: lastTouchedAt, // back-compat alias
       lastTouchedAt,
       repliedAt: null, // direct leads from /api/leads/intake don't track inbound replies the same way
+      crossPropertyTouch: email ? crossPropByEmail.get(email) ?? null : null,
       signedNda,
       vaultVisits: vaultByLead.get(l.id) ?? 0,
       notes: l.qualifier_summary,
@@ -401,6 +466,7 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       respondedAt: lastTouchedAt,
       lastTouchedAt,
       repliedAt: null,
+      crossPropertyTouch: email ? crossPropByEmail.get(email) ?? null : null,
       signedNda: true,
       vaultVisits: 0,
       notes: null,

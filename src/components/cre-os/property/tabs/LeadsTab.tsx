@@ -521,32 +521,50 @@ function pickSamples<T extends { body?: string }>(rows: T[]): T[] {
 function LeadStatusPip({ lead }: { lead: PropertyLead }) {
   const base = "font-mono text-[10px] uppercase tracking-eyebrow border px-1.5 py-0.5 rounded inline-block";
 
+  // Primary status: replied > touched > untouched (per-property)
+  let primary: React.ReactNode;
   if (lead.repliedAt) {
-    return (
+    primary = (
       <span className={`${base} border-coral-400/40 bg-coral-400/[0.10] text-coral-300`}>
         ✓ Replied {fmtRelative(lead.repliedAt)}
       </span>
     );
-  }
-  if (lead.lastTouchedAt) {
+  } else if (lead.lastTouchedAt) {
     const ageHours = (Date.now() - new Date(lead.lastTouchedAt).getTime()) / 3_600_000;
-    if (ageHours > 72) {
-      return (
-        <span className={`${base} border-amber/50 bg-amber/[0.10] text-amber`}>
-          Cold · {fmtRelative(lead.lastTouchedAt)}
-        </span>
-      );
-    }
-    return (
+    primary = ageHours > 72 ? (
+      <span className={`${base} border-amber/50 bg-amber/[0.10] text-amber`}>
+        Cold · {fmtRelative(lead.lastTouchedAt)}
+      </span>
+    ) : (
       <span className={`${base} border-teal-400/40 bg-teal-400/[0.08] text-teal-300`}>
         ✓ Sent {fmtRelative(lead.lastTouchedAt)}
       </span>
     );
+  } else {
+    primary = (
+      <span className={`${base} border-white/[0.10] bg-white/[0.02] text-cream-subtle`}>
+        Untouched
+      </span>
+    );
   }
-  return (
-    <span className={`${base} border-white/[0.10] bg-white/[0.02] text-cream-subtle`}>
-      Untouched
+
+  // Cross-property warning: this person was emailed about ANOTHER listing
+  // recently. Shown alongside the primary pip so the broker doesn't double-
+  // email when blasting from this property's Leads tab.
+  const cross = lead.crossPropertyTouch ? (
+    <span
+      className={`${base} border-coral-400/50 bg-coral-400/[0.08] text-coral-300`}
+      title={`Emailed about ${lead.crossPropertyTouch.propertyName} on ${new Date(lead.crossPropertyTouch.at).toLocaleString()}`}
+    >
+      ⚠ Also touched re: {lead.crossPropertyTouch.propertyName} {fmtRelative(lead.crossPropertyTouch.at)}
     </span>
+  ) : null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {primary}
+      {cross}
+    </div>
   );
 }
 
