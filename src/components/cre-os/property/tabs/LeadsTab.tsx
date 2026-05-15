@@ -41,11 +41,18 @@ const fmtRelative = (iso: string | null): string => {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 };
 
-// Filter buckets — each maps to a concrete state in the lead's lifecycle.
-// "hot" was historically "hot interest, no touched filter" — leads stayed here
-// forever even after we emailed them. Now it means "hot AND not yet touched"
-// so a lead falls out of Hot the moment you Compose+Send to them.
-type FilterTab = "all" | "hot" | "touched_waiting" | "replied" | "engaged" | "cold";
+// Filter buckets follow the lead LIFECYCLE (left → right is what-to-do-next):
+//   hot              → engaged high (CA/Offer/Info Request), you haven't emailed yet
+//   warm             → engaged but lower signal (OM download, flyer open), untouched
+//   touched_waiting  → you sent, no reply yet (any engagement level)
+//   replied          → they wrote back; draft is in the Prospector Inbox
+//   cold             → only visited the page; mass-email candidates
+//   all              → everything
+//
+// Each filter represents ONE state — no overlaps. A lead lives in exactly
+// one bucket at a time, and the bucket changes automatically as the lead's
+// state evolves (Compose+Send moves them out of Hot/Warm into Touched, etc.)
+type FilterTab = "all" | "hot" | "warm" | "touched_waiting" | "replied" | "cold";
 
 export function LeadsTab({
   snapshot,
@@ -80,19 +87,23 @@ export function LeadsTab({
   const filtered = useMemo(() => {
     let out = leads;
     const HOT_INTERESTS = ["executed_ca", "offer_submitted", "info_request"];
+    const WARM_INTERESTS = ["downloaded_om"]; // OM downloads, flyer opens — engaged but lower signal than hot
     if (filter === "hot") {
-      // Hot = hot-interest AND NOT yet touched. After you Compose+Send, the
-      // lead falls OUT of this bucket and into "Touched · waiting".
+      // Hot = hot-interest AND NOT yet touched. After Compose+Send,
+      // the lead falls OUT of Hot and into "Touched · waiting".
       out = out.filter((l) => HOT_INTERESTS.includes(l.interest) && !l.lastTouchedAt);
+    } else if (filter === "warm") {
+      // Warm = mid-engagement (OM download, flyer open) AND untouched.
+      // Falls into Touched · waiting after Compose+Send, same as Hot.
+      out = out.filter((l) => WARM_INTERESTS.includes(l.interest) && !l.lastTouchedAt);
     } else if (filter === "touched_waiting") {
-      // Touched + no reply yet — your real "follow-up needed" queue.
+      // You emailed, they haven't replied — the actual follow-up queue.
       out = out.filter((l) => l.lastTouchedAt && !l.repliedAt);
     } else if (filter === "replied") {
-      // They actually replied. Drafts are waiting in the Prospector Inbox.
+      // They wrote back. Drafts are in the Prospector Inbox.
       out = out.filter((l) => l.repliedAt);
-    } else if (filter === "engaged") {
-      out = out.filter((l) => ["executed_ca", "offer_submitted", "info_request", "downloaded_om"].includes(l.interest));
     } else if (filter === "cold") {
+      // Page visitors only — never crossed the engagement threshold.
       out = out.filter((l) => l.interest === "visited" || l.interest === "unknown");
     }
     if (searchQ.trim()) {
@@ -210,20 +221,32 @@ export function LeadsTab({
         </div>
 
         {/* Filter tabs */}
+        {/* Lifecycle helper — quick reference for what each chip means */}
+        <p className="mb-2 font-body text-[11px] text-cream-subtle leading-relaxed">
+          <strong className="text-cream-dim">Lifecycle:</strong>{" "}
+          <span className="text-coral-300">Hot/Warm</span> = engaged, untouched →{" "}
+          <span className="text-amber">Touched</span> = you sent, no reply →{" "}
+          <span className="text-coral-300">Replied</span> = drafts in Prospector Inbox.{" "}
+          <span className="text-cream-subtle">Cold</span> = viewers only.{" "}
+          Leads move automatically between buckets — Compose+Send shifts them out of Hot.
+        </p>
+
         <div className="flex flex-wrap items-center gap-2 mb-3">
-          {/* Filter chips reflect the actual lead state machine:
-              - Hot (needs first contact): hot interest, you haven't emailed yet
-              - Touched · waiting: you emailed, no reply yet
-              - Replied: they wrote back (drafts live in Prospector Inbox)
-              - All engaged: anyone who's done anything beyond just viewing
-              - Cold: viewers only
-              - All: everything */}
+          {/* Filter chips follow the lead lifecycle, left → right is what-to-do-next.
+              Each chip is mutually exclusive — a lead lives in exactly one state. */}
           <FilterChip
             label="Hot · needs first contact"
             tone="coral"
             active={filter === "hot"}
             onClick={() => setFilter("hot")}
             count={leads.filter((l) => ["executed_ca","offer_submitted","info_request"].includes(l.interest) && !l.lastTouchedAt).length}
+          />
+          <FilterChip
+            label="Warm · needs first contact"
+            tone="amber"
+            active={filter === "warm"}
+            onClick={() => setFilter("warm")}
+            count={leads.filter((l) => l.interest === "downloaded_om" && !l.lastTouchedAt).length}
           />
           <FilterChip
             label="Touched · waiting"
@@ -239,8 +262,12 @@ export function LeadsTab({
             onClick={() => setFilter("replied")}
             count={leads.filter((l) => l.repliedAt).length}
           />
-          <FilterChip label="All engaged" active={filter === "engaged"} onClick={() => setFilter("engaged")} />
-          <FilterChip label="Cold (viewers only)" active={filter === "cold"} onClick={() => setFilter("cold")} />
+          <FilterChip
+            label="Cold (viewers only)"
+            active={filter === "cold"}
+            onClick={() => setFilter("cold")}
+            count={leads.filter((l) => l.interest === "visited" || l.interest === "unknown").length}
+          />
           <FilterChip label="All" active={filter === "all"} onClick={() => setFilter("all")} count={totals.leadCount} />
           <input
             type="search"
