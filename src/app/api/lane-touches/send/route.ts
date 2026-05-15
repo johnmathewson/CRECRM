@@ -29,6 +29,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getActiveGmailToken } from "@/lib/gmail-auth";
 import { sendMessage } from "@/lib/gmail";
+import { captureVoiceExample } from "@/lib/cre-os/voice-examples";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -47,6 +48,10 @@ interface Body {
   enrollmentId?: string;
   stepIndex?: number;
   channel?: "email";
+  // Voice-example capture hints — optional. When set, used to tag the
+  // captured voice_examples row so future few-shot retrieval can find it.
+  aiDrafted?: boolean;     // true when the body came from "Generate AI draft"
+  personaSlug?: string;    // the persona used for the AI draft, if any
 }
 
 export async function POST(req: NextRequest) {
@@ -202,6 +207,24 @@ export async function POST(req: NextRequest) {
     });
   }
   const touchId = touch.id;
+
+  // Capture as a voice example. Manual compose paths are typically the
+  // most-authentic voice signal — broker wrote (or heavily edited) the body
+  // themselves. Source is "manual" unless the caller flagged it as
+  // ai-drafted via metadata.
+  await captureVoiceExample(supabase, {
+    channel: "email",
+    subject: body.subject,
+    body: body.bodyText,
+    source: body.aiDrafted ? "ai_drafted" : "manual",
+    personaSlug: body.personaSlug ?? null,
+    propertyId: body.propertyId,
+    recipientProfileSnapshot: {
+      to: recipientEmail,
+      to_name: recipientName ?? null,
+    },
+    sentAt,
+  });
 
   return NextResponse.json({
     ok: true,

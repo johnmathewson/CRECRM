@@ -21,6 +21,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getActiveGmailToken } from "@/lib/gmail-auth";
 import { sendMessage } from "@/lib/gmail";
+import { captureVoiceExample } from "@/lib/cre-os/voice-examples";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -156,6 +157,29 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       source: "send-suggested-reply",
       parent_inbound_touch_id: inbound.id,
     },
+  });
+
+  // Capture as a voice example. "ai_edited" if the broker changed the AI
+  // draft, "ai_drafted" if they sent the AI's suggestion as-is.
+  const aiDraft = classification.suggestedReply ?? "";
+  const wasEdited = !!body.body && body.body.trim() !== aiDraft.trim();
+  await captureVoiceExample(supabase, {
+    channel: "email",
+    subject,
+    body: replyBody,
+    source: wasEdited ? "ai_edited" : "ai_drafted",
+    userEditsDiff: wasEdited ? `AI draft was:\n${aiDraft}\n\nBroker sent:\n${replyBody}` : null,
+    // Reply persona — distinct from outbound. For now, slug-match to the
+    // intent if available, else fall back to listing_inquiry_followup (most
+    // common case for our current listings).
+    personaSlug: "listing_inquiry_followup",
+    propertyId: inbound.property_id,
+    recipientEngagement: "Replied to outbound",
+    recipientProfileSnapshot: {
+      from_email: toEmail,
+      from_name: toName,
+    },
+    sentAt,
   });
 
   return NextResponse.json({

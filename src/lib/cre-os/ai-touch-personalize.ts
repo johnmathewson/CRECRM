@@ -29,6 +29,11 @@ import {
   type Persona,
   type BrokerVoice,
 } from "@/lib/cre-os/personas-queries";
+import {
+  retrieveVoiceExamples,
+  renderExamplesAsFewShot,
+  type VoiceExample,
+} from "@/lib/cre-os/voice-examples";
 
 // ── Inputs ──────────────────────────────────────────────────────────────
 
@@ -56,6 +61,8 @@ export interface PersonalizationContext {
   stepIndex?: number;
   /** Optional tone hint for the broker's voice */
   voice?: "warm" | "direct" | "casual";
+  /** When set, narrow few-shot example retrieval to this property (and same-persona) */
+  propertyId?: string | null;
 
   property: {
     address?: string | null;
@@ -193,12 +200,14 @@ function channelInstructions(channel: PersonalizationChannel): string {
 function buildPrompt(
   ctx: PersonalizationContext,
   persona: Persona | null,
-  brokerVoice: BrokerVoice | null
+  brokerVoice: BrokerVoice | null,
+  examples: VoiceExample[]
 ): { system: string; userText: string } {
   const angle = persona?.angle_prompt ?? archetypeAngle(ctx.archetype);
   const personaVoice = persona ? renderVoiceProfile(persona.voice_profile) : "";
   const personaSkill = persona ? renderSkillProfile(persona.skill_profile) : "";
   const brokerVoiceBlock = renderBrokerVoice(brokerVoice);
+  const fewShotBlock = renderExamplesAsFewShot(examples);
   const channelMeta = channelInstructions(ctx.channel);
 
   const propLines: string[] = [];
@@ -241,6 +250,9 @@ function buildPrompt(
     `### PERSONA FOR THIS MESSAGE\n${angle}`,
     personaVoice && `### PERSONA VOICE\n${personaVoice}`,
     personaSkill && `### PERSONA SKILL\n${personaSkill}`,
+    // Few-shot block — real past emails to pattern on. Placed LATE in the system
+    // prompt so the model sees the live voice before reading output-format rules.
+    fewShotBlock,
     `### CHANNEL\n${channelMeta}`,
     `### OUTPUT FORMAT — return ONLY a JSON object with these fields:
 {
@@ -279,27 +291,35 @@ Generate the message now.`;
 // ── Public API ──────────────────────────────────────────────────────────
 
 export async function personalizeTouch(ctx: PersonalizationContext): Promise<PersonalizedTouch> {
-  // Load the persona + broker voice from DB so edits flow through immediately
-  // without code change. Falls back to hardcoded archetypeAngle() if the
-  // persona row doesn't exist yet.
+  // Load the persona + broker voice + few-shot examples from DB so edits +
+  // captured emails flow through immediately. All three failures are
+  // independently graceful — empty corpus, missing persona, or missing
+  // broker voice all degrade to the hardcoded fallback path.
   let persona: Persona | null = null;
   let brokerVoice: BrokerVoice | null = null;
+  let examples: VoiceExample[] = [];
   try {
     const sb = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     );
-    [persona, brokerVoice] = await Promise.all([
+    [persona, brokerVoice, examples] = await Promise.all([
       loadPersonaBySlugWithClient(sb, ctx.archetype),
       loadBrokerVoiceWithClient(sb),
+      retrieveVoiceExamples(sb, {
+        personaSlug: ctx.archetype,
+        propertyId: ctx.propertyId,
+        channel: ctx.channel,
+        limit: 5,
+      }),
     ]);
   } catch (err) {
     // Don't fail the draft if the DB lookup fails — the hardcoded fallbacks
     // keep the agent functional. Log so we notice when this happens.
-    console.warn("[personalizer] persona/voice load failed, using fallbacks:", err);
+    console.warn("[personalizer] persona/voice/examples load failed, using fallbacks:", err);
   }
 
-  const { system, userText } = buildPrompt(ctx, persona, brokerVoice);
+  const { system, userText } = buildPrompt(ctx, persona, brokerVoice, examples);
   const result = await callAnthropic({
     model: MODELS.SONNET,
     system,

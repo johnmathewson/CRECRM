@@ -37,6 +37,7 @@ import {
   archetypeFromContext,
   DEFAULT_SENDER,
 } from "@/lib/cre-os/ai-touch-personalize";
+import { captureVoiceExample } from "@/lib/cre-os/voice-examples";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -249,14 +250,19 @@ export async function POST(req: NextRequest) {
     );
 
     // Generate personalized message
+    // Capture archetype once so we can use it for both the prompt and the
+    // captured example below.
+    const personaArchetype = archetypeFromContext({
+      leadInterestLevel: lead.levelOfInterest,
+      propertyIsListing,
+    });
+
     let personalized;
     try {
       personalized = await personalizeTouch({
         channel: "email",
-        archetype: archetypeFromContext({
-          leadInterestLevel: lead.levelOfInterest,
-          propertyIsListing,
-        }),
+        archetype: personaArchetype,
+        propertyId: prop.id,
         property: {
           address: prop.address,
           city: prop.city,
@@ -347,6 +353,25 @@ export async function POST(req: NextRequest) {
           source: "bulk-ai-followup",
           source_lead_id: lead.id,
         },
+      });
+
+      // Capture as a voice example so future AI drafts pattern-match on it.
+      // Best-effort — failures here don't break the send loop.
+      await captureVoiceExample(supabase, {
+        channel: "email",
+        subject: personalized.subject,
+        body: personalized.body,
+        source: "ai_drafted",
+        personaSlug: personaArchetype,
+        propertyId: prop.id,
+        recipientEngagement: lead.levelOfInterest,
+        recipientProfileSnapshot: {
+          name: lead.name,
+          company: lead.company,
+          role: lead.role,
+          visit_count: lead.visitCount,
+        },
+        sentAt,
       });
 
       sent.push({
