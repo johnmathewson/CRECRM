@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
       id, name, address, city, state, asset_type, sub_type, sqft, units,
       year_built, cap_rate, building_class, submarket, for_sale_status,
       years_owned, last_sale_price, mortgage_maturity_date, mortgage_lender,
-      estimated_value, owner_name_raw
+      estimated_value, owner_name_raw, marketing_notes
     `)
     .eq("organization_id", ORG_ID)
     .eq("id", body.propertyId)
@@ -108,6 +108,7 @@ export async function POST(req: NextRequest) {
         mortgageLender: prop.mortgage_lender,
         estimatedValue: prop.estimated_value ? Number(prop.estimated_value) : null,
         name: prop.name,
+        marketingNotes: prop.marketing_notes,
       },
       recipient: {
         name: recip.name ?? null,

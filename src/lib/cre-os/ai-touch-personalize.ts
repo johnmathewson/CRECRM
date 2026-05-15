@@ -19,6 +19,16 @@
  */
 
 import { callAnthropic, parseJsonResponse, MODELS } from "@/lib/anthropic";
+import { createClient } from "@supabase/supabase-js";
+import {
+  loadPersonaBySlugWithClient,
+  loadBrokerVoiceWithClient,
+  renderVoiceProfile,
+  renderSkillProfile,
+  renderBrokerVoice,
+  type Persona,
+  type BrokerVoice,
+} from "@/lib/cre-os/personas-queries";
 
 // ── Inputs ──────────────────────────────────────────────────────────────
 
@@ -70,6 +80,9 @@ export interface PersonalizationContext {
     estimatedValue?: number | null;
     /** Property name (e.g. "Liberty Square Retail") */
     name?: string | null;
+    /** Optional anchor intel for THIS specific property — broker-authored.
+     *  Injected into the prompt when present. Lives in properties.marketing_notes. */
+    marketingNotes?: string | null;
   };
 
   recipient: {
@@ -165,8 +178,27 @@ function channelInstructions(channel: PersonalizationChannel): string {
   return `Format: Email. Subject line: 6-9 words, specific to the property. Body: 3-5 short paragraphs (50-90 words total). Plain text. End with a signature using the provided sender info.`;
 }
 
-function buildPrompt(ctx: PersonalizationContext): { system: string; userText: string } {
-  const angle = archetypeAngle(ctx.archetype);
+/**
+ * Assemble the system + user prompts. The four voice layers cascade in
+ * specificity:
+ *   1. Voice instructions (always-on tone/style rules, hardcoded fallback)
+ *   2. Broker voice (global — bio, brand voice, pet/banned phrases)
+ *   3. Persona angle + voice profile + skill profile (per workflow type)
+ *   4. Property marketing_notes (per listing — broker-authored anchor intel)
+ *
+ * Persona content is loaded from the `personas` table at runtime. If a row
+ * isn't found (migration not run, persona removed, etc.) we fall back to
+ * the hardcoded archetypeAngle() switch so the system stays functional.
+ */
+function buildPrompt(
+  ctx: PersonalizationContext,
+  persona: Persona | null,
+  brokerVoice: BrokerVoice | null
+): { system: string; userText: string } {
+  const angle = persona?.angle_prompt ?? archetypeAngle(ctx.archetype);
+  const personaVoice = persona ? renderVoiceProfile(persona.voice_profile) : "";
+  const personaSkill = persona ? renderSkillProfile(persona.skill_profile) : "";
+  const brokerVoiceBlock = renderBrokerVoice(brokerVoice);
   const channelMeta = channelInstructions(ctx.channel);
 
   const propLines: string[] = [];
@@ -200,29 +232,33 @@ function buildPrompt(ctx: PersonalizationContext): { system: string; userText: s
   if (r.lastAction) recipLines.push(`Most recent action: ${r.lastAction}${r.lastActionDate ? ` on ${r.lastActionDate}` : ""}`);
   if (r.visitCount && r.visitCount > 1) recipLines.push(`Has engaged with us ${r.visitCount} times`);
 
-  const system = `You write outreach messages on behalf of a commercial real estate broker.
-
-${VOICE_INSTRUCTIONS}
-
-ANGLE FOR THIS MESSAGE:
-${angle}
-
-CHANNEL:
-${channelMeta}
-
-OUTPUT FORMAT — return ONLY a JSON object with these fields:
+  // Build the system prompt by stacking layers from most-general to most-specific.
+  // Skipped sections render as empty strings — graceful when DB is empty.
+  const systemSections = [
+    `You write outreach messages on behalf of a commercial real estate broker.`,
+    VOICE_INSTRUCTIONS,
+    brokerVoiceBlock && `### BROKER PROFILE (always applies)\n${brokerVoiceBlock}`,
+    `### PERSONA FOR THIS MESSAGE\n${angle}`,
+    personaVoice && `### PERSONA VOICE\n${personaVoice}`,
+    personaSkill && `### PERSONA SKILL\n${personaSkill}`,
+    `### CHANNEL\n${channelMeta}`,
+    `### OUTPUT FORMAT — return ONLY a JSON object with these fields:
 {
   "subject": "string (empty for SMS)",
   "body": "string — the actual message",
   "rationale": "one sentence on what fact you anchored the message on"
 }
 
-Do not include any text outside the JSON object. Do not wrap in markdown code fences.`;
+Do not include any text outside the JSON object. Do not wrap in markdown code fences.`,
+  ].filter(Boolean);
+
+  const system = systemSections.join("\n\n");
 
   const userText = `Write a ${ctx.channel === "sms" ? "single SMS" : "single email"} to this recipient about this property.
 
 PROPERTY:
 ${propLines.length > 0 ? propLines.join("\n") : "(no property details provided)"}
+${ctx.property.marketingNotes ? `\nMARKETING NOTES FOR THIS LISTING (broker-authored anchor intel — weight heavily):\n${ctx.property.marketingNotes}` : ""}
 
 RECIPIENT:
 ${recipLines.length > 0 ? recipLines.join("\n") : "(unknown recipient — keep it general)"}
@@ -243,7 +279,27 @@ Generate the message now.`;
 // ── Public API ──────────────────────────────────────────────────────────
 
 export async function personalizeTouch(ctx: PersonalizationContext): Promise<PersonalizedTouch> {
-  const { system, userText } = buildPrompt(ctx);
+  // Load the persona + broker voice from DB so edits flow through immediately
+  // without code change. Falls back to hardcoded archetypeAngle() if the
+  // persona row doesn't exist yet.
+  let persona: Persona | null = null;
+  let brokerVoice: BrokerVoice | null = null;
+  try {
+    const sb = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+    [persona, brokerVoice] = await Promise.all([
+      loadPersonaBySlugWithClient(sb, ctx.archetype),
+      loadBrokerVoiceWithClient(sb),
+    ]);
+  } catch (err) {
+    // Don't fail the draft if the DB lookup fails — the hardcoded fallbacks
+    // keep the agent functional. Log so we notice when this happens.
+    console.warn("[personalizer] persona/voice load failed, using fallbacks:", err);
+  }
+
+  const { system, userText } = buildPrompt(ctx, persona, brokerVoice);
   const result = await callAnthropic({
     model: MODELS.SONNET,
     system,

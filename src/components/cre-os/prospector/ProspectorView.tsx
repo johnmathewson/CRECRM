@@ -64,6 +64,12 @@ export function ProspectorView({ snapshot }: { snapshot: ProspectorSnapshot }) {
             Inbox · Agent stream →
           </Link>
           <Link
+            href="/cre-os/prospector/personas"
+            className="block px-3 py-2 rounded border border-teal-400/30 bg-teal-400/[0.05] hover:bg-teal-400/[0.10] font-body text-[11px] text-cream font-medium transition-colors"
+          >
+            Personas · Agent voices →
+          </Link>
+          <Link
             href="/cre-os/settings/data-imports"
             className="block px-3 py-2 rounded border border-white/[0.08] bg-white/[0.02] hover:bg-white/[0.06] font-body text-[11px] text-cream-dim hover:text-cream transition-colors"
           >
