@@ -281,9 +281,12 @@ Do not include any text outside the JSON object. Do not wrap in markdown code fe
 PROPERTY:
 ${propLines.length > 0 ? propLines.join("\n") : "(no property details provided)"}
 ${ctx.property.marketingNotes ? `\nMARKETING NOTES FOR THIS LISTING (broker-authored anchor intel — weight heavily):\n${ctx.property.marketingNotes}` : ""}
-${(ctx.property.documentInventory && ctx.property.documentInventory.length > 0) ? `\nDOCUMENTS AVAILABLE FOR THIS LISTING (use to answer requests; mention the tier-appropriate release process):
+${(ctx.property.documentInventory && ctx.property.documentInventory.length > 0)
+  ? `\nDOCUMENTS AVAILABLE FOR THIS LISTING (use ONLY to answer requests — never invent documents not on this list):
 ${ctx.property.documentInventory.map((d) => `  - ${d.name} (${d.tier})`).join("\n")}
-If the recipient asks for a document not on this list, say "I don't have that on file — let me check what we have and get back to you."` : ""}
+If the recipient asks for a document not on this list, say "I don't have that on file — let me check what we have and get back to you." DO NOT offer to send, reference, attach, or describe any document that is NOT explicitly listed above.`
+  : `\nDOCUMENTS AVAILABLE FOR THIS LISTING: NONE ON FILE YET.
+CRITICAL: Do NOT mention, offer to send, reference, attach, or describe ANY specific document by name (no rent rolls, no property condition reports, no offering memorandums, no flyers, no environmental reports, no leases, no operating statements — NONE). If the recipient asks for any document, say "Let me check what we have on file and get back to you." When you offer a concrete next step, make it a question, a call, or a tour offer — NEVER a document send.`}
 
 RECIPIENT:
 ${recipLines.length > 0 ? recipLines.join("\n") : "(unknown recipient — keep it general)"}
