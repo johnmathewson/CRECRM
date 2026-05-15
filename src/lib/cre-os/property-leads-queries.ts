@@ -342,8 +342,32 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       byEmail.set(emailKey, lead);
       return;
     }
-    // No email — dedupe by name + phone
-    const key = `${lead.name.toLowerCase()}::${lead.phone ?? ""}`;
+    // No email — first check if an already-added has-email row has the
+    // SAME NAME. If so, merge into that row (this is the case where a
+    // CREXi row has the canonical email + a leads-table row for the same
+    // person has no email — we want to surface them as ONE row, not two).
+    const nameLc = lead.name.toLowerCase().trim();
+    if (nameLc && nameLc !== "(unknown)") {
+      for (const existing of Array.from(byEmail.values())) {
+        if (existing.name.toLowerCase().trim() === nameLc) {
+          // Merge non-conflicting fields into the email-bearing row
+          existing.phone = existing.phone ?? lead.phone;
+          existing.company = existing.company ?? lead.company;
+          existing.role = existing.role ?? lead.role;
+          existing.signedNda = existing.signedNda || lead.signedNda;
+          existing.vaultVisits = Math.max(existing.vaultVisits, lead.vaultVisits);
+          if (lead.lastActivityAt && (!existing.lastActivityAt || lead.lastActivityAt > existing.lastActivityAt)) {
+            existing.lastActivityAt = lead.lastActivityAt;
+          }
+          if (lead.respondedAt && (!existing.respondedAt || lead.respondedAt > existing.respondedAt)) {
+            existing.respondedAt = lead.respondedAt;
+          }
+          return;
+        }
+      }
+    }
+    // Still no email match — dedupe by name + phone within the no-email bucket
+    const key = `${nameLc}::${lead.phone ?? ""}`;
     if (!byNameAndPhone.has(key)) byNameAndPhone.set(key, lead);
   }
 

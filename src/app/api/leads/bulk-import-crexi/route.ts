@@ -342,7 +342,27 @@ async function readFileFromRequest(req: NextRequest): Promise<{ buffer: Buffer |
 
 // ── Handler ───────────────────────────────────────────────────────────────
 
-export async function POST(req: NextRequest) {
+export async function POST(_req: NextRequest) {
+  // DEPRECATED — this legacy endpoint creates `leads` table rows with
+  // source='crexi' that DUPLICATE crexi_leads_state rows, polluting the
+  // Leads tab with phantom no-email entries. It was responsible for the
+  // 80 phantom rows cleaned up on 2026-05-15.
+  //
+  // The correct CREXi ingestion path is /api/leads/crexi-report which
+  // writes ONLY to crexi_leads_state. CREXi rows should never end up in
+  // the `leads` table (that table is for direct inquiries — website
+  // forms, forwarded emails, etc.).
+  return NextResponse.json(
+    {
+      error: "This endpoint is deprecated. CREXi imports should use POST /api/leads/crexi-report which writes only to crexi_leads_state. The legacy bulk-import-crexi path created duplicate `leads` table rows that polluted the Leads tab.",
+    },
+    { status: 410 }, // Gone
+  );
+}
+
+// Legacy implementation kept below for reference but unreachable.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function _legacyImpl_unused(req: NextRequest) {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
