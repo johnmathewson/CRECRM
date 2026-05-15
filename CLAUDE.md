@@ -370,3 +370,61 @@ Or in Supabase Studio: Table Editor → `project_memory` → row.
 ---
 
 *Last updated: April 2026. When in doubt, ask John before assuming.*
+
+---
+
+## Prospector voice / skill — design philosophy (2026-05-15 distillation)
+
+A long external "Commercial Property Sale Inquiry Response Skill" document
+was proposed for the agent. We distilled the high-value parts into the
+existing system rather than dropping it in whole. Notes for future Claude:
+
+### Adopted into the system
+
+1. **First-person-as-John rule.** Personas (especially `listing_inquiry_followup`)
+   and the global broker voice both now enforce: never refer to John in third
+   person. Write "I can help" not "John can help."
+
+2. **Use the recipient's role first.** Recipient.role is already passed to
+   the personalizer in the user-text prompt; both the persona angle and the
+   global voice rules now explicitly instruct: anchor on the role, never
+   ask them to identify what they are.
+
+3. **4-tier information classification (public / qualified / nda / restricted)**
+   baked into the `listing_inquiry_followup` persona angle AS GUIDANCE, plus
+   shipped as actual structured data on `properties.document_inventory` so
+   the AI can reference real per-property documents. The combination is more
+   useful than either alone.
+
+4. **Red-flag awareness** (wholesalers, competitors fishing, tenants probing
+   for sale strategy, etc.) — folded into the persona angle.
+
+### Explicitly rejected from the doc — don't re-add
+
+- **CRM-note "Lead Summary" output format.** Wrong artifact — that's a
+  separate AI call, not part of the reply-drafter.
+- **Hardcoded "Follow-Up 1/2/3" templates.** Competes with the few-shot
+  retrieval system. Static templates lock in voice that can't evolve;
+  retrieval pulls John's *actual* recent emails as examples and gets sharper
+  over time.
+- **"Showing rules" with tenant-notice / seller-approval logic.** AI can't
+  verify or execute those — they're broker decisions. If we want to surface
+  flags ("⚠ this looks like a tour request, confirm with seller"), that's a
+  separate output schema, not drafting instructions.
+- **"Never reveal it's an agent" rule as worded.** Risky framing. The honest
+  framing is: AI drafts, John reviews + sends. So every email IS from John
+  with AI assistance. Don't dance around it.
+- **The 7,000-word document length itself.** Prompts dilute attention as
+  they grow; we kept the persona angle ~3,700 chars (was 1,318), well under
+  the point where the model starts ignoring instructions.
+
+### Pattern for future "skill upgrades"
+
+When someone proposes a new agent skill / instruction document:
+1. Identify the unique high-value insights (typically 3-5 ideas).
+2. Map each to an existing system layer (broker_voice / persona / property /
+   skill / few-shot example / output schema).
+3. Reject anything that duplicates what we have or competes with the
+   voice-learning loop.
+4. Implement surgically. Migrations + SQL updates beat appending text to
+   a prompt nine times out of ten.

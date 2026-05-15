@@ -91,6 +91,10 @@ export interface PersonalizationContext {
     /** Optional anchor intel for THIS specific property — broker-authored.
      *  Injected into the prompt when present. Lives in properties.marketing_notes. */
     marketingNotes?: string | null;
+    /** Per-property document inventory + disclosure tier. Injected into the
+     *  prompt when present so the AI knows what it can release and what to
+     *  gate on buyer qualification. */
+    documentInventory?: Array<{ name: string; tier: "public" | "qualified" | "nda" | "restricted" }> | null;
   };
 
   recipient: {
@@ -277,6 +281,9 @@ Do not include any text outside the JSON object. Do not wrap in markdown code fe
 PROPERTY:
 ${propLines.length > 0 ? propLines.join("\n") : "(no property details provided)"}
 ${ctx.property.marketingNotes ? `\nMARKETING NOTES FOR THIS LISTING (broker-authored anchor intel — weight heavily):\n${ctx.property.marketingNotes}` : ""}
+${(ctx.property.documentInventory && ctx.property.documentInventory.length > 0) ? `\nDOCUMENTS AVAILABLE FOR THIS LISTING (use to answer requests; mention the tier-appropriate release process):
+${ctx.property.documentInventory.map((d) => `  - ${d.name} (${d.tier})`).join("\n")}
+If the recipient asks for a document not on this list, say "I don't have that on file — let me check what we have and get back to you."` : ""}
 
 RECIPIENT:
 ${recipLines.length > 0 ? recipLines.join("\n") : "(unknown recipient — keep it general)"}

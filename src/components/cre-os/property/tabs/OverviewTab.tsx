@@ -5,7 +5,7 @@ import { Panel } from "@/components/cre-os/Panel";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { StatusBadge } from "@/components/cre-os/StatusBadge";
 import { TaskRow } from "@/components/cre-os/tasks/TaskRow";
-import type { PropertyDetail } from "@/lib/cre-os/property-queries";
+import type { PropertyDetail, DocumentInventoryItem } from "@/lib/cre-os/property-queries";
 
 const fmtMoney = (n: number | null) => {
   if (n === null || !Number.isFinite(n) || n <= 0) return "—";
@@ -52,8 +52,15 @@ export function OverviewTab({ p }: { p: PropertyDetail }) {
           <MarketingNotesEditor propertyId={p.id} initial={p.marketingNotes ?? ""} />
         </Panel>
 
+        {/* Document inventory — list of marketing/DD documents and their
+            disclosure tier. The AI reads this when buyers ask for specific
+            documents so it knows what to release and what to gate. */}
+        <Panel eyebrow="Document inventory" num={3} title="What's releasable and to whom">
+          <DocumentInventoryEditor propertyId={p.id} initial={p.documentInventory ?? []} />
+        </Panel>
+
         {(hasOwnershipData || hasLoanData || hasMarketData) && (
-          <Panel eyebrow="Ownership & debt" num={3} title="What CoStar knows">
+          <Panel eyebrow="Ownership & debt" num={4} title="What CoStar knows">
             <OwnerLoanPanel p={p} />
           </Panel>
         )}
@@ -255,6 +262,158 @@ function MarketingNotesEditor({ propertyId, initial }: { propertyId: string; ini
           className="px-3 py-1.5 rounded border border-teal-400/40 bg-teal-400/[0.10] hover:bg-teal-400/[0.18] disabled:opacity-40 font-mono text-[10px] uppercase tracking-eyebrow text-teal-300"
         >
           {saving ? "Saving…" : savedAt && !dirty ? "Saved ✓" : "Save notes"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Document inventory editor ───────────────────────────────────────────
+// List of marketing / due-diligence documents available for THIS property,
+// each tagged with a disclosure tier. The AI references this list when
+// buyers ask for specific documents so it knows what's releasable and
+// what needs to be gated.
+const TIER_LABELS: Record<DocumentInventoryItem["tier"], { label: string; tone: string; help: string }> = {
+  public: { label: "Public", tone: "border-teal-400/30 bg-teal-400/[0.06] text-teal-300", help: "Share freely (flyer, asking price, building basics)" },
+  qualified: { label: "Qualified", tone: "border-amber/40 bg-amber/[0.06] text-amber", help: "After light buyer qualification (full OM, rent roll summary)" },
+  nda: { label: "NDA", tone: "border-coral-400/40 bg-coral-400/[0.06] text-coral-300", help: "Requires NDA + buyer review (full leases, op statements)" },
+  restricted: { label: "Restricted", tone: "border-coral-400/60 bg-coral-400/[0.12] text-coral-300", help: "Never share without explicit broker approval" },
+};
+
+function DocumentInventoryEditor({ propertyId, initial }: { propertyId: string; initial: DocumentInventoryItem[] }) {
+  const [items, setItems] = useState<DocumentInventoryItem[]>(initial);
+  const [draftName, setDraftName] = useState("");
+  const [draftTier, setDraftTier] = useState<DocumentInventoryItem["tier"]>("public");
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  function addItem() {
+    const n = draftName.trim();
+    if (!n) return;
+    setItems([...items, { name: n, tier: draftTier }]);
+    setDraftName("");
+  }
+  function removeItem(i: number) {
+    setItems(items.filter((_, idx) => idx !== i));
+  }
+  function setItemTier(i: number, tier: DocumentInventoryItem["tier"]) {
+    setItems(items.map((it, idx) => (idx === i ? { ...it, tier } : it)));
+  }
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      const r = await fetch(`/api/properties/${propertyId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ document_inventory: items }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error ?? `HTTP ${r.status}`);
+      setSavedAt(Date.now());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="font-body text-[12px] text-cream-subtle leading-relaxed">
+        Tell the AI what documents exist for this listing and what tier of disclosure each one requires.
+        When a buyer asks for &ldquo;the rent roll&rdquo; or &ldquo;environmental reports&rdquo;, the AI will know
+        whether we have it and what to ask for before sending.
+      </p>
+
+      {/* Existing items */}
+      {items.length > 0 && (
+        <ul className="space-y-1.5">
+          {items.map((it, i) => {
+            const tone = TIER_LABELS[it.tier].tone;
+            return (
+              <li key={i} className="flex items-center gap-2 rounded border border-white/[0.05] bg-white/[0.02] px-2.5 py-1.5">
+                <span className="flex-1 font-body text-[12.5px] text-cream">{it.name}</span>
+                <select
+                  value={it.tier}
+                  onChange={(e) => setItemTier(i, e.target.value as DocumentInventoryItem["tier"])}
+                  className={`shrink-0 px-2 py-1 rounded border font-mono text-[9.5px] uppercase tracking-eyebrow ${tone}`}
+                >
+                  {(Object.keys(TIER_LABELS) as DocumentInventoryItem["tier"][]).map((t) => (
+                    <option key={t} value={t}>{TIER_LABELS[t].label}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => removeItem(i)}
+                  className="shrink-0 font-mono text-[11px] text-cream-subtle hover:text-coral-300"
+                  aria-label="Remove"
+                >
+                  ✕
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {/* Add new */}
+      <div className="flex gap-1.5 items-stretch">
+        <input
+          type="text"
+          value={draftName}
+          onChange={(e) => setDraftName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              addItem();
+            }
+          }}
+          placeholder="e.g. Full OM, Rent roll, Environmental Phase I"
+          className="flex-1 px-3 py-2 rounded bg-steward-surface/60 border border-white/[0.06] focus:border-teal-400/40 focus:outline-none font-body text-base lg:text-[12.5px] text-cream placeholder:text-cream-subtle"
+        />
+        <select
+          value={draftTier}
+          onChange={(e) => setDraftTier(e.target.value as DocumentInventoryItem["tier"])}
+          className="shrink-0 px-2 py-2 rounded border border-white/[0.08] bg-white/[0.02] font-mono text-[10px] uppercase tracking-eyebrow text-cream-dim"
+        >
+          {(Object.keys(TIER_LABELS) as DocumentInventoryItem["tier"][]).map((t) => (
+            <option key={t} value={t}>{TIER_LABELS[t].label}</option>
+          ))}
+        </select>
+        <button
+          onClick={addItem}
+          disabled={!draftName.trim()}
+          className="shrink-0 px-3 py-2 rounded border border-white/[0.08] bg-white/[0.02] hover:bg-white/[0.06] disabled:opacity-40 font-mono text-[10px] uppercase tracking-eyebrow text-cream-dim hover:text-cream"
+        >
+          + Add
+        </button>
+      </div>
+
+      {/* Tier legend */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-2 border-t border-white/[0.05]">
+        {(Object.keys(TIER_LABELS) as DocumentInventoryItem["tier"][]).map((t) => (
+          <div key={t} className="flex items-start gap-2 font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle">
+            <span className={`shrink-0 px-1.5 py-0.5 rounded border ${TIER_LABELS[t].tone}`}>{TIER_LABELS[t].label}</span>
+            <span className="normal-case font-body text-[11px] text-cream-subtle">{TIER_LABELS[t].help}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Save bar */}
+      <div className="flex items-center justify-between gap-3 pt-2">
+        <div className="font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle">
+          {error && <span className="text-coral-300">Save failed: {error}</span>}
+          {!error && savedAt && <span className="text-teal-300">Saved · live now</span>}
+          {!error && !savedAt && <span>{items.length} document{items.length === 1 ? "" : "s"} on file</span>}
+        </div>
+        <button
+          onClick={save}
+          disabled={saving}
+          className="px-3 py-1.5 rounded border border-teal-400/40 bg-teal-400/[0.10] hover:bg-teal-400/[0.18] disabled:opacity-40 font-mono text-[10px] uppercase tracking-eyebrow text-teal-300"
+        >
+          {saving ? "Saving…" : "Save inventory"}
         </button>
       </div>
     </div>
