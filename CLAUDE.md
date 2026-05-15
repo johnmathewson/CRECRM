@@ -280,6 +280,57 @@ Use existing `.glass` classes for cards. Mobile-first: 16px+ font, no horizontal
 
 ---
 
+## Daily CREXi lead reports → must land on `contacts` (REQUIREMENT)
+
+> Locked decision, 2026-05-15. **Every CREXi-sourced lead must end up as a row in `contacts`**, with `crexi_leads_state` linking to it via `contact_id`. The contacts table is canonical — `crexi_leads_state` is a per-listing denormalized cache. A lead that exists only in `crexi_leads_state` is a data leak.
+
+### Flow
+
+```
+CREXi → "Lead Report - <property>.xlsx" emailed daily
+   ↓
+   inquiries@stewardshipcre.com  (user is redirecting these here once everything is set up)
+   ↓
+   poll-gmail cron picks up the attachment
+   ↓
+   parseCrexiReport() extracts every lead from the Detail sheet
+   ↓
+   For each lead (find-or-create chain):
+     1. contacts row    — match by lower(email); create if missing
+     2. crexi_leads_state row — match by (property_id, lower(email)); link contact_id; create if missing
+     3. activities entry on the property timeline ("CREXi engagement: <signal>")
+```
+
+### Implementation rules
+
+- **Email is the canonical key.** Every CREXi user has an email (CREXi requires it to register). If a parsed row has no email, the parser is wrong — fix the parser, don't insert a ghost row.
+- **Match into `contacts` first**, then create/update `crexi_leads_state` with the resulting `contact_id`. Never create a `crexi_leads_state` row without a `contact_id` set.
+- **Dedup is case-insensitive on email.** `lower(trim(email))`. Same goes for name fallback matching when email collides across spellings.
+- **Don't double-touch contacts.** If a contact already exists (via marketing-site form, NDA signing, prior lead, etc.), enrich it — don't create a duplicate. Preserve `full_name`, `email`, `phone`, `company` with `COALESCE(existing, new)` semantics so manually-curated fields win over auto-imports.
+- **Activities, not just state.** Every CREXi-sourced engagement signal (Executed CA / Downloaded OM / Visited Page N times) should write an `activities` row on the property timeline so the broker sees the journey, not just the latest state snapshot.
+- **The browser extension scrape path** (`/api/extension/crexi-leads`) is secondary — it captures lead-list-table rows without email (CREXi's UI doesn't expose email until you click into the detail panel). It is a **provisional cache** only; the XLSX import is always source of truth and must overwrite/merge.
+
+### Schema linkage (verified production)
+
+```
+contacts.id  ←──────────────────  crexi_leads_state.contact_id  (FK, must be set)
+contacts.id  ←──────────────────  leads.contact_id              (already in place)
+contacts.id  ←──────────────────  activities.contact_id         (link engagement signals)
+```
+
+### Known historical issue (cleaned 2026-05-15)
+
+The browser extension and the XLSX parser were writing to `crexi_leads_state` independently, with case-sensitive name-match dedup. Result: 100+ ghost rows on Liberty Square + Super 8 with `email = NULL` and `contact_id = NULL`. Cleaned via two SQL passes (~86 ghosts removed, 12 emails backfilled, 12 net-new leads inserted from fresh XLSX). **The upsert and extension paths still need to be hardened to prevent recurrence** — flagged in open threads.
+
+### Open work tied to this requirement
+
+1. **`crexi-report` route** (`src/app/api/leads/crexi-report/route.ts`) — currently writes to `crexi_leads_state` only. Extend to find-or-create `contacts` row first and persist `contact_id`. **Mirror the contact-resolution pattern from `/api/extension/crexi-leads`** (which already does email → phone match into `contacts`), but make XLSX the authoritative source.
+2. **Dedup hardening** — change `.eq("name", lead.fullName)` to case-insensitive trim-aware match, and add an email-primary key everywhere.
+3. **Backfill `contact_id` on existing rows** — one-time migration: for every existing `crexi_leads_state` row, find-or-create a contact and link.
+4. **Activities backfill** — write timeline entries for every CREXi engagement signal currently sitting only in `crexi_leads_state`.
+
+---
+
 ## External integrations status
 
 - **Google Workspace:** mailbox `inquiries@stewardshipcre.com` being provisioned (separate from `john@stewardshipcre.com` to keep AI watcher's signal clean — no classification step needed)
@@ -308,6 +359,7 @@ Use existing `.glass` classes for cards. Mobile-first: 16px+ font, no horizontal
 4. **Apps Script email watcher** — separate Apps Script project in John's Google Workspace. Polls `inquiries@stewardshipcre.com` every 60s, POSTs new emails to `/api/leads/intake`.
 5. **Twilio SMS + voice webhooks** — point at `/api/leads/intake` (or dedicated `/api/leads/sms-webhook`, `/api/leads/voice-webhook`) with `source: 'sms'` / `source: 'phone'`.
 6. **Public site contact form** — currently unwired; will POST to this CRM's `/api/leads/intake` once endpoint exists.
+7. **CREXi lead reports → contacts table** (locked 2026-05-15, see dedicated section above) — extend `/api/leads/crexi-report` to find-or-create a `contacts` row for every parsed lead and link `crexi_leads_state.contact_id`. Backfill existing rows. Daily reports being redirected to `inquiries@stewardshipcre.com`.
 
 **Reading current build state from any machine:**
 ```sql
