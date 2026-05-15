@@ -56,6 +56,10 @@ export interface BrokerVoice {
   always_do: string[];
   never_do: string[];
   sign_off_default: string | null;
+  // CAN-SPAM + send-rate compliance fields (added migration 0030)
+  physical_address: string | null;
+  unsubscribe_email: string | null;
+  daily_send_cap: number;
   updated_at: string;
 }
 
@@ -180,4 +184,25 @@ export function renderBrokerVoice(bv: BrokerVoice | null): string {
   }
   if (bv.sign_off_default) lines.push(`DEFAULT SIGN-OFF: ${bv.sign_off_default}`);
   return lines.join("\n\n");
+}
+
+/** Render the CAN-SPAM footer the AI must include verbatim in every email.
+ *  Read by the personalizer + injected as a final REQUIRED instruction. */
+export function renderCanSpamFooter(bv: BrokerVoice | null): string {
+  if (!bv) return "";
+  const address = bv.physical_address ?? "";
+  const unsubEmail = bv.unsubscribe_email ?? "inquiries@stewardshipcre.com";
+  if (!address || address.includes("[TODO")) {
+    // No address configured — emit a placeholder that fails open (still
+    // CAN-SPAM-compliant via the unsubscribe-by-reply instruction).
+    return `IMPORTANT — append this exact footer to every email body, on its own lines after your signature:
+
+---
+If you'd prefer not to receive future emails from us, reply with "unsubscribe" or email ${unsubEmail}.`;
+  }
+  return `IMPORTANT — append this exact footer to every email body, on its own lines after your signature:
+
+---
+${address}
+If you'd prefer not to receive future emails from us, reply with "unsubscribe" or email ${unsubEmail}.`;
 }

@@ -24,6 +24,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getActiveGmailToken } from "@/lib/gmail-auth";
 import { parseCrexiReport, type CrexiLead } from "@/lib/cre-os/parse-crexi-report";
+import { findOrCreateContact } from "@/lib/cre-os/find-or-create-contact";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -123,7 +124,29 @@ async function matchProperty(supabase: any, parsed: { propertyName: string | nul
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function upsertLead(supabase: any, propertyId: string, lead: CrexiLead): Promise<"inserted" | "updated" | "skipped"> {
-  // Match by (property_id, email) primarily; fall back to (property_id, name)
+  // ── 1. Find or create the canonical contact (REQUIRED) ──────────────
+  // Architecture commitment (CLAUDE.md, 2026-05-15): every CREXi lead
+  // MUST end up in `contacts`. Don't insert a crexi_leads_state row
+  // without a contact_id.
+  const contactResult = await findOrCreateContact(supabase, {
+    name: lead.fullName,
+    email: lead.email,
+    phone: lead.phone,
+    role: lead.industryRole,
+    company: lead.company,
+    levelOfInterest: lead.levelOfInterest,
+  });
+  if ("error" in contactResult) {
+    console.warn("[crexi-report] contact resolve failed:", contactResult.error, "lead:", lead.fullName);
+    return "skipped";
+  }
+  const contactId = contactResult.contactId;
+
+  // ── 2. Dedupe + upsert crexi_leads_state ────────────────────────────
+  // Match by (property_id, lower-trim email) primarily; fall back to
+  // (property_id, lower-trim name). Case-insensitive + trim-aware so
+  // re-imports of the same person with different capitalization don't
+  // produce duplicates.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let existing: any = null;
   if (lead.email) {
@@ -132,24 +155,30 @@ async function upsertLead(supabase: any, propertyId: string, lead: CrexiLead): P
       .select("id")
       .eq("organization_id", ORG_ID)
       .eq("property_id", propertyId)
-      .eq("email", lead.email)
+      .ilike("email", lead.email.trim().toLowerCase())
       .maybeSingle();
     existing = data;
   }
   if (!existing && lead.fullName) {
-    const { data } = await supabase
+    // Pull candidates by case-insensitive name match. .ilike with literal
+    // value avoids LIKE-pattern wildcard issues with names containing %.
+    const { data: candidates } = await supabase
       .from("crexi_leads_state")
-      .select("id")
+      .select("id, name, email")
       .eq("organization_id", ORG_ID)
       .eq("property_id", propertyId)
-      .eq("name", lead.fullName)
-      .maybeSingle();
-    existing = data;
+      .ilike("name", lead.fullName.trim());
+    if (candidates && candidates.length > 0) {
+      // Prefer the no-email row (since we're about to backfill it).
+      // Otherwise any match works.
+      existing = candidates.find((c: { email: string | null }) => !c.email) ?? candidates[0];
+    }
   }
 
   const payload = {
     organization_id: ORG_ID,
     property_id: propertyId,
+    contact_id: contactId, // ALWAYS set — this is the canonical linkage
     name: lead.fullName,
     email: lead.email,
     phone: lead.phone,

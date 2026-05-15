@@ -26,6 +26,7 @@ import {
   renderVoiceProfile,
   renderSkillProfile,
   renderBrokerVoice,
+  renderCanSpamFooter,
   type Persona,
   type BrokerVoice,
 } from "@/lib/cre-os/personas-queries";
@@ -207,6 +208,8 @@ function buildPrompt(
   const personaVoice = persona ? renderVoiceProfile(persona.voice_profile) : "";
   const personaSkill = persona ? renderSkillProfile(persona.skill_profile) : "";
   const brokerVoiceBlock = renderBrokerVoice(brokerVoice);
+  // CAN-SPAM footer — only emitted for email channel. Required by law.
+  const canSpamBlock = ctx.channel === "email" ? renderCanSpamFooter(brokerVoice) : "";
   const fewShotBlock = renderExamplesAsFewShot(examples);
   const channelMeta = channelInstructions(ctx.channel);
 
@@ -254,6 +257,9 @@ function buildPrompt(
     // prompt so the model sees the live voice before reading output-format rules.
     fewShotBlock,
     `### CHANNEL\n${channelMeta}`,
+    // CAN-SPAM compliance — placed AFTER channel-format so the model
+    // doesn't accidentally skip the footer when truncating for length.
+    canSpamBlock,
     `### OUTPUT FORMAT — return ONLY a JSON object with these fields:
 {
   "subject": "string (empty for SMS)",

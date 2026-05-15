@@ -32,6 +32,9 @@ export async function PUT(req: NextRequest) {
     always_do?: string[];
     never_do?: string[];
     sign_off_default?: string | null;
+    physical_address?: string | null;
+    unsubscribe_email?: string | null;
+    daily_send_cap?: number;
   };
   try {
     body = await req.json();
@@ -60,6 +63,9 @@ export async function PUT(req: NextRequest) {
     always_do: body.always_do ?? [],
     never_do: body.never_do ?? [],
     sign_off_default: body.sign_off_default ?? null,
+    physical_address: body.physical_address ?? null,
+    unsubscribe_email: body.unsubscribe_email ?? null,
+    daily_send_cap: body.daily_send_cap ?? 100,
     updated_at: new Date().toISOString(),
   };
 

@@ -168,6 +168,35 @@ export async function POST(req: NextRequest) {
     for (const a of c.to_addresses ?? []) touchedEmails.add(a.toLowerCase().trim());
   }
 
+  // ── Opt-outs (CAN-SPAM) ──────────────────────────────────────────────
+  // Anyone in email_optouts is excluded unconditionally. Lower-cased + trimmed
+  // for case-insensitive matching against the unique index.
+  const { data: optoutsData } = await supabase
+    .from("email_optouts")
+    .select("email")
+    .eq("organization_id", ORG_ID);
+  const optouts = new Set<string>(
+    ((optoutsData ?? []) as Array<{ email: string }>).map((o) => o.email.toLowerCase().trim())
+  );
+
+  // ── Daily send cap (defensive) ────────────────────────────────────────
+  // Read the org's daily cap from broker_voice_profile, then count today's
+  // outbound communications. Anything over the cap is queued / skipped.
+  const { data: voiceRow } = await supabase
+    .from("broker_voice_profile")
+    .select("daily_send_cap")
+    .eq("organization_id", ORG_ID)
+    .maybeSingle();
+  const dailyCap = (voiceRow?.daily_send_cap as number) ?? 100;
+  const startOfDayIso = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+  const { count: sentTodayCount } = await supabase
+    .from("communications")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", ORG_ID)
+    .eq("direction", "outbound")
+    .gte("occurred_at", startOfDayIso);
+  let remainingDailyBudget = Math.max(0, dailyCap - (sentTodayCount ?? 0));
+
   // ── Gmail token ──────────────────────────────────────────────────────
   let gmailToken;
   if (!body.dryRun) {
@@ -235,6 +264,21 @@ export async function POST(req: NextRequest) {
     const emailLower = lead.email.toLowerCase().trim();
     if (touchedEmails.has(emailLower)) {
       skipped.push({ leadId: lead.id, email: lead.email, reason: `outbound sent within last ${skipDays} days` });
+      continue;
+    }
+    // Skip: opted out (CAN-SPAM) — unconditional, never email
+    if (optouts.has(emailLower)) {
+      skipped.push({ leadId: lead.id, email: lead.email, reason: "opted out (CAN-SPAM)" });
+      continue;
+    }
+    // Skip: daily send cap reached. Real-send only — dry-run ignores cap so
+    // the broker can see what WOULD happen if they upped the limit.
+    if (!body.dryRun && remainingDailyBudget <= 0) {
+      skipped.push({
+        leadId: lead.id,
+        email: lead.email,
+        reason: `daily send cap (${dailyCap}) reached — try again tomorrow or raise cap in Broker voice`,
+      });
       continue;
     }
 
@@ -386,6 +430,8 @@ export async function POST(req: NextRequest) {
       });
       // Add to touched set so subsequent same-email leads in this batch get skipped
       touchedEmails.add(emailLower);
+      // Decrement remaining daily budget (real sends only — dry-run never enters this branch)
+      remainingDailyBudget -= 1;
     } catch (err) {
       failed.push({
         leadId: lead.id,

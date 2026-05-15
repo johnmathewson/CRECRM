@@ -81,6 +81,21 @@ export interface ReminderRow {
   href?: string;
 }
 
+/** Prospector agent's overnight summary — what the Prospector did since
+ *  yesterday and what needs the broker's attention right now. */
+export interface AgentBrief {
+  sentToday: number;
+  sent7d: number;
+  repliesUnread: number;
+  awaitingReplyOver72h: number;
+  draftsQueued: number;
+  /** Top action prompt for the broker — "X replies need your read" or
+   *  "Y leads gone cold". Computed in priority order. */
+  topAction: { label: string; href: string; tone: "coral" | "amber" | "teal" } | null;
+  /** Intent breakdown of unread replies — for quick triage */
+  intents: { interested: number; question: number; declined: number; hostile: number; unsubscribe: number; unclear: number };
+}
+
 export interface DashboardData {
   kpis: DashboardKpis;
   pipeline: PipelineStageStats[];
@@ -89,25 +104,27 @@ export interface DashboardData {
   activity: ActivityRow[];
   reminders: ReminderRow[];
   copilot: { greeting: string; summary: string };
+  agentBrief: AgentBrief;
 }
 
 // ── Top-level loader ───────────────────────────────────────────────────────
 export async function loadDashboardData(): Promise<DashboardData> {
   // Parallelize everything — none of these depend on each other.
-  const [kpis, pipeline, chips, tasks, activity, reminders] = await Promise.all([
+  const [kpis, pipeline, chips, tasks, activity, reminders, agentBrief] = await Promise.all([
     loadKpis(),
     loadPipeline(),
     loadCopilotChips(),
     loadTasks(),
     loadActivity(),
     loadReminders(),
+    loadAgentBrief(),
   ]);
 
   // Greeting — local time aware, no AI for now (Phase 1.6 layers AI summary on top)
   const greeting = greetingForHour(new Date().getHours());
   const summary = buildSummary(chips, tasks, kpis);
 
-  return { kpis, pipeline, chips, tasks, activity, reminders, copilot: { greeting, summary } };
+  return { kpis, pipeline, chips, tasks, activity, reminders, copilot: { greeting, summary }, agentBrief };
 }
 
 // ── KPIs ───────────────────────────────────────────────────────────────────
@@ -366,3 +383,83 @@ function buildSummary(chips: CopilotChipData, tasks: TaskRow[], kpis: DashboardK
   return bits.length ? bits.join(" · ") : "Pipeline looks calm. Good day to source new opportunities.";
 }
 
+
+// ── Agent brief — overnight summary of the Prospector's activity ──────────
+// Pulled in parallel with the rest of the Command Center load. Counts come
+// from lane_touches (the agent's send/reply log) and crexi_leads_state (the
+// engagement signals waiting on action). Surfaced as a sticky top-of-page
+// panel so the broker sees "what does my agent want me to do today" before
+// pipeline/tasks/etc.
+async function loadAgentBrief(): Promise<AgentBrief> {
+  const sb = createServerSupabase();
+  const now = Date.now();
+  const dayAgo = new Date(now - 24 * 3600_000).toISOString();
+  const weekAgo = new Date(now - 7 * 24 * 3600_000).toISOString();
+  const threeDaysAgo = new Date(now - 72 * 3600_000).toISOString();
+
+  const [sentTodayRes, sent7dRes, repliesRes, awaitingRes, draftsRes] = await Promise.all([
+    sb.from("lane_touches").select("id", { count: "exact", head: true })
+      .eq("organization_id", ORG_ID).eq("status", "sent").gte("sent_at", dayAgo),
+    sb.from("lane_touches").select("id", { count: "exact", head: true })
+      .eq("organization_id", ORG_ID).eq("status", "sent").gte("sent_at", weekAgo),
+    // Unread = responded but the broker hasn't sent a reply (no outbound child)
+    sb.from("lane_touches").select("id, metadata")
+      .eq("organization_id", ORG_ID).eq("status", "responded")
+      .order("responded_at", { ascending: false })
+      .limit(100),
+    // Awaiting reply >72h = sent more than 72h ago, no responded_at
+    sb.from("lane_touches").select("id", { count: "exact", head: true })
+      .eq("organization_id", ORG_ID).eq("status", "sent")
+      .is("responded_at", null)
+      .lt("sent_at", threeDaysAgo),
+    sb.from("lane_touches").select("id", { count: "exact", head: true })
+      .eq("organization_id", ORG_ID).in("status", ["drafted", "approved", "queued"]),
+  ]);
+
+  // Tally intents from unread replies
+  const intents = { interested: 0, question: 0, declined: 0, hostile: 0, unsubscribe: 0, unclear: 0 };
+  for (const r of ((repliesRes.data ?? []) as Array<{ metadata: Record<string, unknown> | null }>)) {
+    const c = (r.metadata?.classification as { intent?: string } | null | undefined) ?? null;
+    const intent = (c?.intent ?? "unclear") as keyof typeof intents;
+    if (intent in intents) intents[intent] += 1;
+  }
+
+  // Compute top-action prompt in priority order
+  const repliesUnread = repliesRes.data?.length ?? 0;
+  let topAction: AgentBrief["topAction"] = null;
+  if (intents.interested > 0) {
+    topAction = {
+      label: `${intents.interested} interested ${intents.interested === 1 ? "reply" : "replies"} waiting`,
+      href: "/cre-os/prospector/inbox?status=replied",
+      tone: "coral",
+    };
+  } else if (repliesUnread > 0) {
+    topAction = {
+      label: `${repliesUnread} ${repliesUnread === 1 ? "reply" : "replies"} to read`,
+      href: "/cre-os/prospector/inbox?status=replied",
+      tone: "coral",
+    };
+  } else if ((awaitingRes.count ?? 0) > 0) {
+    topAction = {
+      label: `${awaitingRes.count} leads cold (>72h, no reply)`,
+      href: "/cre-os/prospector/inbox",
+      tone: "amber",
+    };
+  } else if ((draftsRes.count ?? 0) > 0) {
+    topAction = {
+      label: `${draftsRes.count} draft${(draftsRes.count ?? 0) === 1 ? "" : "s"} queued`,
+      href: "/cre-os/prospector/inbox?status=drafted",
+      tone: "teal",
+    };
+  }
+
+  return {
+    sentToday: sentTodayRes.count ?? 0,
+    sent7d: sent7dRes.count ?? 0,
+    repliesUnread,
+    awaitingReplyOver72h: awaitingRes.count ?? 0,
+    draftsQueued: draftsRes.count ?? 0,
+    topAction,
+    intents,
+  };
+}

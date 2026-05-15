@@ -18,6 +18,10 @@ export function BrokerVoiceEditView({ voice: initial }: { voice: BrokerVoice | n
   const [alwaysDo, setAlwaysDo] = useState<string[]>(initial?.always_do ?? []);
   const [neverDo, setNeverDo] = useState<string[]>(initial?.never_do ?? []);
   const [signOff, setSignOff] = useState(initial?.sign_off_default ?? "");
+  // CAN-SPAM compliance fields
+  const [physicalAddress, setPhysicalAddress] = useState(initial?.physical_address ?? "");
+  const [unsubscribeEmail, setUnsubscribeEmail] = useState(initial?.unsubscribe_email ?? "inquiries@stewardshipcre.com");
+  const [dailySendCap, setDailySendCap] = useState(initial?.daily_send_cap ?? 100);
   const [saving, setSaving] = useState(false);
   const [saveResult, setSaveResult] = useState<{ ok: true } | { ok: false; error: string } | null>(null);
 
@@ -36,6 +40,9 @@ export function BrokerVoiceEditView({ voice: initial }: { voice: BrokerVoice | n
           always_do: alwaysDo,
           never_do: neverDo,
           sign_off_default: signOff || null,
+          physical_address: physicalAddress || null,
+          unsubscribe_email: unsubscribeEmail || null,
+          daily_send_cap: dailySendCap,
         }),
       });
       const data = await r.json();
@@ -173,6 +180,64 @@ export function BrokerVoiceEditView({ voice: initial }: { voice: BrokerVoice | n
             className={inputCls}
             placeholder="— John"
           />
+        </Panel>
+
+        {/* Compliance — required by CAN-SPAM. The AI uses these to render
+            the footer on every outbound email. Also defensive: the bulk
+            send paths enforce daily_send_cap to protect domain reputation. */}
+        <Panel eyebrow="Compliance" num={6} title="CAN-SPAM + send-rate safety">
+          <div className="space-y-3">
+            <div>
+              <label className="block font-mono text-[9.5px] uppercase tracking-eyebrow text-cream-subtle mb-1">
+                Physical mailing address (required by law)
+              </label>
+              <textarea
+                value={physicalAddress}
+                onChange={(e) => setPhysicalAddress(e.target.value)}
+                rows={3}
+                className={`${inputCls} resize-y`}
+                placeholder="Stewardship CRE&#10;123 Main St, Suite 200&#10;Crown Point, IN 46307"
+              />
+              <p className="mt-1 font-body text-[11px] text-cream-subtle leading-relaxed">
+                Appended to every outbound email footer. CAN-SPAM compliance: every commercial email
+                must include the sender&rsquo;s physical postal address.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block font-mono text-[9.5px] uppercase tracking-eyebrow text-cream-subtle mb-1">
+                  Unsubscribe email
+                </label>
+                <input
+                  type="email"
+                  value={unsubscribeEmail}
+                  onChange={(e) => setUnsubscribeEmail(e.target.value)}
+                  className={inputCls}
+                  placeholder="inquiries@stewardshipcre.com"
+                />
+                <p className="mt-1 font-body text-[11px] text-cream-subtle">
+                  Where opt-out replies should be sent. Auto-detect on inbound is on the roadmap; manual processing for now.
+                </p>
+              </div>
+              <div>
+                <label className="block font-mono text-[9.5px] uppercase tracking-eyebrow text-cream-subtle mb-1">
+                  Daily send cap (org-wide)
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={2000}
+                  value={dailySendCap}
+                  onChange={(e) => setDailySendCap(Math.max(1, parseInt(e.target.value || "100")))}
+                  className={inputCls}
+                />
+                <p className="mt-1 font-body text-[11px] text-cream-subtle">
+                  Hard ceiling on outbound emails per calendar day. Protects domain reputation from
+                  a bad blast. Bulk send paths refuse to exceed this.
+                </p>
+              </div>
+            </div>
+          </div>
         </Panel>
 
         <div className="sticky bottom-0 -mx-4 lg:-mx-6 px-4 lg:px-6 py-3 bg-steward-base/95 backdrop-blur-md border-t border-white/[0.08] flex items-center justify-between gap-3 flex-wrap">

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { AppShell } from "@/components/cre-os/AppShell";
 import { CopilotRibbon, CopilotChip } from "@/components/cre-os/CopilotRibbon";
 import { KpiTile } from "@/components/cre-os/KpiTile";
@@ -18,7 +19,7 @@ const fmtMoney = (n: number) => {
 };
 
 export function CommandCenterView({ data }: { data: DashboardData }) {
-  const { kpis, pipeline, chips, tasks, activity, reminders, copilot } = data;
+  const { kpis, pipeline, chips, tasks, activity, reminders, copilot, agentBrief } = data;
 
   // Build the Copilot focus chips from real counts
   const copilotChips: CopilotChip[] = [
@@ -80,6 +81,11 @@ export function CommandCenterView({ data }: { data: DashboardData }) {
   return (
     <AppShell rail={rail}>
       <div className="space-y-6">
+        {/* Agent Brief — Prospector's overnight summary. Top-of-page so
+            the broker sees "what does my agent want me to do today" before
+            anything else. */}
+        <AgentBriefPanel brief={agentBrief} />
+
         {/* Greeting + Copilot ribbon */}
         <CopilotRibbon
           greeting={copilot.greeting}
@@ -228,5 +234,88 @@ function PipelineCondensed({ pipeline }: { pipeline: DashboardData["pipeline"] }
         </div>
       ))}
     </div>
+  );
+}
+
+// ── Agent Brief panel ────────────────────────────────────────────────────
+// The Prospector agent's "stand-up report" — what it did since yesterday,
+// what's waiting on the broker. Top action surfaces the highest-priority
+// thing to handle right now.
+function AgentBriefPanel({ brief }: { brief: DashboardData["agentBrief"] }) {
+  const toneClass = {
+    coral: "border-coral-400/40 bg-coral-400/[0.08] text-coral-300",
+    amber: "border-amber/40 bg-amber/[0.08] text-amber",
+    teal: "border-teal-400/40 bg-teal-400/[0.08] text-teal-300",
+  };
+  return (
+    <div className="rounded-lg border border-white/[0.08] bg-gradient-to-br from-steward-surface/40 to-steward-base/40 px-4 py-3.5">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[9.5px] uppercase tracking-eyebrow text-cream-subtle">
+            Prospector · Agent brief
+          </span>
+          <Link
+            href="/cre-os/prospector"
+            className="font-mono text-[9.5px] uppercase tracking-eyebrow text-cream-subtle hover:text-coral-300"
+          >
+            → Open Prospector
+          </Link>
+        </div>
+        {brief.topAction && (
+          <Link
+            href={brief.topAction.href}
+            className={`px-3 py-1.5 rounded border font-mono text-[10px] uppercase tracking-eyebrow ${toneClass[brief.topAction.tone]}`}
+          >
+            {brief.topAction.label} →
+          </Link>
+        )}
+      </div>
+      <div className="mt-3 grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <BriefStat label="Sent today" value={brief.sentToday} />
+        <BriefStat label="Sent 7d" value={brief.sent7d} />
+        <BriefStat label="Replies (unread)" value={brief.repliesUnread} tone={brief.repliesUnread > 0 ? "coral" : "default"} />
+        <BriefStat label="Cold >72h" value={brief.awaitingReplyOver72h} tone={brief.awaitingReplyOver72h > 0 ? "amber" : "default"} />
+        <BriefStat label="Drafts queued" value={brief.draftsQueued} tone={brief.draftsQueued > 0 ? "teal" : "default"} />
+      </div>
+      {(brief.intents.interested + brief.intents.question + brief.intents.declined + brief.intents.hostile + brief.intents.unsubscribe) > 0 && (
+        <div className="mt-3 pt-3 border-t border-white/[0.05] flex items-center gap-3 flex-wrap font-mono text-[10px] uppercase tracking-eyebrow">
+          <span className="text-cream-subtle">Reply intents:</span>
+          {brief.intents.interested > 0 && <IntentChip label="Interested" count={brief.intents.interested} tone="teal" />}
+          {brief.intents.question > 0 && <IntentChip label="Question" count={brief.intents.question} tone="amber" />}
+          {brief.intents.declined > 0 && <IntentChip label="Declined" count={brief.intents.declined} tone="neutral" />}
+          {brief.intents.hostile > 0 && <IntentChip label="Hostile" count={brief.intents.hostile} tone="coral" />}
+          {brief.intents.unsubscribe > 0 && <IntentChip label="Unsubscribe" count={brief.intents.unsubscribe} tone="coral" />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BriefStat({ label, value, tone = "default" }: { label: string; value: number; tone?: "default" | "coral" | "amber" | "teal" }) {
+  const colorClass = {
+    default: "text-cream",
+    coral: "text-coral-300",
+    amber: "text-amber",
+    teal: "text-teal-300",
+  }[tone];
+  return (
+    <div>
+      <div className="font-mono text-[9.5px] uppercase tracking-eyebrow text-cream-subtle">{label}</div>
+      <div className={`mt-0.5 font-display text-xl ${colorClass}`}>{value}</div>
+    </div>
+  );
+}
+
+function IntentChip({ label, count, tone }: { label: string; count: number; tone: "coral" | "amber" | "teal" | "neutral" }) {
+  const colors = {
+    coral: "border-coral-400/40 bg-coral-400/[0.08] text-coral-300",
+    amber: "border-amber/40 bg-amber/[0.08] text-amber",
+    teal: "border-teal-400/40 bg-teal-400/[0.08] text-teal-300",
+    neutral: "border-white/[0.10] bg-white/[0.04] text-cream-dim",
+  }[tone];
+  return (
+    <span className={`px-1.5 py-0.5 rounded border ${colors} normal-case font-body`}>
+      {label} <span className="font-mono text-[9.5px]">{count}</span>
+    </span>
   );
 }
