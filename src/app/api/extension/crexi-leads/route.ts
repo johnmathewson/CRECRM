@@ -381,35 +381,89 @@ export async function POST(req: NextRequest) {
       }
 
       // ── 3. Upsert crexi_leads_state + diff ────────────────────────────
-      const { data: prior } = await supabase
-        .from("crexi_leads_state")
-        .select("id, level_of_interest, number_of_visits, contact_id, lead_id, raw_panel")
-        .eq("property_id", propertyId)
-        .ilike("name", lead.name.trim())
-        .ilike("email", email || "")
-        .maybeSingle();
+      //
+      // CRITICAL: when the extension scrapes a row WITHOUT email (CREXi's
+      // table view doesn't expose email — it's only behind the detail
+      // panel), we must NOT create a new ghost row if the person already
+      // exists with an email. The old code did `.ilike("email", email || "")`
+      // which couldn't match an existing row whose email was not empty
+      // string. Result: dozens of duplicate no-email "ghost" rows every
+      // time the user browsed CREXi. Fixed by matching by name only when
+      // no email is scraped, and PRESERVING existing email/phone/role on
+      // update so the scrape never wipes good data.
+      let prior: {
+        id: string;
+        email?: string | null;
+        phone?: string | null;
+        company?: string | null;
+        role?: string | null;
+        level_of_interest?: string | null;
+        number_of_visits?: number | null;
+        contact_id?: string | null;
+        lead_id?: string | null;
+        raw_panel?: Record<string, unknown> | null;
+      } | null = null;
+
+      if (email) {
+        // We have an email — exact-match by (property, name, email)
+        const { data } = await supabase
+          .from("crexi_leads_state")
+          .select("id, email, phone, company, role, level_of_interest, number_of_visits, contact_id, lead_id, raw_panel")
+          .eq("property_id", propertyId)
+          .ilike("name", lead.name.trim())
+          .ilike("email", email)
+          .maybeSingle();
+        prior = data;
+        // If no email-keyed match, ALSO check by name only (in case the
+        // existing row is a no-email ghost we want to backfill).
+        if (!prior) {
+          const { data: ghosts } = await supabase
+            .from("crexi_leads_state")
+            .select("id, email, phone, company, role, level_of_interest, number_of_visits, contact_id, lead_id, raw_panel")
+            .eq("property_id", propertyId)
+            .ilike("name", lead.name.trim())
+            .is("email", null);
+          prior = (ghosts && ghosts[0]) ?? null;
+        }
+      } else {
+        // No email scraped — find ANY existing row for this name on this
+        // property. Prefer the email-bearing one so we don't ghost-overwrite.
+        const { data: candidates } = await supabase
+          .from("crexi_leads_state")
+          .select("id, email, phone, company, role, level_of_interest, number_of_visits, contact_id, lead_id, raw_panel")
+          .eq("property_id", propertyId)
+          .ilike("name", lead.name.trim());
+        if (candidates && candidates.length > 0) {
+          prior = candidates.find((c) => c.email) ?? candidates[0];
+        }
+      }
 
       const priorRank = rankOf(prior?.level_of_interest);
       const currRank = rankOf(lead.level_of_interest);
       const priorVisits = prior?.number_of_visits ?? 0;
       const currVisits = lead.number_of_visits ?? 0;
 
+      // COALESCE semantics: the scrape only adds info, never wipes it.
+      // If a field exists on the prior row and the scrape didn't capture
+      // it, keep the prior value.
       const statePayload = {
         organization_id: ORG_ID,
         property_id: propertyId,
         crexi_listing_id: crexiListingId,
         name: lead.name.trim(),
-        email: email,
-        phone: lead.phone || null,
-        company: lead.company || null,
-        role: lead.role || null,
-        level_of_interest: lead.level_of_interest || null,
-        number_of_visits: lead.number_of_visits ?? null,
+        email: email ?? prior?.email ?? null,
+        phone: lead.phone || prior?.phone || null,
+        company: lead.company || prior?.company || null,
+        role: lead.role || prior?.role || null,
+        level_of_interest: currRank >= priorRank
+          ? (lead.level_of_interest || prior?.level_of_interest || null)
+          : (prior?.level_of_interest || null),
+        number_of_visits: Math.max(currVisits, priorVisits) || null,
         last_activity_date: lead.last_activity_at || null,
         contact_id: contactId,
         lead_id: leadId,
         last_seen_at: new Date().toISOString(),
-        last_panel_scrape_at: lead.email ? new Date().toISOString() : prior ? null : null,
+        last_panel_scrape_at: lead.email ? new Date().toISOString() : prior?.raw_panel ? new Date().toISOString() : null,
         raw_panel: lead.activity_timeline || lead.buyer_evaluation
           ? { activity_timeline: lead.activity_timeline, buyer_evaluation: lead.buyer_evaluation }
           : prior?.raw_panel || null,
