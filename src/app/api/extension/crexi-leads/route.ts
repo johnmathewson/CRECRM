@@ -234,10 +234,25 @@ export async function POST(req: NextRequest) {
   const hotLeadIds: string[] = []; // Lead IDs whose engagement advanced this poll
   const errors: Array<{ name: string; reason: string }> = [];
 
+  // Reject scrape artifacts (CREXi column headers occasionally captured by
+  // the browser extension as a person's name). Without this filter we end up
+  // with phantom "Name" / "First" / "Last" contacts that catch other people
+  // via the phone-fallback in find-or-create.
+  const JUNK_NAMES = new Set([
+    "name", "first", "last", "email", "phone", "company", "role",
+    "crexi score", "crexi lead score", "industry role", "level of interest",
+    "no. visits", "date", "verification method",
+  ]);
+
   for (const lead of body.leads) {
     try {
       if (!lead.name || lead.name.trim().length < 2) {
         stats.skipped += 1;
+        continue;
+      }
+      if (JUNK_NAMES.has(lead.name.trim().toLowerCase())) {
+        stats.skipped += 1;
+        errors.push({ name: lead.name, reason: "Rejected scrape artifact (column header captured as name)" });
         continue;
       }
 

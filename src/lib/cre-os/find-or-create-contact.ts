@@ -63,6 +63,24 @@ function inferContactType(role: string | null | undefined): string {
   return "investor";
 }
 
+// CREXi column headers + obvious junk that the browser extension sometimes
+// captures as a person's name when it mis-parses the lead list page. Any row
+// whose name matches one of these is a scrape artifact, NOT a real person.
+// Reject at the API layer so no contact + no crexi_leads_state row gets
+// created from a bad scrape.
+const JUNK_NAMES = new Set([
+  "name", "first", "last", "email", "phone", "company", "role",
+  "crexi score", "crexi lead score", "industry role", "level of interest",
+  "no. visits", "date", "verification method",
+  "(unknown)", "(no name)", "",
+]);
+
+function isJunkName(name: string | null | undefined): boolean {
+  if (!name) return true;
+  const trimmed = name.trim().toLowerCase();
+  return JUNK_NAMES.has(trimmed);
+}
+
 export async function findOrCreateContact(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   sb: SupabaseClient<any, any, any>,
@@ -71,6 +89,14 @@ export async function findOrCreateContact(
   const email = normalizeEmail(lead.email);
   const phone = normalizePhone(lead.phone);
   const name = (lead.name ?? "").trim();
+
+  // Reject scrape artifacts (column headers captured as a person's name).
+  // If there's no email AND the name is junk, refuse — better to skip than
+  // pollute the contacts table with a phantom that will catch other people
+  // by phone-fallback.
+  if (!email && isJunkName(name)) {
+    return { error: `Rejected scrape artifact: name="${name}" with no email — likely a header row` };
+  }
 
   if (!email && !phone && !name) {
     return { error: "No email, phone, or name — cannot resolve contact" };
