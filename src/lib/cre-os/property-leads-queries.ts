@@ -116,7 +116,7 @@ function normalizeInterest(s: string | null | undefined): LeadInterestLevel {
 export async function loadPropertyLeads(propertyId: string): Promise<PropertyLeadsSnapshot> {
   const sb = createServerSupabase();
 
-  const [crexiRes, leadsRes, ndaRes, vaultRes, latestReportRes, outboundRes, inboundRepliesRes] = await Promise.all([
+  const [crexiRes, leadsRes, ndaRes, vaultRes, latestReportRes, outboundRes, inboundRepliesRes, sentTouchesRes] = await Promise.all([
     sb.from("crexi_leads_state")
       .select("id, name, email, phone, company, role, level_of_interest, number_of_visits, last_activity_date, first_seen_at, raw_panel, contact_id")
       .eq("organization_id", ORG_ID)
@@ -164,16 +164,49 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       .eq("property_id", propertyId)
       .eq("status", "responded")
       .order("responded_at", { ascending: false }),
+
+    // Outbound sends via /api/lane-touches/send (the Compose dialog path).
+    // These write to lane_touches but historically NOT to communications,
+    // so we have to query both to get a complete lastTouchedAt picture.
+    // Match by metadata.to (email) since lane_touches doesn't have
+    // to_addresses like communications does.
+    sb.from("lane_touches")
+      .select("contact_id, sent_at, metadata")
+      .eq("organization_id", ORG_ID)
+      .eq("property_id", propertyId)
+      .eq("status", "sent")
+      .order("sent_at", { ascending: false }),
   ]);
 
   // ── Build the email → lastTouchedAt map (outbound we sent) ──
-  // (Historically called respondedByEmail; renamed semantically.)
+  // Combined from TWO sources:
+  //   1. communications (direction=outbound, to_addresses jsonb)
+  //   2. lane_touches (status=sent, metadata.to = email) — Compose path
+  // We take the max across both since they may not be in sync.
   const respondedByEmail = new Map<string, string>();
+  // Also build a contact_id → lastTouchedAt map (covers leads keyed by
+  // contact rather than email; e.g. when Compose was sent to a phone)
+  const touchedByContactId = new Map<string, string>();
+
   for (const c of (outboundRes.data ?? []) as Array<{ to_addresses: string[] | null; occurred_at: string }>) {
     for (const addr of c.to_addresses ?? []) {
       const e = addr.toLowerCase().trim();
       const prev = respondedByEmail.get(e);
       if (!prev || c.occurred_at > prev) respondedByEmail.set(e, c.occurred_at);
+    }
+  }
+  for (const t of (sentTouchesRes.data ?? []) as Array<{ contact_id: string | null; sent_at: string | null; metadata: Record<string, unknown> | null }>) {
+    if (!t.sent_at) continue;
+    // Email key: lane_touches.metadata.to is the recipient email for Compose
+    const toEmail = ((t.metadata?.to as string) ?? "").toLowerCase().trim();
+    if (toEmail) {
+      const prev = respondedByEmail.get(toEmail);
+      if (!prev || t.sent_at > prev) respondedByEmail.set(toEmail, t.sent_at);
+    }
+    // Contact-id key for leads matched via contact_id rather than email
+    if (t.contact_id) {
+      const prev = touchedByContactId.get(t.contact_id);
+      if (!prev || t.sent_at > prev) touchedByContactId.set(t.contact_id, t.sent_at);
     }
   }
 
@@ -271,7 +304,13 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
     const raw = c.raw_panel || {};
     const notes = [raw["Note 1"], raw["Note 2"], raw["Note 3"]].filter(Boolean).join("\n\n") || null;
     const interest = normalizeInterest(c.level_of_interest);
-    const lastTouchedAt = email ? respondedByEmail.get(email) ?? null : null;
+    // lastTouchedAt: max of email-keyed and contact-keyed touches (covers
+    // both the communications path and the lane_touches/Compose path)
+    const byEmailVal = email ? respondedByEmail.get(email) ?? null : null;
+    const byContactVal = c.contact_id ? touchedByContactId.get(c.contact_id) ?? null : null;
+    const lastTouchedAt = (byEmailVal && byContactVal)
+      ? (byEmailVal > byContactVal ? byEmailVal : byContactVal)
+      : (byEmailVal ?? byContactVal);
     const repliedAt = c.contact_id ? repliedByContactId.get(c.contact_id) ?? null : null;
     const signedNda = email ? ndaByEmail.has(email) : false;
     addLead({

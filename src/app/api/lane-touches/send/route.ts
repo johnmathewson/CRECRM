@@ -208,6 +208,30 @@ export async function POST(req: NextRequest) {
   }
   const touchId = touch.id;
 
+  // Also write to communications so the Leads-tab state machine and any
+  // downstream reporting that joins on communications.to_addresses can see
+  // this send. (Historically this route only wrote to lane_touches, which
+  // caused leads to NOT show as Touched after a Compose+Send.)
+  await supabase.from("communications").insert({
+    organization_id: ORG_ID,
+    property_id: body.propertyId,
+    channel: "email",
+    direction: "outbound",
+    external_id: sent.id,
+    subject: body.subject,
+    body_preview: body.bodyText.slice(0, 500),
+    from_address: token.email,
+    to_addresses: [recipientEmail],
+    occurred_at: sentAt,
+    raw_payload: {
+      gmail_message_id: sent.id,
+      gmail_thread_id: sent.threadId,
+      source: "lane-touches-send",
+      lane_touch_id: touchId,
+      activity_id: activity?.id,
+    },
+  });
+
   // Capture as a voice example. Manual compose paths are typically the
   // most-authentic voice signal — broker wrote (or heavily edited) the body
   // themselves. Source is "manual" unless the caller flagged it as
