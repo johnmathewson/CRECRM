@@ -228,7 +228,11 @@ export function LeadsTab({
       setBulkResult(combined);
       if (!dryRun && combined.sent > 0) {
         setSelected(new Set());
+        // router.refresh() can be flaky in Next 14 when chunked sends produce
+        // back-to-back state updates. Force a server re-fetch + small delay,
+        // then re-trigger so the new leads array lands in the table.
         router.refresh();
+        setTimeout(() => router.refresh(), 600);
       }
     } catch (err) {
       setBulkResult({
@@ -390,16 +394,27 @@ export function LeadsTab({
         {/* Bulk result panel */}
         {bulkResult && (
           <div className="mb-3 rounded border border-teal-400/30 bg-teal-400/[0.04] px-4 py-3 space-y-2">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               <div className="font-mono text-[10px] uppercase tracking-eyebrow text-teal-300">
                 {bulkResult.dryRun ? "Dry-run complete · nothing sent" : "Bulk follow-up complete"}
               </div>
-              <button
-                onClick={() => setBulkResult(null)}
-                className="font-mono text-[10px] text-cream-subtle hover:text-cream"
-              >
-                ✕ dismiss
-              </button>
+              <div className="flex items-center gap-2">
+                {!bulkResult.dryRun && bulkResult.sent > 0 && (
+                  <button
+                    onClick={() => window.location.reload()}
+                    className="px-2 py-1 rounded border border-coral-400/40 bg-coral-400/[0.10] hover:bg-coral-400/[0.20] font-mono text-[10px] uppercase tracking-eyebrow text-coral-300"
+                    title="If the lead buckets haven't updated, click to hard-refresh the page"
+                  >
+                    ↻ Refresh now
+                  </button>
+                )}
+                <button
+                  onClick={() => setBulkResult(null)}
+                  className="font-mono text-[10px] text-cream-subtle hover:text-cream"
+                >
+                  ✕ dismiss
+                </button>
+              </div>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono text-[11.5px]">
               <div><span className="text-cream-subtle">Attempted</span><div className="font-display text-lg text-cream">{bulkResult.attempted}</div></div>
