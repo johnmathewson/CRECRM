@@ -160,8 +160,9 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       .eq("direction", "outbound"),
 
     // Inbound replies — lane_touches with status='responded' for this property.
-    // Matched to leads by contact_id (set during CREXi → contacts linkage).
-    // This is what populates the "Replied" state on each lead.
+    // Matched to leads by contact_id (set during CREXi → contacts linkage) OR
+    // by from_email in metadata (when contact_id is NULL — happens when the
+    // reply matched via communications source which doesn't carry contact_id).
     sb.from("lane_touches")
       .select("contact_id, responded_at, metadata")
       .eq("organization_id", ORG_ID)
@@ -272,12 +273,28 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
     }
   }
 
-  // ── Build the contact_id → repliedAt map (their inbound replies) ──
+  // ── Build the contact_id → repliedAt AND email → repliedAt maps ──
+  // Two indexes because reply touches don't always carry a contact_id:
+  // when the reply matched a parent via communications (the bulk-ai-followup
+  // write path), match-reply-to-touch sets contact_id = NULL. We fall back
+  // to from_email in metadata so those replies still surface on the Leads tab.
   const repliedByContactId = new Map<string, string>();
-  for (const r of (inboundRepliesRes.data ?? []) as Array<{ contact_id: string | null; responded_at: string | null }>) {
-    if (!r.contact_id || !r.responded_at) continue;
-    const prev = repliedByContactId.get(r.contact_id);
-    if (!prev || r.responded_at > prev) repliedByContactId.set(r.contact_id, r.responded_at);
+  const repliedByEmail = new Map<string, string>();
+  for (const r of (inboundRepliesRes.data ?? []) as Array<{
+    contact_id: string | null;
+    responded_at: string | null;
+    metadata: Record<string, unknown> | null;
+  }>) {
+    if (!r.responded_at) continue;
+    if (r.contact_id) {
+      const prev = repliedByContactId.get(r.contact_id);
+      if (!prev || r.responded_at > prev) repliedByContactId.set(r.contact_id, r.responded_at);
+    }
+    const fromEmail = ((r.metadata?.from_email as string) ?? "").toLowerCase().trim();
+    if (fromEmail) {
+      const prev = repliedByEmail.get(fromEmail);
+      if (!prev || r.responded_at > prev) repliedByEmail.set(fromEmail, r.responded_at);
+    }
   }
 
   // ── NDA signers by email ──
@@ -397,7 +414,14 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
     const lastTouchedAt = (byEmailVal && byContactVal)
       ? (byEmailVal > byContactVal ? byEmailVal : byContactVal)
       : (byEmailVal ?? byContactVal);
-    const repliedAt = c.contact_id ? repliedByContactId.get(c.contact_id) ?? null : null;
+    // Replied lookup: try contact_id first (when set), fall back to email
+    // (covers replies that matched via communications source where contact_id
+    // is NULL on the lane_touch).
+    const byContactRepl = c.contact_id ? repliedByContactId.get(c.contact_id) : null;
+    const byEmailRepl = email ? repliedByEmail.get(email) : null;
+    const repliedAt = (byContactRepl && byEmailRepl)
+      ? (byContactRepl > byEmailRepl ? byContactRepl : byEmailRepl)
+      : (byContactRepl ?? byEmailRepl ?? null);
     const crossPropertyTouch = email ? crossPropByEmail.get(email) ?? null : null;
     const signedNda = email ? ndaByEmail.has(email) : false;
     addLead({

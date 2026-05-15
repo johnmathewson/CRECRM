@@ -166,6 +166,21 @@ export async function maybeRouteAsReply(
     };
   }
 
+  // ── 2b. Resolve a contact_id if the parent didn't carry one ──────────
+  // When the reply matched a communications-source parent (bulk-ai-followup
+  // path), parent.contactId is NULL. Look up the contact by from_email so
+  // the reply lane_touch links correctly and surfaces on the Leads tab.
+  let resolvedContactId = parent.contactId;
+  if (!resolvedContactId && msg.fromEmail) {
+    const { data: contactRow } = await supabase
+      .from("contacts")
+      .select("id")
+      .eq("organization_id", ORG_ID)
+      .ilike("email", msg.fromEmail.trim())
+      .maybeSingle();
+    if (contactRow) resolvedContactId = contactRow.id as string;
+  }
+
   // ── 3. Insert the inbound lane_touches row ───────────────────────────
   const { data: replyRow, error: replyErr } = await supabase
     .from("lane_touches")
@@ -174,7 +189,7 @@ export async function maybeRouteAsReply(
       enrollment_id: parent.enrollmentId,
       lane_id: parent.laneId,
       property_id: parent.propertyId,
-      contact_id: parent.contactId,
+      contact_id: resolvedContactId,
       step_index: 0,
       channel: "email",
       status: "responded",
