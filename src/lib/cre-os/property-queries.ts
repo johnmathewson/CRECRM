@@ -175,6 +175,9 @@ export interface PropertyDetail {
   occupancyPct: number | null;
   description: string | null;
   notes: string | null;
+  /** Optional anchor intel for AI outreach about this property — broker-authored.
+   *  Injected into the personalizer prompt when present. Lives in properties.marketing_notes. */
+  marketingNotes: string | null;
   createdAt: string | null;
 
   // Owner identity (from CoStar — True Owner is LLC unmask)
@@ -387,7 +390,7 @@ export async function loadPropertyDetail(slug: string): Promise<PropertyDetail |
       id, slug, name, address, city, state, zip, county, apn,
       asset_type, sub_type, status, pipeline_stage, your_role, transaction_type,
       asking_price, sqft, units, acreage, year_built, noi, cap_rate, occupancy_pct,
-      description, notes, created_at,
+      description, notes, marketing_notes, created_at,
       owner_name_raw, owner_type, owner_phone, owner_contact_name,
       owner_mailing_address, owner_mailing_city, owner_mailing_state, owner_mailing_zip,
       true_owner_name, true_owner_phone, true_owner_contact_name,
@@ -446,6 +449,7 @@ export async function loadPropertyDetail(slug: string): Promise<PropertyDetail |
     occupancyPct: numOrNull(p.occupancy_pct),
     description: p.description ?? null,
     notes: p.notes ?? null,
+    marketingNotes: p.marketing_notes ?? null,
     createdAt: p.created_at ?? null,
 
     // Owner identity

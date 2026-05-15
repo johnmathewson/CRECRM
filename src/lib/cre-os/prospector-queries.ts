@@ -76,6 +76,12 @@ export interface Lane {
   description: string | null;
   status: LaneStatus;
   triggerType: LaneTriggerType;
+  /** Which persona drives this lane's AI drafts. NULL falls back to looking
+   *  up a persona whose slug matches the triggerType. */
+  personaId: string | null;
+  /** Persona slug + name, denormalized for display when joined */
+  personaSlug: string | null;
+  personaName: string | null;
   filters: LaneFilters;
   cadence: CadenceStep[];
   approvalMode: ApprovalMode;
@@ -173,12 +179,18 @@ export interface ProspectorSnapshot {
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function toLane(row: Record<string, unknown>, liveEnrolled = 0, matchingNotEnrolled = 0): Lane {
+  // persona join (when present) lands on row.persona — supabase returns
+  // either an object or null for one-to-one foreign joins.
+  const persona = (row.persona as { id?: string; slug?: string; name?: string } | null) ?? null;
   return {
     id: row.id as string,
     name: row.name as string,
     description: (row.description as string) ?? null,
     status: row.status as LaneStatus,
     triggerType: row.trigger_type as LaneTriggerType,
+    personaId: (row.persona_id as string) ?? persona?.id ?? null,
+    personaSlug: persona?.slug ?? null,
+    personaName: persona?.name ?? null,
     filters: (row.filters as LaneFilters) ?? {},
     cadence: (row.cadence as CadenceStep[]) ?? [],
     approvalMode: (row.approval_mode as ApprovalMode) ?? {},
@@ -279,7 +291,7 @@ export async function loadLaneDetail(id: string): Promise<Lane | null> {
   const sb = createServerSupabase();
   const { data, error } = await sb
     .from("lanes")
-    .select("*")
+    .select("*, persona:personas(id, slug, name)")
     .eq("organization_id", ORG_ID)
     .eq("id", id)
     .maybeSingle();

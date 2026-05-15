@@ -127,9 +127,11 @@ export async function runCadence(options: CadenceRunOptions = {}): Promise<Caden
   };
 
   // Load active lanes (cached for the duration of this run)
+  // Includes trigger_type + persona_id + persona join so the personalizer
+  // can route to the right voice/skill profile.
   const laneQuery = supabase
     .from("lanes")
-    .select("id, name, status, cadence, approval_mode, daily_touch_cap")
+    .select("id, name, status, cadence, approval_mode, daily_touch_cap, trigger_type, persona_id, persona:personas(slug)")
     .eq("organization_id", ORG_ID)
     .eq("status", "active");
   if (options.laneId) laneQuery.eq("id", options.laneId);
@@ -260,7 +262,14 @@ export async function runCadence(options: CadenceRunOptions = {}): Promise<Caden
       try {
         const personalized = await personalizeTouch({
           channel: step.channel as PersonalizationChannel,
-          archetype: lane.id ? archetypeFromContext({ laneTriggerType: (lane as Lane & { trigger_type?: string }).trigger_type ?? null }) as LaneArchetype : "generic",
+          // Persona resolution: explicit personaId (via join.slug) wins; else
+          // derive from trigger_type via archetypeFromContext.
+          archetype: (
+            (lane as Lane & { persona?: { slug?: string } | null }).persona?.slug
+              ?? (lane.id
+                ? archetypeFromContext({ laneTriggerType: (lane as Lane & { trigger_type?: string }).trigger_type ?? null })
+                : "generic")
+          ) as LaneArchetype,
           stepIndex: enr.current_step,
           property: {
             address: property.address,

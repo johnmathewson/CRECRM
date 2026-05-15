@@ -31,6 +31,9 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 const UPDATABLE = [
   "name", "description", "status", "trigger_type", "filters", "cadence",
   "approval_mode", "daily_touch_cap", "weekly_enrollment_cap",
+  // The persona that drives AI drafts for this lane. NULL is valid (falls
+  // back to slug-by-trigger-type lookup in the personalizer).
+  "persona_id",
 ];
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {

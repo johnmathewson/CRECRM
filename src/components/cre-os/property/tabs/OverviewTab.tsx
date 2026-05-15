@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Panel } from "@/components/cre-os/Panel";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { StatusBadge } from "@/components/cre-os/StatusBadge";
@@ -42,8 +43,17 @@ export function OverviewTab({ p }: { p: PropertyDetail }) {
           )}
         </Panel>
 
+        {/* Marketing notes — anchor intel for AI outreach about THIS property.
+            Gets injected into every personalizer prompt that involves this asset.
+            Use it for: "Lead with 8.69% cap, not asking price", "Owner motivated
+            for 60-day close", "Patel buyer pool is hot here — assume hospitality
+            fluency", etc. Edits save instantly — no rebuild. */}
+        <Panel eyebrow="Marketing notes" num={2} title="What the AI should anchor on">
+          <MarketingNotesEditor propertyId={p.id} initial={p.marketingNotes ?? ""} />
+        </Panel>
+
         {(hasOwnershipData || hasLoanData || hasMarketData) && (
-          <Panel eyebrow="Ownership & debt" num={2} title="What CoStar knows">
+          <Panel eyebrow="Ownership & debt" num={3} title="What CoStar knows">
             <OwnerLoanPanel p={p} />
           </Panel>
         )}
@@ -183,6 +193,70 @@ function KeyFactsGrid({ p }: { p: PropertyDetail }) {
           <div className="mt-0.5 font-heading text-[14px] text-cream">{v ?? <span className="text-cream-subtle">—</span>}</div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ── Marketing notes editor ──────────────────────────────────────────────
+// Per-property anchor intel for the AI personalizer. Edits flow through
+// PATCH /api/properties/[id] and become live for the next draft.
+function MarketingNotesEditor({ propertyId, initial }: { propertyId: string; initial: string }) {
+  const [value, setValue] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const dirty = value !== initial && value !== (savedAt ? value : initial);
+  // ^ dirty = the textarea differs from what was last loaded OR last saved
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      const r = await fetch(`/api/properties/${propertyId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ marketing_notes: value }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error ?? `HTTP ${r.status}`);
+      setSavedAt(Date.now());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="font-body text-[12px] text-cream-subtle leading-relaxed">
+        Free-form intel that gets injected into every AI draft about this property.
+        Examples: <span className="italic">&ldquo;Lead with the 8.69% cap, not the asking price.&rdquo;</span>{" "}
+        <span className="italic">&ldquo;Owner motivated for a 60-day close.&rdquo;</span>{" "}
+        <span className="italic">&ldquo;Assume hospitality fluency — don&rsquo;t over-explain per-key economics.&rdquo;</span>
+      </p>
+      <textarea
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        rows={Math.max(4, Math.min(10, value.split("\n").length + 1))}
+        placeholder="(optional — leave empty and the AI will work from the property's structured data alone)"
+        className="w-full px-3 py-2 rounded bg-steward-surface/60 border border-white/[0.06] focus:border-teal-400/40 focus:outline-none font-body text-base lg:text-[12.5px] text-cream placeholder:text-cream-subtle leading-relaxed resize-y"
+      />
+      <div className="flex items-center justify-between gap-3">
+        <div className="font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle">
+          {error && <span className="text-coral-300">Save failed: {error}</span>}
+          {!error && savedAt && !dirty && <span className="text-teal-300">Saved · live now</span>}
+          {!error && !savedAt && dirty && <span className="text-amber">Unsaved changes</span>}
+          {!error && !savedAt && !dirty && <span>Edits save instantly to every future AI draft</span>}
+        </div>
+        <button
+          onClick={save}
+          disabled={saving || (!dirty && !!savedAt)}
+          className="px-3 py-1.5 rounded border border-teal-400/40 bg-teal-400/[0.10] hover:bg-teal-400/[0.18] disabled:opacity-40 font-mono text-[10px] uppercase tracking-eyebrow text-teal-300"
+        >
+          {saving ? "Saving…" : savedAt && !dirty ? "Saved ✓" : "Save notes"}
+        </button>
+      </div>
     </div>
   );
 }

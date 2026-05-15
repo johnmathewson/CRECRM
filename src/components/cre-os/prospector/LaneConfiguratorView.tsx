@@ -8,6 +8,7 @@ import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { Panel } from "@/components/cre-os/Panel";
 import type { RailSection } from "@/components/cre-os/InsightsRail";
 import type { Lane, LaneFilters, CadenceStep } from "@/lib/cre-os/prospector-queries";
+import type { Persona } from "@/lib/cre-os/personas-queries";
 
 const ASSET_TYPE_OPTIONS = [
   "multifamily", "retail", "office", "industrial", "mixed_use",
@@ -37,11 +38,21 @@ interface PreviewResult {
   }>;
 }
 
-export function LaneConfiguratorView({ lane, facets }: { lane: Lane; facets: Facets }) {
+export function LaneConfiguratorView({
+  lane,
+  facets,
+  personas,
+}: {
+  lane: Lane;
+  facets: Facets;
+  personas: Persona[];
+}) {
   const router = useRouter();
   const [name, setName] = useState(lane.name);
   const [description, setDescription] = useState(lane.description ?? "");
   const [status, setStatus] = useState(lane.status);
+  // Persona dropdown — null is valid (falls back to slug-by-trigger-type)
+  const [personaId, setPersonaId] = useState<string | null>(lane.personaId);
   const [filters, setFilters] = useState<LaneFilters>(lane.filters);
   const [cadence, setCadence] = useState<CadenceStep[]>(lane.cadence);
   const [dailyTouchCap, setDailyTouchCap] = useState(lane.dailyTouchCap);
@@ -86,6 +97,7 @@ export function LaneConfiguratorView({ lane, facets }: { lane: Lane; facets: Fac
           cadence,
           daily_touch_cap: dailyTouchCap,
           weekly_enrollment_cap: weeklyEnrollmentCap,
+          persona_id: personaId,
         }),
       });
       const data = await r.json();
@@ -247,6 +259,38 @@ export function LaneConfiguratorView({ lane, facets }: { lane: Lane; facets: Fac
                 rows={2}
                 className={`${inputCls} resize-y`}
               />
+            </Field>
+            {/* Persona — drives the voice + skill used for every AI draft in this lane.
+                When NULL, the personalizer falls back to looking up a persona whose
+                slug matches the lane's trigger_type. Most lanes will leave this on
+                "Auto" — set it explicitly when you want a non-default voice. */}
+            <Field label="Persona (voice + skill)" className="md:col-span-2">
+              <select
+                value={personaId ?? ""}
+                onChange={(e) => setPersonaId(e.target.value || null)}
+                className={inputCls}
+              >
+                <option value="">Auto · match by trigger type</option>
+                {personas.map((p) => (
+                  <option key={p.slug} value={p.id}>
+                    {p.name} · /{p.slug}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 font-body text-[11px] text-cream-subtle leading-relaxed">
+                Leave on Auto unless you want this lane to speak in a non-default voice.
+                {personaId && (
+                  <>
+                    {" "}
+                    <Link
+                      href={`/cre-os/prospector/personas/${personas.find((p) => p.id === personaId)?.slug ?? ""}`}
+                      className="text-teal-300 hover:text-teal-200 underline"
+                    >
+                      Edit this persona →
+                    </Link>
+                  </>
+                )}
+              </p>
             </Field>
           </div>
         </Panel>
