@@ -41,7 +41,11 @@ const fmtRelative = (iso: string | null): string => {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 };
 
-type FilterTab = "all" | "hot" | "engaged" | "awaiting" | "cold";
+// Filter buckets — each maps to a concrete state in the lead's lifecycle.
+// "hot" was historically "hot interest, no touched filter" — leads stayed here
+// forever even after we emailed them. Now it means "hot AND not yet touched"
+// so a lead falls out of Hot the moment you Compose+Send to them.
+type FilterTab = "all" | "hot" | "touched_waiting" | "replied" | "engaged" | "cold";
 
 export function LeadsTab({
   snapshot,
@@ -75,12 +79,19 @@ export function LeadsTab({
 
   const filtered = useMemo(() => {
     let out = leads;
+    const HOT_INTERESTS = ["executed_ca", "offer_submitted", "info_request"];
     if (filter === "hot") {
-      out = out.filter((l) => ["executed_ca", "offer_submitted", "info_request"].includes(l.interest));
+      // Hot = hot-interest AND NOT yet touched. After you Compose+Send, the
+      // lead falls OUT of this bucket and into "Touched · waiting".
+      out = out.filter((l) => HOT_INTERESTS.includes(l.interest) && !l.lastTouchedAt);
+    } else if (filter === "touched_waiting") {
+      // Touched + no reply yet — your real "follow-up needed" queue.
+      out = out.filter((l) => l.lastTouchedAt && !l.repliedAt);
+    } else if (filter === "replied") {
+      // They actually replied. Drafts are waiting in the Prospector Inbox.
+      out = out.filter((l) => l.repliedAt);
     } else if (filter === "engaged") {
       out = out.filter((l) => ["executed_ca", "offer_submitted", "info_request", "downloaded_om"].includes(l.interest));
-    } else if (filter === "awaiting") {
-      out = out.filter((l) => ["executed_ca", "offer_submitted", "info_request"].includes(l.interest) && !l.respondedAt);
     } else if (filter === "cold") {
       out = out.filter((l) => l.interest === "visited" || l.interest === "unknown");
     }
@@ -200,8 +211,34 @@ export function LeadsTab({
 
         {/* Filter tabs */}
         <div className="flex flex-wrap items-center gap-2 mb-3">
-          <FilterChip label="Hot" tone="coral" active={filter === "hot"} onClick={() => setFilter("hot")} count={totals.hotActions} />
-          <FilterChip label="Awaiting response" tone="amber" active={filter === "awaiting"} onClick={() => setFilter("awaiting")} count={totals.awaitingResponse} />
+          {/* Filter chips reflect the actual lead state machine:
+              - Hot (needs first contact): hot interest, you haven't emailed yet
+              - Touched · waiting: you emailed, no reply yet
+              - Replied: they wrote back (drafts live in Prospector Inbox)
+              - All engaged: anyone who's done anything beyond just viewing
+              - Cold: viewers only
+              - All: everything */}
+          <FilterChip
+            label="Hot · needs first contact"
+            tone="coral"
+            active={filter === "hot"}
+            onClick={() => setFilter("hot")}
+            count={leads.filter((l) => ["executed_ca","offer_submitted","info_request"].includes(l.interest) && !l.lastTouchedAt).length}
+          />
+          <FilterChip
+            label="Touched · waiting"
+            tone="amber"
+            active={filter === "touched_waiting"}
+            onClick={() => setFilter("touched_waiting")}
+            count={leads.filter((l) => l.lastTouchedAt && !l.repliedAt).length}
+          />
+          <FilterChip
+            label="Replied"
+            tone="coral"
+            active={filter === "replied"}
+            onClick={() => setFilter("replied")}
+            count={leads.filter((l) => l.repliedAt).length}
+          />
           <FilterChip label="All engaged" active={filter === "engaged"} onClick={() => setFilter("engaged")} />
           <FilterChip label="Cold (viewers only)" active={filter === "cold"} onClick={() => setFilter("cold")} />
           <FilterChip label="All" active={filter === "all"} onClick={() => setFilter("all")} count={totals.leadCount} />
@@ -415,11 +452,7 @@ export function LeadsTab({
                       {fmtRelative(l.lastActivityAt)}
                     </td>
                     <td className="py-2.5 pr-3">
-                      {l.respondedAt ? (
-                        <span className="font-mono text-[10px] text-teal-300">✓ {fmtRelative(l.respondedAt)}</span>
-                      ) : (
-                        <span className="font-mono text-[10px] text-amber">—</span>
-                      )}
+                      <LeadStatusPip lead={l} />
                     </td>
                     <td className="py-2.5 text-right whitespace-nowrap">
                       <button
@@ -477,6 +510,44 @@ function pickSamples<T extends { body?: string }>(rows: T[]): T[] {
     withBody[Math.floor(withBody.length / 2)],
     withBody[withBody.length - 1],
   ];
+}
+
+// ── Lead status pip ──────────────────────────────────────────────────────
+// Visual indicator showing where each lead is in the touch lifecycle:
+//   Untouched         — no outbound sent yet
+//   Sent Xh ago       — sent within the last 72h, no reply
+//   Cold · Xd ago     — sent >72h ago, no reply (needs a follow-up touch)
+//   ✓ Replied Xh ago  — they wrote back
+function LeadStatusPip({ lead }: { lead: PropertyLead }) {
+  const base = "font-mono text-[10px] uppercase tracking-eyebrow border px-1.5 py-0.5 rounded inline-block";
+
+  if (lead.repliedAt) {
+    return (
+      <span className={`${base} border-coral-400/40 bg-coral-400/[0.10] text-coral-300`}>
+        ✓ Replied {fmtRelative(lead.repliedAt)}
+      </span>
+    );
+  }
+  if (lead.lastTouchedAt) {
+    const ageHours = (Date.now() - new Date(lead.lastTouchedAt).getTime()) / 3_600_000;
+    if (ageHours > 72) {
+      return (
+        <span className={`${base} border-amber/50 bg-amber/[0.10] text-amber`}>
+          Cold · {fmtRelative(lead.lastTouchedAt)}
+        </span>
+      );
+    }
+    return (
+      <span className={`${base} border-teal-400/40 bg-teal-400/[0.08] text-teal-300`}>
+        ✓ Sent {fmtRelative(lead.lastTouchedAt)}
+      </span>
+    );
+  }
+  return (
+    <span className={`${base} border-white/[0.10] bg-white/[0.02] text-cream-subtle`}>
+      Untouched
+    </span>
+  );
 }
 
 // ── Mobile card — replaces the table row on phones ──────────────────────
@@ -559,12 +630,8 @@ function LeadCardMobile({
               {l.lastActivityAt && (
                 <span>{fmtRelative(l.lastActivityAt)}</span>
               )}
-              {l.respondedAt ? (
-                <span className="text-teal-300">✓ replied</span>
-              ) : (
-                <span className="text-amber">awaiting</span>
-              )}
             </div>
+            <LeadStatusPip lead={l} />
           </div>
 
           <div className="mt-2 pt-2 border-t border-white/[0.04]">

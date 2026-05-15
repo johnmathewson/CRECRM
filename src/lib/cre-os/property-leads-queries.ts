@@ -51,8 +51,17 @@ export interface PropertyLead {
   lastActivityAt: string | null;
   /** First-seen timestamp */
   firstSeenAt: string | null;
-  /** Has any outbound communication been sent to this email? */
+  /** Has any outbound communication been sent to this email?
+   *  DEPRECATED — use lastTouchedAt going forward. Kept for back-compat with
+   *  existing UI code that references respondedAt. Set to same value as
+   *  lastTouchedAt by the loader. */
   respondedAt: string | null;
+  /** When did we last send an outbound email to this lead? (renamed from
+   *  respondedAt for clarity — it was always about OUR outbound, not their reply) */
+  lastTouchedAt: string | null;
+  /** When did THIS lead actually reply to one of our outbound touches?
+   *  Pulled from lane_touches.status='responded' rows matched by contact_id. */
+  repliedAt: string | null;
   /** Whether they signed an NDA */
   signedNda: boolean;
   /** Aggregate vault visits */
@@ -107,9 +116,9 @@ function normalizeInterest(s: string | null | undefined): LeadInterestLevel {
 export async function loadPropertyLeads(propertyId: string): Promise<PropertyLeadsSnapshot> {
   const sb = createServerSupabase();
 
-  const [crexiRes, leadsRes, ndaRes, vaultRes, latestReportRes, outboundRes] = await Promise.all([
+  const [crexiRes, leadsRes, ndaRes, vaultRes, latestReportRes, outboundRes, inboundRepliesRes] = await Promise.all([
     sb.from("crexi_leads_state")
-      .select("id, name, email, phone, company, role, level_of_interest, number_of_visits, last_activity_date, first_seen_at, raw_panel")
+      .select("id, name, email, phone, company, role, level_of_interest, number_of_visits, last_activity_date, first_seen_at, raw_panel, contact_id")
       .eq("organization_id", ORG_ID)
       .eq("property_id", propertyId)
       .order("last_activity_date", { ascending: false, nullsFirst: false }),
@@ -145,9 +154,20 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       .eq("organization_id", ORG_ID)
       .eq("property_id", propertyId)
       .eq("direction", "outbound"),
+
+    // Inbound replies — lane_touches with status='responded' for this property.
+    // Matched to leads by contact_id (set during CREXi → contacts linkage).
+    // This is what populates the "Replied" state on each lead.
+    sb.from("lane_touches")
+      .select("contact_id, responded_at, metadata")
+      .eq("organization_id", ORG_ID)
+      .eq("property_id", propertyId)
+      .eq("status", "responded")
+      .order("responded_at", { ascending: false }),
   ]);
 
-  // ── Build the email → respondedAt map ──
+  // ── Build the email → lastTouchedAt map (outbound we sent) ──
+  // (Historically called respondedByEmail; renamed semantically.)
   const respondedByEmail = new Map<string, string>();
   for (const c of (outboundRes.data ?? []) as Array<{ to_addresses: string[] | null; occurred_at: string }>) {
     for (const addr of c.to_addresses ?? []) {
@@ -155,6 +175,14 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       const prev = respondedByEmail.get(e);
       if (!prev || c.occurred_at > prev) respondedByEmail.set(e, c.occurred_at);
     }
+  }
+
+  // ── Build the contact_id → repliedAt map (their inbound replies) ──
+  const repliedByContactId = new Map<string, string>();
+  for (const r of (inboundRepliesRes.data ?? []) as Array<{ contact_id: string | null; responded_at: string | null }>) {
+    if (!r.contact_id || !r.responded_at) continue;
+    const prev = repliedByContactId.get(r.contact_id);
+    if (!prev || r.responded_at > prev) repliedByContactId.set(r.contact_id, r.responded_at);
   }
 
   // ── NDA signers by email ──
@@ -237,12 +265,14 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
     last_activity_date: string | null;
     first_seen_at: string | null;
     raw_panel: { "Crexi Lead Score"?: number; "Note 1"?: string; "Note 2"?: string; "Note 3"?: string } | null;
+    contact_id: string | null;
   }>) {
     const email = c.email?.toLowerCase().trim() ?? null;
     const raw = c.raw_panel || {};
     const notes = [raw["Note 1"], raw["Note 2"], raw["Note 3"]].filter(Boolean).join("\n\n") || null;
     const interest = normalizeInterest(c.level_of_interest);
-    const respondedAt = email ? respondedByEmail.get(email) ?? null : null;
+    const lastTouchedAt = email ? respondedByEmail.get(email) ?? null : null;
+    const repliedAt = c.contact_id ? repliedByContactId.get(c.contact_id) ?? null : null;
     const signedNda = email ? ndaByEmail.has(email) : false;
     addLead({
       id: c.id,
@@ -258,7 +288,9 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       leadScore: raw["Crexi Lead Score"] ?? null,
       lastActivityAt: c.last_activity_date,
       firstSeenAt: c.first_seen_at,
-      respondedAt,
+      respondedAt: lastTouchedAt, // back-compat alias
+      lastTouchedAt,
+      repliedAt,
       signedNda,
       vaultVisits: 0,
       notes,
@@ -282,7 +314,7 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
   }>) {
     const email = l.sender_email?.toLowerCase().trim() ?? null;
     if (!email && !l.sender_name) continue; // unparseable
-    const respondedAt = email ? respondedByEmail.get(email) ?? l.final_sent_at ?? null : l.final_sent_at;
+    const lastTouchedAt = email ? respondedByEmail.get(email) ?? l.final_sent_at ?? null : l.final_sent_at;
     const signedNda = email ? ndaByEmail.has(email) : false;
     addLead({
       id: l.id,
@@ -298,7 +330,9 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       leadScore: null,
       lastActivityAt: l.updated_at,
       firstSeenAt: l.created_at,
-      respondedAt,
+      respondedAt: lastTouchedAt, // back-compat alias
+      lastTouchedAt,
+      repliedAt: null, // direct leads from /api/leads/intake don't track inbound replies the same way
       signedNda,
       vaultVisits: vaultByLead.get(l.id) ?? 0,
       notes: l.qualifier_summary,
@@ -310,7 +344,7 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
     const email = n.typed_email?.toLowerCase().trim() ?? null;
     if (email && byEmail.has(email)) continue;
     if (!email && !n.typed_name) continue;
-    const respondedAt = email ? respondedByEmail.get(email) ?? null : null;
+    const lastTouchedAt = email ? respondedByEmail.get(email) ?? null : null;
     addLead({
       id: `nda-${n.id}`,
       source: "nda_vault",
@@ -325,7 +359,9 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       leadScore: null,
       lastActivityAt: n.signed_at,
       firstSeenAt: n.signed_at,
-      respondedAt,
+      respondedAt: lastTouchedAt,
+      lastTouchedAt,
+      repliedAt: null,
       signedNda: true,
       vaultVisits: 0,
       notes: null,
