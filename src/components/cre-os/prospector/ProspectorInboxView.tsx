@@ -510,24 +510,27 @@ function TouchDetailPanel({ touch, onClose }: { touch: InboxTouch; onClose: () =
           )}
         </div>
 
-        {/* Suggested-reply editor — only when there's a draft to act on */}
-        {isReply && draft && (
-          <div className="rounded border border-teal-400/25 bg-teal-400/[0.03] p-4">
+        {/* Reply editor — always show on inbound replies, even if the AI
+            didn't pre-fill a draft. Broker can either edit the AI's
+            suggestion or write their own from scratch. */}
+        {isReply && (
+          <div className="rounded border border-teal-400/40 bg-teal-400/[0.04] p-4">
             <div className="flex items-center justify-between gap-2 mb-2">
-              <div className="font-mono text-[9.5px] uppercase tracking-eyebrow text-teal-300">
-                AI suggested reply · edit before sending
+              <div className="font-mono text-[10px] uppercase tracking-eyebrow text-teal-300 font-semibold">
+                {draft ? "Your reply · edit the AI draft and send" : "Your reply · write below and send"}
               </div>
-              {replyBody.trim() !== draft.trim() && (
+              {draft && replyBody.trim() !== draft.trim() && (
                 <div className="font-mono text-[9px] uppercase tracking-eyebrow text-amber">edited</div>
               )}
             </div>
             <textarea
               value={replyBody}
               onChange={(e) => setReplyBody(e.target.value)}
-              rows={Math.min(14, Math.max(6, replyBody.split("\n").length + 1))}
-              className="w-full px-3 py-2 rounded bg-steward-surface/60 border border-white/[0.06] focus:border-teal-400/40 focus:outline-none font-body text-base lg:text-[12.5px] text-cream placeholder:text-cream-subtle leading-relaxed resize-y"
-              placeholder="The AI couldn't draft a reply — write your own."
-              disabled={sending || sendResult?.ok === true}
+              rows={Math.min(14, Math.max(8, replyBody.split("\n").length + 2))}
+              className="w-full px-3 py-2.5 rounded bg-steward-surface/80 border border-teal-400/30 focus:border-teal-400/60 focus:outline-none focus:ring-1 focus:ring-teal-400/40 font-body text-base lg:text-[13px] text-cream placeholder:text-cream-subtle leading-relaxed resize-y cursor-text"
+              placeholder={draft ? "" : "Type your response here…"}
+              readOnly={sending || sendResult?.ok === true}
+              autoFocus
             />
             <div className="mt-2 flex items-center justify-between gap-3 flex-wrap">
               <div className="font-mono text-[9.5px] uppercase tracking-eyebrow text-cream-subtle">
