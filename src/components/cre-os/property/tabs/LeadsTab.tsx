@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Panel } from "@/components/cre-os/Panel";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
@@ -27,6 +28,27 @@ const INTEREST_TONE: Record<LeadInterestLevel, string> = {
   downloaded_om: "border-teal-400/30 bg-teal-400/[0.05] text-teal-300",
   visited: "border-white/[0.10] bg-white/[0.02] text-cream-dim",
   unknown: "border-white/[0.06] bg-white/[0.01] text-cream-subtle",
+};
+
+// AI-classified reply intent — matches the labels in the Prospector Inbox.
+const REPLY_INTENT_LABEL: Record<string, string> = {
+  interested: "Interested",
+  question: "Question",
+  declined: "Declined",
+  hostile: "Hostile",
+  unsubscribe: "Unsubscribe",
+  out_of_office: "OOO",
+  unclear: "Unclear",
+};
+
+const REPLY_INTENT_TONE: Record<string, string> = {
+  interested: "border-teal-400/40 bg-teal-400/[0.10] text-teal-300",
+  question: "border-amber/40 bg-amber/[0.10] text-amber",
+  declined: "border-cream-dim/30 bg-white/[0.04] text-cream-dim",
+  hostile: "border-coral-400/50 bg-coral-400/[0.12] text-coral-300",
+  unsubscribe: "border-coral-400/40 bg-coral-400/[0.08] text-coral-300",
+  out_of_office: "border-white/[0.08] bg-white/[0.02] text-cream-subtle",
+  unclear: "border-white/[0.06] bg-white/[0.02] text-cream-subtle",
 };
 
 const fmtRelative = (iso: string | null): string => {
@@ -548,6 +570,20 @@ export function LeadsTab({
                         {l.email && <span className="truncate">{l.email}</span>}
                         {l.phone && <span className="text-teal-300">{l.phone}</span>}
                       </div>
+                      {/* If they replied, surface AI summary inline so the broker
+                          gets at-a-glance context without leaving the page */}
+                      {l.replySummary && (
+                        <div className="mt-1.5 flex items-start gap-2">
+                          {l.replyIntent && (
+                            <span className={`shrink-0 font-mono text-[9px] uppercase tracking-eyebrow border px-1.5 py-0.5 rounded ${REPLY_INTENT_TONE[l.replyIntent] ?? REPLY_INTENT_TONE.unclear}`}>
+                              {REPLY_INTENT_LABEL[l.replyIntent] ?? l.replyIntent}
+                            </span>
+                          )}
+                          <span className="font-body text-[11px] text-cream-dim italic truncate">
+                            AI read: {l.replySummary}
+                          </span>
+                        </div>
+                      )}
                     </td>
                     <td className="py-2.5 pr-3">
                       <span className={`font-mono text-[9px] uppercase tracking-eyebrow border px-1.5 py-0.5 rounded ${INTEREST_TONE[l.interest]}`}>
@@ -567,14 +603,24 @@ export function LeadsTab({
                       <LeadStatusPip lead={l} />
                     </td>
                     <td className="py-2.5 text-right whitespace-nowrap">
-                      <button
-                        disabled={!l.email}
-                        onClick={() => setComposeTarget(l)}
-                        title={l.email ? "Compose individual follow-up" : "No email on file"}
-                        className="font-mono text-[10px] uppercase tracking-eyebrow text-cream-dim hover:text-coral-300 disabled:opacity-30 disabled:cursor-not-allowed"
-                      >
-                        Compose →
-                      </button>
+                      {l.replyTouchId ? (
+                        <Link
+                          href={`/cre-os/prospector/inbox?touch=${l.replyTouchId}`}
+                          title="Read what they said + send the AI-drafted response"
+                          className="font-mono text-[10px] uppercase tracking-eyebrow text-coral-300 hover:text-coral-200"
+                        >
+                          View reply →
+                        </Link>
+                      ) : (
+                        <button
+                          disabled={!l.email}
+                          onClick={() => setComposeTarget(l)}
+                          title={l.email ? "Compose individual follow-up" : "No email on file"}
+                          className="font-mono text-[10px] uppercase tracking-eyebrow text-cream-dim hover:text-coral-300 disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          Compose →
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -765,14 +811,38 @@ function LeadCardMobile({
             <LeadStatusPip lead={l} />
           </div>
 
+          {/* AI summary of the reply (only when present) — gives at-a-glance
+              context before the broker taps through to read it */}
+          {l.replySummary && (
+            <div className="mt-2 pt-2 border-t border-white/[0.04] flex items-start gap-2">
+              {l.replyIntent && (
+                <span className={`shrink-0 font-mono text-[9px] uppercase tracking-eyebrow border px-1.5 py-0.5 rounded ${REPLY_INTENT_TONE[l.replyIntent] ?? REPLY_INTENT_TONE.unclear}`}>
+                  {REPLY_INTENT_LABEL[l.replyIntent] ?? l.replyIntent}
+                </span>
+              )}
+              <span className="font-body text-[11.5px] text-cream-dim italic">
+                AI read: {l.replySummary}
+              </span>
+            </div>
+          )}
+
           <div className="mt-2 pt-2 border-t border-white/[0.04]">
-            <button
-              disabled={!l.email}
-              onClick={onCompose}
-              className="w-full px-3 py-2 rounded border border-coral-400/40 bg-coral-400/[0.08] hover:bg-coral-400/[0.18] font-mono text-[10.5px] uppercase tracking-eyebrow text-coral-300 disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              {l.email ? "Compose follow-up" : "No email on file"}
-            </button>
+            {l.replyTouchId ? (
+              <Link
+                href={`/cre-os/prospector/inbox?touch=${l.replyTouchId}`}
+                className="block text-center w-full px-3 py-2 rounded border border-coral-400/40 bg-coral-400/[0.12] hover:bg-coral-400/[0.20] font-mono text-[10.5px] uppercase tracking-eyebrow text-coral-300"
+              >
+                View reply & respond →
+              </Link>
+            ) : (
+              <button
+                disabled={!l.email}
+                onClick={onCompose}
+                className="w-full px-3 py-2 rounded border border-coral-400/40 bg-coral-400/[0.08] hover:bg-coral-400/[0.18] font-mono text-[10.5px] uppercase tracking-eyebrow text-coral-300 disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                {l.email ? "Compose follow-up" : "No email on file"}
+              </button>
+            )}
           </div>
         </div>
       </div>

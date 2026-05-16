@@ -62,6 +62,15 @@ export interface PropertyLead {
   /** When did THIS lead actually reply to one of our outbound touches?
    *  Pulled from lane_touches.status='responded' rows matched by contact_id. */
   repliedAt: string | null;
+  /** The lane_touches.id of the most-recent reply. Used to deep-link from
+   *  the Leads tab to the Prospector Inbox detail panel where the broker
+   *  can read the reply + send the AI-drafted response. */
+  replyTouchId: string | null;
+  /** AI-classified intent of the latest reply, for at-a-glance triage on the
+   *  Leads tab. One of: interested / question / declined / hostile / unsubscribe / out_of_office / unclear. */
+  replyIntent: string | null;
+  /** AI-generated one-sentence summary of the reply ("Wants the rent roll."). */
+  replySummary: string | null;
   /** If this lead's email was touched on a DIFFERENT property recently,
    *  surface that here so the broker doesn't accidentally double-email.
    *  Null = not touched elsewhere recently. */
@@ -160,11 +169,9 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       .eq("direction", "outbound"),
 
     // Inbound replies — lane_touches with status='responded' for this property.
-    // Matched to leads by contact_id (set during CREXi → contacts linkage) OR
-    // by from_email in metadata (when contact_id is NULL — happens when the
-    // reply matched via communications source which doesn't carry contact_id).
+    // Selects the touch ID so the Leads tab can deep-link to the inbox detail.
     sb.from("lane_touches")
-      .select("contact_id, responded_at, metadata")
+      .select("id, contact_id, responded_at, metadata")
       .eq("organization_id", ORG_ID)
       .eq("property_id", propertyId)
       .eq("status", "responded")
@@ -273,27 +280,39 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
     }
   }
 
-  // ── Build the contact_id → repliedAt AND email → repliedAt maps ──
-  // Two indexes because reply touches don't always carry a contact_id:
-  // when the reply matched a parent via communications (the bulk-ai-followup
-  // write path), match-reply-to-touch sets contact_id = NULL. We fall back
-  // to from_email in metadata so those replies still surface on the Leads tab.
-  const repliedByContactId = new Map<string, string>();
-  const repliedByEmail = new Map<string, string>();
+  // ── Build the contact_id → reply AND email → reply maps ──
+  // Carries touch_id + intent + summary so the Leads tab can render
+  // at-a-glance triage info and deep-link to the inbox detail.
+  type ReplyInfo = {
+    touchId: string;
+    repliedAt: string;
+    intent: string | null;
+    summary: string | null;
+  };
+  const repliedByContactId = new Map<string, ReplyInfo>();
+  const repliedByEmail = new Map<string, ReplyInfo>();
   for (const r of (inboundRepliesRes.data ?? []) as Array<{
+    id: string;
     contact_id: string | null;
     responded_at: string | null;
     metadata: Record<string, unknown> | null;
   }>) {
     if (!r.responded_at) continue;
+    const classification = (r.metadata?.classification as { intent?: string; summary?: string } | null | undefined) ?? null;
+    const info: ReplyInfo = {
+      touchId: r.id,
+      repliedAt: r.responded_at,
+      intent: classification?.intent ?? null,
+      summary: classification?.summary ?? null,
+    };
     if (r.contact_id) {
       const prev = repliedByContactId.get(r.contact_id);
-      if (!prev || r.responded_at > prev) repliedByContactId.set(r.contact_id, r.responded_at);
+      if (!prev || r.responded_at > prev.repliedAt) repliedByContactId.set(r.contact_id, info);
     }
     const fromEmail = ((r.metadata?.from_email as string) ?? "").toLowerCase().trim();
     if (fromEmail) {
       const prev = repliedByEmail.get(fromEmail);
-      if (!prev || r.responded_at > prev) repliedByEmail.set(fromEmail, r.responded_at);
+      if (!prev || r.responded_at > prev.repliedAt) repliedByEmail.set(fromEmail, info);
     }
   }
 
@@ -416,12 +435,16 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       : (byEmailVal ?? byContactVal);
     // Replied lookup: try contact_id first (when set), fall back to email
     // (covers replies that matched via communications source where contact_id
-    // is NULL on the lane_touch).
+    // is NULL on the lane_touch). Picks the most-recent across both maps.
     const byContactRepl = c.contact_id ? repliedByContactId.get(c.contact_id) : null;
     const byEmailRepl = email ? repliedByEmail.get(email) : null;
-    const repliedAt = (byContactRepl && byEmailRepl)
-      ? (byContactRepl > byEmailRepl ? byContactRepl : byEmailRepl)
+    const replyInfo = (byContactRepl && byEmailRepl)
+      ? (byContactRepl.repliedAt > byEmailRepl.repliedAt ? byContactRepl : byEmailRepl)
       : (byContactRepl ?? byEmailRepl ?? null);
+    const repliedAt = replyInfo?.repliedAt ?? null;
+    const replyTouchId = replyInfo?.touchId ?? null;
+    const replyIntent = replyInfo?.intent ?? null;
+    const replySummary = replyInfo?.summary ?? null;
     const crossPropertyTouch = email ? crossPropByEmail.get(email) ?? null : null;
     const signedNda = email ? ndaByEmail.has(email) : false;
     addLead({
@@ -441,6 +464,9 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       respondedAt: lastTouchedAt, // back-compat alias
       lastTouchedAt,
       repliedAt,
+      replyTouchId,
+      replyIntent,
+      replySummary,
       crossPropertyTouch,
       signedNda,
       vaultVisits: 0,
@@ -483,7 +509,10 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       firstSeenAt: l.created_at,
       respondedAt: lastTouchedAt, // back-compat alias
       lastTouchedAt,
-      repliedAt: null, // direct leads from /api/leads/intake don't track inbound replies the same way
+      repliedAt: email ? repliedByEmail.get(email)?.repliedAt ?? null : null,
+      replyTouchId: email ? repliedByEmail.get(email)?.touchId ?? null : null,
+      replyIntent: email ? repliedByEmail.get(email)?.intent ?? null : null,
+      replySummary: email ? repliedByEmail.get(email)?.summary ?? null : null,
       crossPropertyTouch: email ? crossPropByEmail.get(email) ?? null : null,
       signedNda,
       vaultVisits: vaultByLead.get(l.id) ?? 0,
@@ -513,7 +542,10 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       firstSeenAt: n.signed_at,
       respondedAt: lastTouchedAt,
       lastTouchedAt,
-      repliedAt: null,
+      repliedAt: email ? repliedByEmail.get(email)?.repliedAt ?? null : null,
+      replyTouchId: email ? repliedByEmail.get(email)?.touchId ?? null : null,
+      replyIntent: email ? repliedByEmail.get(email)?.intent ?? null : null,
+      replySummary: email ? repliedByEmail.get(email)?.summary ?? null : null,
       crossPropertyTouch: email ? crossPropByEmail.get(email) ?? null : null,
       signedNda: true,
       vaultVisits: 0,

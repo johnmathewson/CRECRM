@@ -83,6 +83,31 @@ export function ProspectorInboxView({
   const [searchInput, setSearchInput] = useState(activeFilters.q ?? "");
   const [composeOpen, setComposeOpen] = useState(false);
 
+  // Deep-link support: if the URL has ?touch=<id>, auto-open that touch's
+  // detail panel. Used by the Leads-tab "View reply & respond →" links so
+  // the broker lands right where they can read the reply + send a response.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const touchId = params.get("touch");
+    if (!touchId) return;
+    const match = snapshot.touches.find((t) => t.id === touchId);
+    if (match) {
+      setSelected(match);
+      // Scroll the detail panel into view after the initial paint
+      setTimeout(() => {
+        const el = document.querySelector('[data-touch-detail-panel="true"]');
+        if (el && "scrollIntoView" in el) (el as HTMLElement).scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 100);
+    } else {
+      // Touch isn't in the current snapshot (filtered out). Fetch it directly.
+      fetch(`/api/lane-touches/${touchId}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((data) => { if (data?.touch) setSelected(data.touch); });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Live refresh — pulls fresh snapshot every 30s while the page is open.
   useEffect(() => {
     if (!autoRefresh) return;
@@ -422,6 +447,7 @@ function TouchDetailPanel({ touch, onClose }: { touch: InboxTouch; onClose: () =
   }
 
   return (
+    <div data-touch-detail-panel="true">
     <Panel
       eyebrow={isReply ? "Reply received" : "Sent"}
       num={2}
@@ -539,6 +565,7 @@ function TouchDetailPanel({ touch, onClose }: { touch: InboxTouch; onClose: () =
         )}
       </div>
     </Panel>
+    </div>
   );
 }
 
