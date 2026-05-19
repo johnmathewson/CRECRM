@@ -254,20 +254,31 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
 
           // ── Route based on classification ──
           if (classification.intent === "crexi_report") {
+            // ALWAYS dispatch and continue — never fall through to lead-intake.
+            // Why: Netlify function-to-function fetches sometimes return
+            // non-ok status even when the target function completes
+            // successfully (cold-start timing, internal proxy quirks).
+            // Falling through on reportRes.ok=false caused BOTH the parser
+            // AND the auto-ack to run for forwarded CREXi reports. The
+            // parser writes its own status to import_jobs — that's the
+            // authoritative audit trail. If the parse fails, the broker
+            // can re-trigger manually rather than getting embarrassing
+            // auto-acks fired in the meantime.
             try {
               const reportRes = await fetch(`${origin}/api/leads/crexi-report`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ gmail_message_id: msg.id }),
               });
-              if (reportRes.ok) {
-                dispatched += 1;
-                continue;
-              }
-              console.warn(`[poll-gmail] CREXi report parse failed for ${msg.id}, falling through to lead intake`);
+              const ok = reportRes.ok;
+              const status = reportRes.status;
+              const bodyText = await reportRes.text().catch(() => "");
+              console.log(`[poll-gmail] crexi-report dispatch for ${msg.id}: ok=${ok} status=${status} body=${bodyText.slice(0, 200)}`);
             } catch (err) {
-              console.error(`[poll-gmail] CREXi report dispatch error:`, err);
+              console.error(`[poll-gmail] CREXi report dispatch error (parser may still run):`, err);
             }
+            dispatched += 1;
+            continue; // unconditionally skip lead-intake on crexi_report classification
           }
 
           // Drop these without auto-acking — they don't deserve a response
