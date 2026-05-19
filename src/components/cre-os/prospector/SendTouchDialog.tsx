@@ -227,6 +227,13 @@ export function SendTouchDialog({
       if (!r.ok) throw new Error(data.error ?? `HTTP ${r.status}`);
       setSent({ messageId: data.gmail_message_id });
       router.refresh();
+      // Auto-close the dialog after a brief flash so the broker doesn't
+      // have to dismiss it manually. The 800ms delay gives them a moment
+      // to register that the send actually happened (success state shows)
+      // before disappearing.
+      setTimeout(() => {
+        onClose();
+      }, 800);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Send failed");
     } finally {
