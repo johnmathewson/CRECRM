@@ -126,7 +126,7 @@ export async function POST(req: NextRequest) {
     .from("properties")
     .select(`
       id, name, address, city, state, asset_type, sub_type, sqft, units,
-      year_built, cap_rate, building_class, submarket, for_sale_status,
+      year_built, cap_rate, building_class, submarket, for_sale_status, status,
       years_owned, last_sale_price, mortgage_maturity_date, mortgage_lender,
       estimated_value, owner_name_raw, marketing_notes, document_inventory
     `)
@@ -396,15 +396,19 @@ export async function POST(req: NextRequest) {
       continue;
     }
 
-    // Detect listing-side vs owner-side. If the property has any active for-sale
-    // status, the CREXi-style engagement signal means this person is a BUYER who
-    // looked at our listing — route to listing_inquiry_followup, not the generic
-    // warm_lead_followup (which historically produced owner-side cold-prospect copy).
+    // Detect listing-side vs owner-side. The property is a LISTING if either:
+    //   1. for_sale_status is set to an active value (active/listed/pending/under_contract)
+    //   2. OR properties.status is "listed" or "active" (the canonical inventory state)
+    // Checking both fields fixes a historic bug where for_sale_status was NULL
+    // even though status='listed' — Liberty + Super 8 fell through to the
+    // wrong persona (warm_lead_followup) because of this.
     const propertyIsListing = !!(
-      prop.for_sale_status &&
-      ["active", "listed", "pending", "under_contract"].includes(
-        String(prop.for_sale_status).toLowerCase()
-      )
+      (prop.for_sale_status &&
+        ["active", "listed", "pending", "under_contract"].includes(
+          String(prop.for_sale_status).toLowerCase()
+        )) ||
+      (prop.status &&
+        ["listed", "active"].includes(String(prop.status).toLowerCase()))
     );
 
     // Generate personalized message

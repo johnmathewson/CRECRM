@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
     .from("properties")
     .select(`
       id, name, address, city, state, asset_type, sub_type, sqft, units,
-      year_built, cap_rate, building_class, submarket, for_sale_status,
+      year_built, cap_rate, building_class, submarket, for_sale_status, status,
       years_owned, last_sale_price, mortgage_maturity_date, mortgage_lender,
       estimated_value, owner_name_raw, marketing_notes, document_inventory
     `)
@@ -73,11 +73,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Property not found" }, { status: 404 });
   }
 
+  // The property is a LISTING if either for_sale_status is active OR the
+  // canonical properties.status is "listed"/"active". Checking both catches
+  // the case where for_sale_status was never populated (Liberty + Super 8
+  // had status='listed' but for_sale_status=null, causing the wrong persona
+  // route).
   const propertyIsListing = !!(
-    prop.for_sale_status &&
-    ["active", "listed", "pending", "under_contract"].includes(
-      String(prop.for_sale_status).toLowerCase()
-    )
+    (prop.for_sale_status &&
+      ["active", "listed", "pending", "under_contract"].includes(
+        String(prop.for_sale_status).toLowerCase()
+      )) ||
+    (prop.status &&
+      ["listed", "active"].includes(String(prop.status).toLowerCase()))
   );
 
   const recip = body.recipient ?? {};
