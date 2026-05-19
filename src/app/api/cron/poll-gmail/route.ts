@@ -28,6 +28,11 @@ import {
   parseAddress,
 } from "@/lib/gmail";
 import { maybeRouteAsReply } from "@/lib/cre-os/match-reply-to-touch";
+import {
+  classifyInboundEmail,
+  collectAttachmentFilenames,
+  type InboundClassification,
+} from "@/lib/cre-os/classify-inbound-email";
 
 // Walk a Gmail message payload tree looking for an attachment whose
 // filename matches a CREXi Lead Report pattern. CREXi sends the file with
@@ -209,17 +214,46 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
             continue; // skip lead-intake — this was a reply
           }
 
-          // ── Second try: is this a CREXi daily Lead Report? ──
-          // Two-signal detection:
-          //   1. Attachment filename matches lead-report patterns
-          //      ("Lead Report - X.xlsx" or "Lead_Report_X.xlsx")
-          //   2. OR: email subject contains "Lead Report" AND has an
-          //      xlsx attachment (fallback for renamed/forwarded files)
-          // If yes → route to the report parser instead of lead intake.
-          const hasCrexiReportAttachment =
+          // ── Second try: AI intent classifier ──
+          // Replaces the rule-based "filename regex" detection with an LLM
+          // call (Haiku) that reads the email holistically — subject + body
+          // + sender + attachment filenames — and decides what bucket it
+          // belongs to. Result drives routing.
+          //
+          // We still run a rule-based pre-check as a SAFETY NET: if the
+          // filename obviously matches a CREXi report (cheap regex), we
+          // can skip the AI call and route directly. The AI handles
+          // everything else (forwarded files, new naming conventions,
+          // direct inquiries, unsubscribes, spam, etc.).
+          const obviousCrexiReport =
             hasLeadReportXlsx(msg.payload) ||
             looksLikeLeadReportEmail(subject, msg.payload);
-          if (hasCrexiReportAttachment) {
+
+          let classification: InboundClassification | null = null;
+          let routedAs: string = obviousCrexiReport ? "crexi_report (rule)" : "";
+
+          if (obviousCrexiReport) {
+            // Skip the AI call — rules are confident this is a CREXi report
+            classification = {
+              intent: "crexi_report",
+              confidence: 1.0,
+              reasoning: "Matched rule-based filename / subject pattern",
+              classifiedAt: new Date().toISOString(),
+              model: "rule",
+            };
+          } else {
+            classification = await classifyInboundEmail({
+              fromAddress: fromEmail,
+              subject: subject ?? null,
+              bodyPreview: text ?? "",
+              attachmentFilenames: collectAttachmentFilenames(msg.payload),
+            });
+            routedAs = `${classification.intent} (ai, conf=${classification.confidence.toFixed(2)})`;
+          }
+          console.log(`[poll-gmail] ${msg.id} from=${fromEmail ?? "?"} → ${routedAs}: ${classification.reasoning}`);
+
+          // ── Route based on classification ──
+          if (classification.intent === "crexi_report") {
             try {
               const reportRes = await fetch(`${origin}/api/leads/crexi-report`, {
                 method: "POST",
@@ -230,12 +264,45 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
                 dispatched += 1;
                 continue;
               }
-              // If report parse fails, fall through to normal lead intake
-              // so we don't drop the message entirely.
               console.warn(`[poll-gmail] CREXi report parse failed for ${msg.id}, falling through to lead intake`);
             } catch (err) {
               console.error(`[poll-gmail] CREXi report dispatch error:`, err);
             }
+          }
+
+          // Drop these without auto-acking — they don't deserve a response
+          if (classification.intent === "spam" || classification.intent === "internal") {
+            console.log(`[poll-gmail] ${msg.id} dropped (${classification.intent}) — no auto-ack`);
+            dispatched += 1;
+            continue;
+          }
+
+          // Unsubscribe — record the opt-out and don't reply.
+          if (classification.intent === "unsubscribe" && fromEmail) {
+            await supabase.from("email_optouts").upsert({
+              organization_id: ORG_ID,
+              email: fromEmail.toLowerCase().trim(),
+              source: "reply_unsubscribe",
+              reason: `Auto-detected unsubscribe via classifier: ${classification.reasoning}`,
+            }, { onConflict: "organization_id,email" }).select();
+            console.log(`[poll-gmail] ${msg.id} unsubscribed ${fromEmail}`);
+            dispatched += 1;
+            continue;
+          }
+
+          // data_feed — placeholder route (logged + handled like generic
+          // direct_inquiry for now). Future: dedicated parsers for LoopNet,
+          // Buildout, CoStar exports.
+          if (classification.intent === "data_feed") {
+            console.log(`[poll-gmail] ${msg.id} flagged as data_feed — no parser yet, routing to lead intake`);
+          }
+
+          // cadence_reply but the thread-id match didn't catch it — could be
+          // a reply on a new thread. Try to find the originating outbound by
+          // sender email and link if possible. Fall through to lead intake
+          // for now (auto-ack still goes out — broker can manually link).
+          if (classification.intent === "cadence_reply") {
+            console.log(`[poll-gmail] ${msg.id} classified as cadence_reply but no thread match — falling through to lead intake`);
           }
 
           const intakePayload = {
