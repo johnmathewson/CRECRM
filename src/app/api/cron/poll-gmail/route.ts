@@ -30,15 +30,45 @@ import {
 import { maybeRouteAsReply } from "@/lib/cre-os/match-reply-to-touch";
 
 // Walk a Gmail message payload tree looking for an attachment whose
-// filename matches the CREXi daily Lead Report pattern.
+// filename matches a CREXi Lead Report pattern. CREXi sends the file with
+// two different naming conventions depending on which export path was used:
+//   - "Lead Report - Super 8 by Wyndham Valparaiso.xlsx"   (spaces + hyphen)
+//   - "Lead_Report_Liberty_Square_Retail_Center.xlsx"      (underscores)
+// We accept either, plus minor variants ("Lead-Report" with hyphens, etc).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function hasLeadReportXlsx(payload: any): boolean {
   if (!payload) return false;
   const fn: string | undefined = payload.filename;
-  if (fn && /^Lead Report - .+\.xlsx$/i.test(fn)) return true;
+  if (fn) {
+    // Normalize: lower-case + collapse common separators (_, -, .) to spaces
+    // so "Lead_Report_X.xlsx" reads as "lead report x.xlsx" for matching.
+    const normalized = fn.toLowerCase().replace(/[_\-.]+/g, " ").trim();
+    if (/^lead report\b/.test(normalized) && /xlsx\b/.test(normalized)) return true;
+  }
   if (Array.isArray(payload.parts)) {
     for (const p of payload.parts) {
       if (hasLeadReportXlsx(p)) return true;
+    }
+  }
+  return false;
+}
+
+// Secondary signal: even if filename matching fails (e.g. the file was
+// renamed by a forwarder), an email with subject "Lead Report" + any XLSX
+// attachment is almost certainly a CREXi export. Belt + suspenders.
+function looksLikeLeadReportEmail(subject: string | null, payload: unknown): boolean {
+  if (!subject) return false;
+  if (!/lead\s*report/i.test(subject)) return false;
+  return hasAnyXlsxAttachment(payload);
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function hasAnyXlsxAttachment(payload: any): boolean {
+  if (!payload) return false;
+  const fn: string | undefined = payload.filename;
+  if (fn && /\.xlsx$/i.test(fn)) return true;
+  if (Array.isArray(payload.parts)) {
+    for (const p of payload.parts) {
+      if (hasAnyXlsxAttachment(p)) return true;
     }
   }
   return false;
@@ -180,9 +210,15 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
           }
 
           // ── Second try: is this a CREXi daily Lead Report? ──
-          // Detected by attachment filename pattern "Lead Report - *.xlsx".
-          // If yes, route to the report parser instead of lead intake.
-          const hasCrexiReportAttachment = hasLeadReportXlsx(msg.payload);
+          // Two-signal detection:
+          //   1. Attachment filename matches lead-report patterns
+          //      ("Lead Report - X.xlsx" or "Lead_Report_X.xlsx")
+          //   2. OR: email subject contains "Lead Report" AND has an
+          //      xlsx attachment (fallback for renamed/forwarded files)
+          // If yes → route to the report parser instead of lead intake.
+          const hasCrexiReportAttachment =
+            hasLeadReportXlsx(msg.payload) ||
+            looksLikeLeadReportEmail(subject, msg.payload);
           if (hasCrexiReportAttachment) {
             try {
               const reportRes = await fetch(`${origin}/api/leads/crexi-report`, {
