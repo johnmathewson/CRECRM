@@ -88,6 +88,11 @@ export function SendTouchDialog({
   const [generating, setGenerating] = useState(false);
   const [draftArchetype, setDraftArchetype] = useState<string | null>(null);
   const [draftRationale, setDraftRationale] = useState<string | null>(null);
+  // Snapshot of the AI draft as it was when first generated — needed so
+  // we can detect whether the broker edited it before sending. Sent
+  // to the server as `aiDraftOriginalBody` for voice-learning capture.
+  const [aiDraftOriginalBody, setAiDraftOriginalBody] = useState<string | null>(null);
+  const [aiDraftOriginalSubject, setAiDraftOriginalSubject] = useState<string | null>(null);
 
   // Property search state (only used when no property is preselected)
   const [searchQuery, setSearchQuery] = useState("");
@@ -173,10 +178,15 @@ export function SendTouchDialog({
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error ?? `HTTP ${r.status}`);
-      setSubject(data.subject ?? defaultSubject(selectedProperty));
-      setBodyText(data.body ?? "");
+      const aiSubject = data.subject ?? defaultSubject(selectedProperty);
+      const aiBody = data.body ?? "";
+      setSubject(aiSubject);
+      setBodyText(aiBody);
       setDraftArchetype(data.archetype ?? null);
       setDraftRationale(data.rationale ?? null);
+      // Snapshot what the AI produced so the send route can detect edits.
+      setAiDraftOriginalBody(aiBody);
+      setAiDraftOriginalSubject(aiSubject);
     } catch (err) {
       setError(err instanceof Error ? err.message : "AI draft failed");
     } finally {
@@ -205,6 +215,12 @@ export function SendTouchDialog({
           toName: toName.trim() || undefined,
           subject: subject.trim(),
           bodyText,
+          // Voice-learning capture: tell the server this was an AI draft
+          // (if it was) AND pass the original so it can detect edits.
+          aiDrafted: aiDraftOriginalBody !== null,
+          personaSlug: draftArchetype ?? undefined,
+          aiDraftOriginalBody: aiDraftOriginalBody ?? undefined,
+          aiDraftOriginalSubject: aiDraftOriginalSubject ?? undefined,
         }),
       });
       const data = await r.json();

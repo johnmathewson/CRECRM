@@ -35,6 +35,22 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
+
+/**
+ * Build a compact, human-readable diff between the AI's original draft and
+ * what the broker actually sent. Stored in voice_examples.user_edits_diff
+ * and fed to the learn-from-edits analyzer so Claude can spot patterns
+ * (broker keeps removing X, broker keeps adding Y at the end, etc).
+ */
+function buildEditDiff(originalBody: string, sentBody: string, originalSubject: string | null, sentSubject: string): string {
+  const parts: string[] = [];
+  if (originalSubject && originalSubject !== sentSubject) {
+    parts.push(`SUBJECT CHANGED:\n  AI: ${originalSubject}\n  Sent: ${sentSubject}`);
+  }
+  parts.push(`AI ORIGINAL BODY:\n${originalBody}`);
+  parts.push(`BROKER SENT:\n${sentBody}`);
+  return parts.join("\n\n---\n\n");
+}
 const SEND_DISPLAY_NAME = "John Mathewson";
 
 interface Body {
@@ -52,6 +68,11 @@ interface Body {
   // captured voice_examples row so future few-shot retrieval can find it.
   aiDrafted?: boolean;     // true when the body came from "Generate AI draft"
   personaSlug?: string;    // the persona used for the AI draft, if any
+  // NEW: pass the ORIGINAL AI draft body so the route can detect whether
+  // the broker edited it before sending. Used to compute user_edits_diff
+  // (what the broker changed) — drives the learn-from-edits training pass.
+  aiDraftOriginalBody?: string;
+  aiDraftOriginalSubject?: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -232,15 +253,30 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  // Capture as a voice example. Manual compose paths are typically the
-  // most-authentic voice signal — broker wrote (or heavily edited) the body
-  // themselves. Source is "manual" unless the caller flagged it as
-  // ai-drafted via metadata.
+  // Determine the precise source — manual / ai_drafted / ai_edited —
+  // based on whether the caller passed the original AI draft AND whether
+  // the broker actually edited it before sending.
+  let source: "manual" | "ai_drafted" | "ai_edited" = "manual";
+  let userEditsDiff: string | null = null;
+  if (body.aiDrafted) {
+    const origBody = (body.aiDraftOriginalBody ?? "").trim();
+    const sentBody = (body.bodyText ?? "").trim();
+    if (origBody && origBody !== sentBody) {
+      // Broker edited the AI draft. Capture the diff for future analysis.
+      source = "ai_edited";
+      userEditsDiff = buildEditDiff(origBody, sentBody, body.aiDraftOriginalSubject ?? null, body.subject);
+    } else {
+      // AI drafted, broker sent without edits (or didn't provide original)
+      source = "ai_drafted";
+    }
+  }
+
   await captureVoiceExample(supabase, {
     channel: "email",
     subject: body.subject,
     body: body.bodyText,
-    source: body.aiDrafted ? "ai_drafted" : "manual",
+    source,
+    userEditsDiff,
     personaSlug: body.personaSlug ?? null,
     propertyId: body.propertyId,
     recipientProfileSnapshot: {
