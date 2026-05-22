@@ -9,6 +9,66 @@
   --teal: #4ECDC4;
   --green: #6BCB77;
   --amber: #F2C94C;
+
+  /* Semantic surface/ink channels (RGB triplets, space-separated, for
+     Tailwind's rgb(var(--x) / <alpha-value>) pattern). DEFAULTS ARE DARK —
+     this reproduces the existing dark theme exactly. The nav chrome
+     (sidebar / topbar / rail) reads these defaults and stays dark. */
+  --bg: 13 13 13;             /* #0D0D0D page background */
+  --surface: 26 26 26;        /* #1A1A1A cards / panels */
+  --surface-hi: 40 40 40;     /* #282828 raised surface */
+  --surface-panel: 56 56 56;  /* #383838 active panel */
+  --ink: 240 237 228;         /* #F0EDE4 text */
+}
+
+/* ── Light "slate glass" content theme ─────────────
+   Scoped to the main content area (AppShell <main>.canvas-light) so the
+   left sidebar + topbar stay dark. Apple-ish frosted glass on a light
+   slate canvas. */
+.canvas-light {
+  --bg: 238 241 244;          /* #EEF1F4 light slate canvas */
+  --surface: 255 255 255;     /* white cards */
+  --surface-hi: 248 250 252;  /* #F8FAFC raised */
+  --surface-panel: 255 255 255;
+  --ink: 27 32 39;            /* #1B2027 slate-black text */
+  background-color: rgb(var(--bg));
+  color: rgb(var(--ink));
+}
+
+/* The literal white-opacity utilities (border-white/[x], bg-white/[x]) are
+   hairlines/fills tuned for dark surfaces — near-invisible on light. Inside
+   the light canvas, retarget them to slate-ink equivalents. Borders are
+   safe to blanket-flip; bg fills are split base vs hover so hover stays
+   hover-only. */
+.canvas-light [class*="border-white/"] { border-color: rgb(27 32 39 / 0.10); }
+
+.canvas-light .bg-white\/\[0\.01\],
+.canvas-light .bg-white\/\[0\.02\],
+.canvas-light .bg-white\/\[0\.03\] { background-color: rgb(27 32 39 / 0.025); }
+.canvas-light .bg-white\/\[0\.04\],
+.canvas-light .bg-white\/\[0\.06\] { background-color: rgb(27 32 39 / 0.045); }
+.canvas-light .bg-white\/\[0\.08\],
+.canvas-light .bg-white\/\[0\.10\] { background-color: rgb(27 32 39 / 0.07); }
+
+.canvas-light .hover\:bg-white\/\[0\.02\]:hover,
+.canvas-light .hover\:bg-white\/\[0\.03\]:hover { background-color: rgb(27 32 39 / 0.04); }
+.canvas-light .hover\:bg-white\/\[0\.04\]:hover,
+.canvas-light .hover\:bg-white\/\[0\.05\]:hover,
+.canvas-light .hover\:bg-white\/\[0\.06\]:hover { background-color: rgb(27 32 39 / 0.06); }
+.canvas-light .hover\:bg-white\/\[0\.08\]:hover,
+.canvas-light .hover\:bg-white\/\[0\.10\]:hover { background-color: rgb(27 32 39 / 0.09); }
+
+/* Cards/panels get a soft shadow + subtle frost so they read as floating
+   glass over the slate canvas instead of flat white boxes. Targets the
+   common card surface classes. */
+.canvas-light .bg-steward-surface,
+.canvas-light .bg-steward-mid,
+.canvas-light .bg-steward-surfaceHi,
+.canvas-light .bg-steward-panel,
+.canvas-light .bg-steward-dark {
+  box-shadow: 0 1px 2px rgb(27 32 39 / 0.04), 0 4px 16px rgb(27 32 39 / 0.05);
+  backdrop-filter: blur(8px) saturate(1.2);
+  -webkit-backdrop-filter: blur(8px) saturate(1.2);
 }
 
 html {

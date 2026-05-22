@@ -136,11 +136,11 @@ export function ValuateView({ context }: { context: ValuateContext }) {
         .valuate-shell input[type="tel"],
         .valuate-shell select,
         .valuate-shell textarea {
-          color: #F0EDE4;
+          color: rgb(var(--ink));
         }
         .valuate-shell input::placeholder,
         .valuate-shell textarea::placeholder {
-          color: rgba(240, 237, 228, 0.35);
+          color: rgb(var(--ink) / 0.35);
         }
       `}</style>
     </AppShell>

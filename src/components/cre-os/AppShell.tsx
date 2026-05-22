@@ -73,7 +73,7 @@ export function AppShell({
         {/* Main — full-width on mobile, padded on desktop. The pb-24 on
             mobile reserves space so the fixed BottomNav doesn't cover
             content at the end of every page. */}
-        <main className="flex-1 overflow-y-auto overflow-x-hidden">
+        <main className="canvas-light flex-1 overflow-y-auto overflow-x-hidden">
           <div className="max-w-[1600px] mx-auto px-4 py-5 pb-24 lg:px-8 lg:py-6 lg:pb-6">{children}</div>
         </main>
 

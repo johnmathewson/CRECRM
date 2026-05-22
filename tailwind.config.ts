@@ -12,14 +12,19 @@ const config: Config = {
         // Brand backgrounds — charcoal-anchored (dropped green tint per
         // brand evolution; mirrors the editorial financial-terminal feel
         // closer than the teal-base did).
+        // Semantic surface tokens are CSS-variable channels so a single
+        // `.canvas-light` scope can flip the main content area to the light
+        // "slate glass" theme while the nav chrome (sidebar/topbar/rail)
+        // keeps the dark defaults. Channel form ("13 13 13") preserves
+        // Tailwind opacity modifiers (bg-steward-base/80 still works).
         steward: {
-          base: "#0D0D0D",     // charcoal-950 — page background
-          dark: "#1A1A1A",     // charcoal-900 — alt page bg / sticky overlays
-          mid: "#282828",      // charcoal-800 — raised surface (cards, panels)
-          panel: "#383838",    // charcoal-700 — active / selected panel
-          ink: "#0D0D0D",
-          surface: "#1A1A1A",
-          surfaceHi: "#282828",
+          base: "rgb(var(--bg) / <alpha-value>)",        // page / canvas background
+          dark: "rgb(var(--surface) / <alpha-value>)",   // alt bg / sticky overlays
+          mid: "rgb(var(--surface-hi) / <alpha-value>)", // raised surface (cards, panels)
+          panel: "rgb(var(--surface-panel) / <alpha-value>)", // active / selected panel
+          ink: "rgb(var(--bg) / <alpha-value>)",
+          surface: "rgb(var(--surface) / <alpha-value>)",
+          surfaceHi: "rgb(var(--surface-hi) / <alpha-value>)",
         },
         coral: {
           50:  "#FCF1EE",
@@ -50,16 +55,19 @@ const config: Config = {
           DEFAULT: "#4ECDC4",
           muted: "rgba(78,205,196,0.22)",
         },
+        // "cream" is the INK/text color. Variable-channel so text flips to
+        // slate-black inside `.canvas-light` and stays cream on dark chrome.
+        // (Numeric shades stay literal — used as fixed bright accents.)
         cream: {
           50:  "#FFFFFF",
           100: "#FAF8F5",
           200: "#F0EDE8",
           300: "#E5E0D8",
           400: "#D4CEC4",
-          DEFAULT: "#F0EDE4",
-          muted: "rgba(240,237,228,0.50)",
-          subtle: "rgba(240,237,228,0.30)",
-          dim: "rgba(240,237,228,0.65)",
+          DEFAULT: "rgb(var(--ink) / <alpha-value>)",
+          muted: "rgb(var(--ink) / 0.50)",
+          subtle: "rgb(var(--ink) / 0.30)",
+          dim: "rgb(var(--ink) / 0.65)",
         },
         charcoal: {
           50:  "#F7F7F7",

@@ -76,7 +76,7 @@ export function StageStepper({
                   {isLoading ? "…" : s}
                 </Tag>
                 {i < ACTIVE_STAGES.length - 1 && (
-                  <span className={`text-[10px] ${isPast ? "text-teal-400" : "text-white/15"}`}>→</span>
+                  <span className={`text-[10px] ${isPast ? "text-teal-400" : "text-cream/20"}`}>→</span>
                 )}
               </div>
             );

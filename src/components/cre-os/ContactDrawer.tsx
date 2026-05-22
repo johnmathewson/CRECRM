@@ -224,9 +224,9 @@ function DrawerPanel({ leadId, onClose, onChange }: { leadId: string; onClose: (
         className="fixed inset-0 z-[80] bg-black/55"
         style={{ backdropFilter: "blur(2px)", opacity: mounted ? 1 : 0, transition: "opacity 0.2s" }}
       />
-      {/* Panel */}
+      {/* Panel — canvas-light so the drawer matches the light content theme */}
       <aside
-        className="fixed top-0 right-0 bottom-0 z-[81] flex flex-col bg-steward-base border-l border-white/[0.08]"
+        className="canvas-light fixed top-0 right-0 bottom-0 z-[81] flex flex-col bg-steward-base border-l border-white/[0.08]"
         style={{
           width: "min(480px, 100vw)",
           transform: mounted ? "translateX(0)" : "translateX(100%)",
