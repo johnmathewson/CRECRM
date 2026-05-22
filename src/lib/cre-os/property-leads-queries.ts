@@ -33,6 +33,10 @@ export type LeadSourceTag = "crexi" | "website" | "email" | "nda_vault" | "direc
 export interface PropertyLead {
   /** Synthetic ID — prefer the crexi_leads_state.id when present, else leads.id */
   id: string;
+  /** Real leads-table id when this engagement corresponds to an actual
+   *  inbound lead (so the row can open the unified ContactDrawer). Null for
+   *  pure CREXi-engagement / NDA-only rows that have no leads row. */
+  leadId: string | null;
   source: LeadSourceTag;
   name: string;
   email: string | null;
@@ -362,6 +366,7 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       const existing = byEmail.get(emailKey);
       if (existing) {
         // Merge — prefer more-complete fields
+        existing.leadId = existing.leadId ?? lead.leadId; // keep the real leads.id if either source has it
         existing.phone = existing.phone ?? lead.phone;
         existing.company = existing.company ?? lead.company;
         existing.role = existing.role ?? lead.role;
@@ -387,6 +392,7 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       for (const existing of Array.from(byEmail.values())) {
         if (existing.name.toLowerCase().trim() === nameLc) {
           // Merge non-conflicting fields into the email-bearing row
+          existing.leadId = existing.leadId ?? lead.leadId;
           existing.phone = existing.phone ?? lead.phone;
           existing.company = existing.company ?? lead.company;
           existing.role = existing.role ?? lead.role;
@@ -449,6 +455,7 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
     const signedNda = email ? ndaByEmail.has(email) : false;
     addLead({
       id: c.id,
+      leadId: null, // CREXi engagement row; gets a leadId only if merged with a leads row below
       source: "crexi",
       name: c.name ?? "(unknown)",
       email,
@@ -495,6 +502,7 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
     const signedNda = email ? ndaByEmail.has(email) : false;
     addLead({
       id: l.id,
+      leadId: l.id, // real leads-table row — opens the ContactDrawer
       source: (l.source as LeadSourceTag) || "email",
       name: l.sender_name ?? "(unknown)",
       email,
@@ -528,6 +536,7 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
     const lastTouchedAt = email ? respondedByEmail.get(email) ?? null : null;
     addLead({
       id: `nda-${n.id}`,
+      leadId: null, // NDA-only signer; no inbound leads row
       source: "nda_vault",
       name: n.typed_name ?? "(unknown)",
       email,

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Panel } from "@/components/cre-os/Panel";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { SendTouchDialog } from "@/components/cre-os/prospector/SendTouchDialog";
+import { useContactDrawer } from "@/components/cre-os/ContactDrawer";
 import type {
   PropertyLeadsSnapshot,
   PropertyLead,
@@ -89,6 +90,7 @@ export function LeadsTab({
   propertyName: string;
 }) {
   const { activity, leads, totals } = snapshot;
+  const { openLead } = useContactDrawer();
   const [filter, setFilter] = useState<FilterTab>("hot");
   const [searchQ, setSearchQ] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -558,7 +560,18 @@ export function LeadsTab({
                     </td>
                     <td className="py-2.5 pr-3">
                       <div className="font-heading text-[12.5px] text-cream font-semibold truncate max-w-[30ch]">
-                        {l.name}
+                        {l.leadId ? (
+                          <button
+                            type="button"
+                            onClick={() => openLead(l.leadId!, { onChange: () => router.refresh() })}
+                            className="text-left hover:text-coral-300 transition-colors"
+                            title="Open lead — reply, draft, full history"
+                          >
+                            {l.name}
+                          </button>
+                        ) : (
+                          l.name
+                        )}
                         {l.signedNda && (
                           <span className="ml-1.5 font-mono text-[9px] uppercase tracking-eyebrow text-coral-300">📝 NDA</span>
                         )}
@@ -743,6 +756,8 @@ function LeadCardMobile({
   onToggleSelect: () => void;
   onCompose: () => void;
 }) {
+  const { openLead } = useContactDrawer();
+  const router = useRouter();
   return (
     <div
       className={`rounded border px-3 py-3 transition-colors ${
@@ -769,7 +784,17 @@ function LeadCardMobile({
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline justify-between gap-2 flex-wrap">
             <div className="font-heading text-[13.5px] text-cream font-semibold">
-              {l.name}
+              {l.leadId ? (
+                <button
+                  type="button"
+                  onClick={() => openLead(l.leadId!, { onChange: () => router.refresh() })}
+                  className="text-left hover:text-coral-300 transition-colors"
+                >
+                  {l.name}
+                </button>
+              ) : (
+                l.name
+              )}
               {l.signedNda && (
                 <span className="ml-1.5 font-mono text-[9px] uppercase tracking-eyebrow text-coral-300">📝 NDA</span>
               )}
