@@ -8,8 +8,10 @@ import { Sparkline } from "@/components/cre-os/Sparkline";
 import { Panel } from "@/components/cre-os/Panel";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { StatusBadge } from "@/components/cre-os/StatusBadge";
+import { DoThisNow } from "@/components/cre-os/DoThisNow";
 import type { RailSection } from "@/components/cre-os/InsightsRail";
 import type { DashboardData } from "@/lib/cre-os/queries";
+import type { LeadCard as LeadCardData } from "@/lib/cre-os/inbox-queries";
 
 const fmtMoney = (n: number) => {
   if (!Number.isFinite(n) || n <= 0) return "—";
@@ -18,7 +20,13 @@ const fmtMoney = (n: number) => {
   return "$" + n.toLocaleString();
 };
 
-export function CommandCenterView({ data }: { data: DashboardData }) {
+export function CommandCenterView({
+  data,
+  doThisNow = [],
+}: {
+  data: DashboardData;
+  doThisNow?: LeadCardData[];
+}) {
   const { kpis, pipeline, chips, tasks, activity, reminders, copilot, agentBrief } = data;
 
   // Build the Copilot focus chips from real counts
@@ -128,6 +136,10 @@ export function CommandCenterView({ data }: { data: DashboardData }) {
             caption={kpis.tasksOverdue > 0 ? undefined : "On track"}
           />
         </div>
+
+        {/* Do This Now — ranked action queue. Each row opens the
+            ContactDrawer in-context (no navigation). */}
+        <DoThisNow leads={doThisNow} />
 
         {/* Pipeline preview */}
         <Panel

@@ -1,7 +1,9 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { StatusBadge } from "@/components/cre-os/StatusBadge";
+import { useContactDrawer } from "@/components/cre-os/ContactDrawer";
 import type { LeadCard as LeadCardData } from "@/lib/cre-os/inbox-queries";
 
 /**
@@ -14,6 +16,8 @@ import type { LeadCard as LeadCardData } from "@/lib/cre-os/inbox-queries";
  *   • dim border on archived / sent / cold
  */
 export function LeadCard({ lead }: { lead: LeadCardData }) {
+  const { openLead } = useContactDrawer();
+  const router = useRouter();
   const status = (lead.status ?? "").toLowerCase();
   const isArchived = status === "archived" || status === "spam";
   const isHotPending = lead.urgency === "hot" && !lead.finalSent && !isArchived;
@@ -29,9 +33,10 @@ export function LeadCard({ lead }: { lead: LeadCardData }) {
         : "border border-white/[0.05] bg-steward-mid/40";
 
   return (
-    <a
-      href={`/cre-os/inbox/${lead.id}`}
-      className={`block group rounded-md p-4 transition-all hover:border-coral-400/30 ${cardClass}`}
+    <button
+      type="button"
+      onClick={() => openLead(lead.id, { onChange: () => router.refresh() })}
+      className={`block w-full text-left group rounded-md p-4 transition-all hover:border-coral-400/30 cursor-pointer ${cardClass}`}
     >
       {/* Top row: sender + urgency */}
       <div className="flex items-start justify-between gap-3">
@@ -99,7 +104,7 @@ export function LeadCard({ lead }: { lead: LeadCardData }) {
         {lead.hasDraft && !lead.finalSent && <span className="text-coral-300">· Draft ready</span>}
         {lead.finalSent && <span className="text-teal-300">· Reply sent</span>}
       </div>
-    </a>
+    </button>
   );
 }
 

@@ -1,4 +1,5 @@
 import { Space_Grotesk, DM_Sans, Inter, JetBrains_Mono } from "next/font/google";
+import { ContactDrawerProvider } from "@/components/cre-os/ContactDrawer";
 
 /**
  * CRE OS layout — loads brand fonts and pins them to CSS variables that the
@@ -37,7 +38,10 @@ export default function CreOsLayout({ children }: { children: React.ReactNode })
     <div
       className={`${spaceGrotesk.variable} ${dmSans.variable} ${inter.variable} ${jetbrains.variable} h-[100dvh] w-screen overflow-hidden`}
     >
-      {children}
+      {/* ContactDrawerProvider lets any lead row (Inbox card, Command
+          worklist, etc.) open the universal slide-over in-context instead
+          of navigating to /cre-os/inbox/[id]. */}
+      <ContactDrawerProvider>{children}</ContactDrawerProvider>
     </div>
   );
 }
