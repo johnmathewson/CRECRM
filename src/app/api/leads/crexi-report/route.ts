@@ -3,6 +3,10 @@
  *
  * Parse a Crexi daily Lead Report XLSX attachment from Gmail and upsert
  * every lead into crexi_leads_state, attached to the matching property.
+ * For "hot" leads (Executed CA, Opened OM, Requested Info, Offer), also
+ * creates a `leads` table row so they surface in Command "Do This Now".
+ * Drafting is intentionally decoupled — the scheduled
+ * /api/cron/draft-crexi-leads route picks them up in small batches.
  *
  * Body:
  *   { gmail_message_id: string, dryRun?: boolean }
@@ -13,7 +17,8 @@
  *   3. Decode + parse with parseCrexiReport()
  *   4. Match property by (a) Detail-sheet address, then (b) name
  *   5. Upsert leads (dedupe by email + property_id; fall back to name + phone)
- *   6. Write an import_jobs audit row
+ *   6. For hot leads: ensure a `leads` row exists (outreach-gate dedupe)
+ *   7. Write an import_jobs audit row
  *
  * Called by:
  *   • Manual trigger via this endpoint (for backfilling old emails)
@@ -122,8 +127,139 @@ async function matchProperty(supabase: any, parsed: { propertyName: string | nul
   return null;
 }
 
+// ── Hot-lead detection ───────────────────────────────────────────────────
+
+/**
+ * A lead is "hot" when they've taken a substantive action beyond just
+ * viewing the listing. These warrant proactive outreach and a `leads` row.
+ */
+function isHotLead(lead: CrexiLead): boolean {
+  const loi = (lead.levelOfInterest || "").toLowerCase();
+  return (
+    /executed\s*ca/.test(loi) ||
+    /requested\s*info/.test(loi) ||
+    /opened\s*(om|flyer)/.test(loi) ||
+    /offer/.test(loi)
+  );
+}
+
+function buildEngagementSignal(lead: CrexiLead, propertyName: string | null): string {
+  const loi = (lead.levelOfInterest || "").trim();
+  const action = /executed\s*ca/i.test(loi)
+    ? "executed the Confidentiality Agreement"
+    : /requested\s*info/i.test(loi)
+    ? "requested information"
+    : /opened\s*om/i.test(loi)
+    ? "opened the Offering Memorandum"
+    : /opened\s*flyer/i.test(loi)
+    ? "opened the flyer"
+    : /offer/i.test(loi)
+    ? "submitted an offer"
+    : loi || "engaged with the listing";
+
+  const where = propertyName ? ` on ${propertyName}` : "";
+  const when = lead.activityDate
+    ? ` (${new Date(lead.activityDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })})`
+    : "";
+  const role =
+    lead.industryRole && !/^listing rep$/i.test(lead.industryRole.trim())
+      ? ` — ${lead.industryRole}${lead.company ? ` at ${lead.company}` : ""}`
+      : lead.company
+      ? ` — ${lead.company}`
+      : "";
+
+  return `${lead.fullName} ${action}${where}${when}${role}.`;
+}
+
+/**
+ * For hot leads: ensure a `leads` row exists so they surface in Command
+ * "Do This Now". Dedupes against existing leads for this contact + property
+ * (any source, not archived) so we don't create phantom rows on re-import.
+ *
+ * Returns the lead ID if created or already-existing, null if gated/failed.
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function upsertLead(supabase: any, propertyId: string, lead: CrexiLead): Promise<"inserted" | "updated" | "skipped"> {
+async function ensureHotLeadRow(
+  supabase: any,
+  contactId: string,
+  propertyId: string,
+  propertyName: string,
+  lead: CrexiLead,
+  crexiLeadsStateId: string | null,
+): Promise<string | null> {
+  // ❶ Already have a lead for this contact + property (any source)?
+  const { data: existing } = await supabase
+    .from("leads")
+    .select("id")
+    .eq("organization_id", ORG_ID)
+    .eq("contact_id", contactId)
+    .eq("property_id", propertyId)
+    .neq("status", "archived")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (existing) return existing.id; // already in inbox — don't duplicate
+
+  // ❷ Already sent something to this contact (any property)?
+  const { count: sentCount } = await supabase
+    .from("leads")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", ORG_ID)
+    .eq("contact_id", contactId)
+    .not("final_sent_at", "is", null);
+  if ((sentCount || 0) > 0) return null; // already replied — skip
+
+  // ❸ Create the leads row
+  const urgency = /executed\s*ca|requested\s*info|offer/i.test(lead.levelOfInterest || "")
+    ? "hot"
+    : "warm";
+
+  const engagementSignal = buildEngagementSignal(lead, propertyName);
+
+  const { data: created, error } = await supabase
+    .from("leads")
+    .insert({
+      organization_id: ORG_ID,
+      contact_id: contactId,
+      property_id: propertyId,
+      source: "crexi",
+      status: "new",
+      sender_name: lead.fullName,
+      sender_email: lead.email,
+      sender_phone: lead.phone,
+      property_label: propertyName,
+      urgency,
+      qualifier_summary:
+        `CREXi: ${lead.levelOfInterest || "engaged"}` +
+        (lead.company ? ` · ${lead.company}` : "") +
+        (lead.industryRole ? ` · ${lead.industryRole}` : ""),
+      raw_subject: null,
+      raw_body: JSON.stringify({
+        discovered_via: "crexi_lead_report",
+        level_of_interest: lead.levelOfInterest,
+        activity_date: lead.activityDate,
+        company: lead.company,
+        industry_role: lead.industryRole,
+        crexi_lead_score: lead.crexiLeadScore,
+        buying_power: lead.estimatedBuyingPower,
+        proof_of_funds: lead.proofOfFunds,
+        notes: lead.notes,
+        engagement_signal: engagementSignal,
+        crexi_leads_state_id: crexiLeadsStateId,
+      }),
+    })
+    .select("id")
+    .single();
+
+  if (error || !created) {
+    console.warn("[crexi-report] hot lead row insert failed:", error?.message);
+    return null;
+  }
+  return created.id;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function upsertLead(supabase: any, propertyId: string, lead: CrexiLead): Promise<{ result: "inserted" | "updated" | "skipped"; contactId: string | null; crexiLeadsStateId: string | null }> {
   // ── 1. Find or create the canonical contact (REQUIRED) ──────────────
   // Architecture commitment (CLAUDE.md, 2026-05-15): every CREXi lead
   // MUST end up in `contacts`. Don't insert a crexi_leads_state row
@@ -138,7 +274,7 @@ async function upsertLead(supabase: any, propertyId: string, lead: CrexiLead): P
   });
   if ("error" in contactResult) {
     console.warn("[crexi-report] contact resolve failed:", contactResult.error, "lead:", lead.fullName);
-    return "skipped";
+    return { result: "skipped", contactId: null, crexiLeadsStateId: null };
   }
   const contactId = contactResult.contactId;
 
@@ -196,15 +332,16 @@ async function upsertLead(supabase: any, propertyId: string, lead: CrexiLead): P
       .from("crexi_leads_state")
       .update({ ...payload, updated_at: new Date().toISOString() })
       .eq("id", existing.id);
-    if (error) return "skipped";
-    return "updated";
+    if (error) return { result: "skipped", contactId: null, crexiLeadsStateId: null };
+    return { result: "updated", contactId, crexiLeadsStateId: existing.id };
   } else {
-    const { error } = await supabase.from("crexi_leads_state").insert({
-      ...payload,
-      first_seen_at: new Date().toISOString(),
-    });
-    if (error) return "skipped";
-    return "inserted";
+    const { data: inserted, error } = await supabase
+      .from("crexi_leads_state")
+      .insert({ ...payload, first_seen_at: new Date().toISOString() })
+      .select("id")
+      .single();
+    if (error || !inserted) return { result: "skipped", contactId: null, crexiLeadsStateId: null };
+    return { result: "inserted", contactId, crexiLeadsStateId: inserted.id };
   }
 }
 
@@ -271,16 +408,33 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    let inserted = 0, updated = 0, skipped = 0;
+    let inserted = 0, updated = 0, skipped = 0, hotLeadsQueued = 0;
     if (!body.dryRun) {
       for (const lead of parsed.leads) {
         const r = await upsertLead(supabase, propMatch.id, lead);
-        if (r === "inserted") inserted++;
-        else if (r === "updated") updated++;
+        if (r.result === "inserted") inserted++;
+        else if (r.result === "updated") updated++;
         else skipped++;
+
+        // For hot leads that were successfully persisted in crexi_leads_state,
+        // also ensure a `leads` table row exists so they appear in Command
+        // "Do This Now". Drafting is decoupled — the cron draft-crexi-leads
+        // scheduled function picks them up in batches.
+        if (r.result !== "skipped" && r.contactId && isHotLead(lead)) {
+          const hotLeadId = await ensureHotLeadRow(
+            supabase,
+            r.contactId,
+            propMatch.id,
+            propMatch.name,
+            lead,
+            r.crexiLeadsStateId,
+          );
+          if (hotLeadId) hotLeadsQueued++;
+        }
       }
     } else {
       inserted = parsed.leads.length;
+      hotLeadsQueued = parsed.leads.filter(isHotLead).length;
     }
 
     if (jobId) {
@@ -294,6 +448,7 @@ export async function POST(req: NextRequest) {
           property: propMatch,
           activity: parsed.activity,
           warnings: parsed.warnings,
+          hot_leads_queued: hotLeadsQueued,
         },
       }).eq("id", jobId);
     }
@@ -307,6 +462,7 @@ export async function POST(req: NextRequest) {
       inserted,
       updated,
       skipped,
+      hot_leads_queued: hotLeadsQueued,
       warnings: parsed.warnings,
     });
   } catch (err) {
