@@ -90,6 +90,28 @@ export async function getProfile(accessToken: string): Promise<GmailProfile> {
 }
 
 /**
+ * Search Gmail messages by query (e.g. "in:sent after:2026/05/01").
+ * Returns up to maxResults message stubs { id, threadId }.
+ * Does NOT fetch message bodies — call getMessage() on each id for that.
+ */
+export async function listMessages(
+  accessToken: string,
+  query: string,
+  maxResults: number = 25
+): Promise<{ id: string; threadId: string }[]> {
+  const params = new URLSearchParams({
+    q: query,
+    maxResults: String(Math.min(maxResults, 100)),
+  });
+  const res = await gmailJson<{
+    messages?: { id: string; threadId: string }[];
+    nextPageToken?: string;
+    resultSizeEstimate?: number;
+  }>(`/messages?${params.toString()}`, accessToken);
+  return res.messages ?? [];
+}
+
+/**
  * List history records since startHistoryId. Returns only messagesAdded changes
  * by filtering on historyTypes=messageAdded.
  */

@@ -22,6 +22,7 @@ import { getActiveGmailToken } from "@/lib/gmail-auth";
 import {
   getProfile,
   listHistory,
+  listMessages,
   getMessage,
   getHeader,
   extractBody,
@@ -97,6 +98,11 @@ interface PollResult {
     failed?: number;
     error?: string;
   };
+  sentSync: {
+    synced?: number;
+    skipped?: number;
+    error?: string;
+  };
   duration_ms: number;
 }
 
@@ -108,7 +114,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
     const provided = req.headers.get("x-cron-secret");
     if (provided !== cronSecret) {
       return NextResponse.json(
-        { ok: false, poll: { error: "unauthorized" }, acks: {}, duration_ms: 0 },
+        { ok: false, poll: { error: "unauthorized" }, acks: {}, sentSync: {}, duration_ms: 0 },
         { status: 401 }
       );
     }
@@ -123,6 +129,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
     ok: true,
     poll: {},
     acks: {},
+    sentSync: {},
     duration_ms: 0,
   };
 
@@ -446,6 +453,102 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
     result.acks.failed = failed;
   } catch (err: any) {
     result.acks.error = err.message;
+  }
+
+  // ── Job 3: Sync Gmail SENT → CRM leads ──────────────────────────────────
+  // Catches emails John sent directly from Gmail (not via the CRM send button)
+  // so the action queue doesn't keep surfacing leads he already contacted.
+  //
+  // Searches the last 21 days of SENT mail, 20 messages per run (dedup by
+  // external_id means repeated runs quickly skip already-processed messages).
+  if (token) {
+    try {
+      const cutoff = new Date(Date.now() - 21 * 24 * 3600_000);
+      const afterStr = `${cutoff.getFullYear()}/${String(cutoff.getMonth() + 1).padStart(2, "0")}/${String(cutoff.getDate()).padStart(2, "0")}`;
+      const sentRefs = await listMessages(token.accessToken, `in:sent after:${afterStr}`, 20);
+
+      let synced = 0;
+      let skipped = 0;
+
+      for (const ref of sentRefs) {
+        try {
+          // Fast dedup: skip messages already in communications
+          const { data: alreadyLogged } = await supabase
+            .from("communications")
+            .select("id")
+            .eq("external_id", ref.id)
+            .maybeSingle();
+          if (alreadyLogged) { skipped++; continue; }
+
+          const msg = await getMessage(token.accessToken, ref.id);
+          const toHeader = getHeader(msg.payload, "To");
+          const subject = getHeader(msg.payload, "Subject");
+          const { email: toEmail } = parseAddress(toHeader);
+
+          // Skip messages sent to ourselves or without a real recipient
+          if (!toEmail) { skipped++; continue; }
+          if (toEmail.toLowerCase() === token.email.toLowerCase()) { skipped++; continue; }
+
+          const sentAt = msg.internalDate
+            ? new Date(parseInt(msg.internalDate)).toISOString()
+            : new Date().toISOString();
+
+          // Match to the most recent non-archived CRM lead for this email address
+          const { data: matchedLead } = await supabase
+            .from("leads")
+            .select("id, property_id, contact_id, status")
+            .eq("organization_id", ORG_ID)
+            .ilike("sender_email", toEmail.trim())
+            .not("status", "in", '("archived","spam")')
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (!matchedLead) { skipped++; continue; }
+
+          const { text: bodyText } = extractBody(msg.payload);
+
+          // Write outbound communications row — visible in ContactDrawer thread
+          await supabase.from("communications").insert({
+            organization_id: ORG_ID,
+            lead_id: matchedLead.id,
+            property_id: (matchedLead.property_id as string | null) ?? null,
+            channel: "email",
+            direction: "outbound",
+            external_id: ref.id,
+            subject,
+            body_preview: bodyText.slice(0, 500),
+            from_address: token.email,
+            to_addresses: [toEmail],
+            occurred_at: sentAt,
+            raw_payload: {
+              gmail_message_id: ref.id,
+              gmail_thread_id: msg.threadId,
+              label_ids: msg.labelIds,
+              source: "gmail_sent_sync",
+            },
+          });
+
+          // Mark the lead as sent so it leaves the action queue
+          if (matchedLead.status !== "sent") {
+            await supabase.from("leads").update({
+              status: "sent",
+              final_sent_at: sentAt,
+              updated_at: new Date().toISOString(),
+            }).eq("id", matchedLead.id);
+          }
+
+          synced++;
+        } catch (msgErr) {
+          console.error(`[poll-gmail] sent-sync error on ${ref.id}:`, msgErr);
+        }
+      }
+
+      result.sentSync = { synced, skipped };
+    } catch (syncErr: any) {
+      result.sentSync = { error: syncErr.message };
+      console.error("[poll-gmail] sent-sync job failed:", syncErr.message);
+    }
   }
 
   result.duration_ms = Date.now() - started;
