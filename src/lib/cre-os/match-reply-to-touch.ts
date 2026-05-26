@@ -309,11 +309,16 @@ export async function maybeRouteAsReply(
     // Re-open the lead so it surfaces in "Do This Now" and the AI can draft
     // a response to what they said. Only re-open if it was in 'sent' status
     // (don't clobber a lead that John already re-opened manually).
+    // Clear final_sent_at too — DoThisNow.priority() checks finalSent, so a
+    // re-opened lead with final_sent_at still set would be invisible in the queue.
     await supabase
       .from("leads")
       .update({
         status: "new",
         draft_reply: null, // cleared so draftLeadReply can produce a fresh reply
+        final_sent_at: null, // cleared so the lead shows in the action queue
+        raw_subject: msg.subject, // reply subject — used by draftLeadReply first_touch
+        raw_body: msg.bodyText.slice(0, 5000), // reply body — used for drafting context
         qualifier_summary: classification.summary || undefined,
         updated_at: msg.receivedAt,
       })

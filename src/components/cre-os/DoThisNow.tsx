@@ -22,7 +22,10 @@ import type { LeadCard as LeadCardData } from "@/lib/cre-os/inbox-queries";
 
 function priority(l: LeadCardData): number {
   const status = (l.status ?? "").toLowerCase();
-  if (status === "archived" || status === "spam" || l.finalSent) return -1; // excluded
+  // Exclude definitively handled leads. "sent" is explicit because finalSent
+  // relies on final_sent_at being set — if that column is null for any reason,
+  // the lead would otherwise score 500+ and appear at the top of the queue.
+  if (status === "archived" || status === "spam" || status === "sent" || l.finalSent) return -1;
   let p = 0;
   if (l.urgency === "hot") p += 500;
   else if (l.urgency === "warm") p += 250;
