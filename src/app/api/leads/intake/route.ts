@@ -162,7 +162,7 @@ async function upsertContact(
       .from("contacts")
       .select("id, warmth")
       .eq("organization_id", ORG_ID)
-      .eq("email", email)
+      .ilike("email", email.trim())  // case-insensitive — prevents duplicate contacts
       .maybeSingle();
     if (data) existing = data;
   }
