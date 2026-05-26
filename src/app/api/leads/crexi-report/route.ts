@@ -240,6 +240,21 @@ async function ensureHotLeadRow(
 
   const engagementSignal = buildEngagementSignal(lead, propertyName);
 
+  // Resolve email: prefer the parsed CREXi value, fall back to the
+  // canonical contact record. Protects against cases where the CREXi
+  // report omits the email column on a given row but the contact already
+  // has it from a prior import — without this the leads row would be
+  // created with sender_email=null and the drafting cron would skip it.
+  let senderEmail = lead.email ?? null;
+  if (!senderEmail) {
+    const { data: contact } = await supabase
+      .from("contacts")
+      .select("email")
+      .eq("id", contactId)
+      .single();
+    senderEmail = contact?.email ?? null;
+  }
+
   const { data: created, error } = await supabase
     .from("leads")
     .insert({
@@ -249,7 +264,7 @@ async function ensureHotLeadRow(
       source: "crexi",
       status: "new",
       sender_name: lead.fullName,
-      sender_email: lead.email,
+      sender_email: senderEmail,
       sender_phone: lead.phone,
       property_label: propertyName,
       urgency,
