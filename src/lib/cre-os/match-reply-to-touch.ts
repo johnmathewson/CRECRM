@@ -40,8 +40,12 @@ interface MatchedSource {
   organizationId: string;
   enrollmentId: string | null;
   laneId: string | null;
-  propertyId: string;
+  /** null when the matched communications row has no property (unmatched lead) */
+  propertyId: string | null;
   contactId: string | null;
+  /** The leads row this communications row belongs to — used to re-surface the
+   *  lead in the worklist and write the inbound reply to the drawer thread. */
+  leadId: string | null;
   /** What we sent — useful for classifying the reply */
   parentSubject: string | null;
   parentBody: string | null;
@@ -77,15 +81,17 @@ async function findMatch(supabase: SupabaseClient<any, any, any>, threadId: stri
       laneId: touchHit.lane_id,
       propertyId: touchHit.property_id,
       contactId: touchHit.contact_id,
+      leadId: null, // lane_touches don't have a direct lead_id
       parentSubject: touchHit.subject,
       parentBody: touchHit.body,
     };
   }
 
-  // 2. Try communications (bulk-AI-followup landings only)
+  // 2. Try communications — covers manual sends from leads/[id]/send AND
+  //    bulk-AI-followup sends. Outbound rows have gmail_thread_id in raw_payload.
   const { data: commsRows } = await supabase
     .from("communications")
-    .select("id, organization_id, property_id, subject, body_preview, raw_payload")
+    .select("id, organization_id, lead_id, property_id, subject, body_preview, raw_payload")
     .eq("organization_id", ORG_ID)
     .eq("direction", "outbound")
     .eq("channel", "email")
@@ -95,19 +101,32 @@ async function findMatch(supabase: SupabaseClient<any, any, any>, threadId: stri
   const commHit = ((commsRows ?? []) as Array<{
     id: string;
     organization_id: string;
+    lead_id: string | null;
     property_id: string | null;
     subject: string | null;
     body_preview: string | null;
   }>)[0];
-  if (commHit && commHit.property_id) {
+  if (commHit) {
+    // property_id may be null on older rows that were inserted before the fix.
+    // If missing, recover it from the linked lead row (one extra query, rare path).
+    let propertyId = commHit.property_id ?? null;
+    if (!propertyId && commHit.lead_id) {
+      const { data: leadRow } = await supabase
+        .from("leads")
+        .select("property_id")
+        .eq("id", commHit.lead_id)
+        .maybeSingle();
+      propertyId = (leadRow?.property_id as string | null) ?? null;
+    }
     return {
       sourceTable: "communications",
       parentId: commHit.id,
       organizationId: commHit.organization_id,
       enrollmentId: null,
       laneId: null,
-      propertyId: commHit.property_id,
+      propertyId,
       contactId: null,
+      leadId: commHit.lead_id ?? null,
       parentSubject: commHit.subject,
       parentBody: commHit.body_preview,
     };
@@ -127,12 +146,14 @@ export async function maybeRouteAsReply(
   if (!parent) return { matched: false };
 
   // ── 1. Pull property + recipient context for classification ──────────
-  const { data: prop } = await supabase
-    .from("properties")
-    .select("name, address, asset_type")
-    .eq("organization_id", ORG_ID)
-    .eq("id", parent.propertyId)
-    .maybeSingle();
+  const { data: prop } = parent.propertyId
+    ? await supabase
+        .from("properties")
+        .select("name, address, asset_type")
+        .eq("organization_id", ORG_ID)
+        .eq("id", parent.propertyId)
+        .maybeSingle()
+    : { data: null };
 
   // ── 2. Classify the reply ────────────────────────────────────────────
   // Done synchronously so the inbox immediately surfaces the read. Adds
@@ -258,7 +279,64 @@ export async function maybeRouteAsReply(
     }
   }
 
-  // ── 6. Activity entry on the property timeline (with the classification
+  // ── 6. Re-surface the lead in the worklist + write to the drawer thread ──
+  // Only applies when this reply was triggered by a manual send from
+  // leads/[id]/send (sourceTable === "communications" && leadId is set).
+  // Cadence lane_touches replies don't have a direct leads row to update.
+  if (parent.leadId) {
+    // Write the inbound reply to communications so it appears in the
+    // ContactDrawer thread alongside John's outbound reply.
+    await supabase.from("communications").insert({
+      organization_id: ORG_ID,
+      lead_id: parent.leadId,
+      contact_id: resolvedContactId,
+      property_id: parent.propertyId ?? null,
+      channel: "email",
+      direction: "inbound",
+      external_id: msg.gmailMessageId,
+      subject: msg.subject,
+      body_preview: msg.bodyText.slice(0, 500),
+      from_address: msg.fromEmail,
+      occurred_at: msg.receivedAt,
+      raw_payload: {
+        gmail_message_id: msg.gmailMessageId,
+        gmail_thread_id: msg.gmailThreadId,
+        from_name: msg.fromName,
+        classification,
+      },
+    });
+
+    // Re-open the lead so it surfaces in "Do This Now" and the AI can draft
+    // a response to what they said. Only re-open if it was in 'sent' status
+    // (don't clobber a lead that John already re-opened manually).
+    await supabase
+      .from("leads")
+      .update({
+        status: "new",
+        draft_reply: null, // cleared so draftLeadReply can produce a fresh reply
+        qualifier_summary: classification.summary || undefined,
+        updated_at: msg.receivedAt,
+      })
+      .eq("id", parent.leadId)
+      .in("status", ["sent"]);
+
+    // Lead-level event visible in the drawer activity tab
+    await supabase.from("lead_events").insert({
+      organization_id: ORG_ID,
+      lead_id: parent.leadId,
+      event_type: "replied",
+      actor: "system",
+      summary: `${msg.fromName || msg.fromEmail || "Contact"} replied — ${classification.summary}`,
+      metadata: {
+        gmail_message_id: msg.gmailMessageId,
+        gmail_thread_id: msg.gmailThreadId,
+        intent: classification.intent,
+        confidence: classification.confidence,
+      },
+    });
+  }
+
+  // ── 7. Activity entry on the property timeline (with the classification
   //       summary in the subject so it's visible at a glance) ────────────
   const summaryPrefix =
     classification.intent !== "unclear" && classification.confidence >= 0.6

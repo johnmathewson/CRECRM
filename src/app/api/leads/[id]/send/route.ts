@@ -178,6 +178,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   await supabase.from("communications").insert({
     organization_id: ORG_ID,
     lead_id: lead.id,
+    // property_id is required by match-reply-to-touch so inbound replies can
+    // be threaded back to this lead instead of creating a duplicate new lead.
+    property_id: (lead.property_id as string | null) ?? null,
     channel: "email",
     direction: "outbound",
     external_id: sent.id,
