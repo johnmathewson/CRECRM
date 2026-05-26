@@ -18,6 +18,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getActiveGmailToken } from "@/lib/gmail-auth";
 import { sendMessage } from "@/lib/gmail";
+import { captureVoiceExample } from "@/lib/cre-os/voice-examples";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -29,6 +30,23 @@ interface SendBody {
   body?: string;
   subject?: string;
   to?: string;
+}
+
+/**
+ * Minimal word-level diff for voice-example capture. Returns a compact
+ * human-readable string showing what John changed from the AI draft so
+ * future prompts can learn his editing patterns.
+ *
+ * We don't pull in a full diff library here — this is best-effort context
+ * for the few-shot retriever, not a strict patch format.
+ */
+function computeDiff(original: string, edited: string): string {
+  const origLines = original.split("\n");
+  const editLines = edited.split("\n");
+  const removed = origLines.filter((l) => !editLines.includes(l)).map((l) => `- ${l}`);
+  const added = editLines.filter((l) => !origLines.includes(l)).map((l) => `+ ${l}`);
+  if (!removed.length && !added.length) return "(no line-level changes)";
+  return [...removed.slice(0, 20), ...added.slice(0, 20)].join("\n");
 }
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
@@ -51,6 +69,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     .from("leads")
     .select(`
       id, status, sender_email, sender_name, raw_subject, draft_reply,
+      property_id, source, qualifier_summary,
       organization_id
     `)
     .eq("id", params.id)
@@ -178,6 +197,37 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     summary: `John sent reply to ${to}`,
     metadata: { gmail_message_id: sent.id, gmail_thread_id: sent.threadId, char_count: bodyText.length },
   });
+
+  // ── Capture voice example for future AI drafts ──
+  // Best-effort: never block the 200 response if this fails.
+  try {
+    const aiDraft = (lead.draft_reply as string | null) ?? null;
+    const wasEdited = !!aiDraft && bodyText.trim() !== aiDraft.trim();
+    await captureVoiceExample(supabase, {
+      channel: "email",
+      subject,
+      body: bodyText,
+      source: aiDraft ? (wasEdited ? "ai_edited" : "ai_drafted") : "manual",
+      userEditsDiff: wasEdited ? computeDiff(aiDraft!, bodyText) : null,
+      // CREXi leads are always listing_inquiry_followup; inbound replies are
+      // a first-touch persona. Either way the example improves future drafts.
+      personaSlug:
+        (lead.source as string | null) === "crexi"
+          ? "listing_inquiry_followup"
+          : "first_touch_reply",
+      propertyId: (lead.property_id as string | null) ?? null,
+      recipientEngagement: (lead.qualifier_summary as string | null) ?? null,
+      recipientProfileSnapshot: {
+        name: lead.sender_name ?? null,
+        email: to,
+        source: lead.source ?? null,
+      },
+      sentAt,
+    });
+  } catch (captureErr) {
+    // Log but never fail the send
+    console.warn("[send] captureVoiceExample failed:", captureErr);
+  }
 
   return NextResponse.json({
     ok: true,

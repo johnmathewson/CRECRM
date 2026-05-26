@@ -24,6 +24,7 @@
 
 import { callAnthropic, MODELS } from "./anthropic";
 import { gatherIntel, formatIntelForPrompt } from "./agent-intel";
+import { personalizeTouch, DEFAULT_SENDER } from "./cre-os/ai-touch-personalize";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -258,15 +259,48 @@ Draft John's outreach email now.`;
   let draftReply: string | null = null;
   let draftTokens: unknown = null;
   try {
-    const result = await callAnthropic({
-      model: MODELS.SONNET,
-      system: DRAFT_SYSTEM_BASE,
-      messages: [{ role: "user", content: userMessage }],
-      maxTokens: 1024,
-      temperature: 0.6,
-    });
-    draftReply = result.text.trim();
-    draftTokens = result.usage;
+    if (tone === "proactive_engagement") {
+      // Route through the richer personalizer — same voice/persona/few-shot
+      // system used by the Property Leads tab. Injects the grounding intel
+      // (comps, contact history, vault link) via marketingNotes so the model
+      // has the same factual anchors it gets on the first_touch path.
+      const touch = await personalizeTouch({
+        channel: "email",
+        archetype: "listing_inquiry_followup",
+        propertyId: lead.property_id || null,
+        property: {
+          name: intel.matchedProperty?.name || lead.property_label || null,
+          address: intel.matchedProperty?.address || null,
+          city: intel.matchedProperty?.city || null,
+          state: intel.matchedProperty?.state || null,
+          assetType: intel.matchedProperty?.asset_type || null,
+          sqft: intel.matchedProperty?.sqft || null,
+          yearBuilt: intel.matchedProperty?.year_built || null,
+          capRate: intel.matchedProperty?.cap_rate || null,
+          // Pack the full intel block here — comps, vault link, contact history
+          marketingNotes: intelBlock || null,
+        },
+        recipient: {
+          name: lead.sender_name || null,
+          lastAction: engagementSignal || qualification.qualifier_summary || null,
+        },
+        sender: DEFAULT_SENDER,
+      });
+      draftReply = touch.body.trim();
+      // personalizeTouch doesn't expose token usage; leave draftTokens null
+    } else {
+      // first_touch: keep the existing direct-Claude path — it's a reply to
+      // an inbound message and doesn't need cold-outreach framing.
+      const result = await callAnthropic({
+        model: MODELS.SONNET,
+        system: DRAFT_SYSTEM_BASE,
+        messages: [{ role: "user", content: userMessage }],
+        maxTokens: 1024,
+        temperature: 0.6,
+      });
+      draftReply = result.text.trim();
+      draftTokens = result.usage;
+    }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     await recordEvent(supabase, organizationId, leadId, "error", "agent", `Draft failed: ${message}`, {
