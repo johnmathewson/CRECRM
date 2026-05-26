@@ -311,18 +311,21 @@ function DrawerPanel({ leadId, onClose, onChange }: { leadId: string; onClose: (
                 </div>
               </div>
 
-              {/* Original inbound */}
-              {(lead.raw_subject || lead.raw_body) && (
-                <div>
-                  <Eyebrow tone="muted">Inbound</Eyebrow>
-                  <div className="mt-2 rounded-md border border-white/[0.06] bg-white/[0.02] p-3.5">
-                    {lead.raw_subject && <div className="font-heading text-[12px] font-semibold text-cream mb-1">{lead.raw_subject}</div>}
-                    {lead.raw_body && (
-                      <pre className="whitespace-pre-wrap font-body text-[11.5px] text-cream-dim leading-relaxed max-h-40 overflow-auto">{lead.raw_body}</pre>
-                    )}
+              {/* Inbound message (email leads) or CREXi activity card */}
+              {lead.source === "crexi"
+                ? <CrexiActivityCard rawBody={lead.raw_body} />
+                : (lead.raw_subject || lead.raw_body) && (
+                  <div>
+                    <Eyebrow tone="muted">Inbound</Eyebrow>
+                    <div className="mt-2 rounded-md border border-white/[0.06] bg-white/[0.02] p-3.5">
+                      {lead.raw_subject && <div className="font-heading text-[12px] font-semibold text-cream mb-1">{lead.raw_subject}</div>}
+                      {lead.raw_body && (
+                        <pre className="whitespace-pre-wrap font-body text-[11.5px] text-cream-dim leading-relaxed max-h-40 overflow-auto">{lead.raw_body}</pre>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
+                )
+              }
 
               {/* Thread */}
               {thread.length > 0 && (
@@ -440,6 +443,57 @@ function Row({ label, value }: { label: string; value: string }) {
     <div className="flex gap-2 font-body text-[11.5px]">
       <span className="shrink-0 w-[84px] text-cream-subtle">{label}</span>
       <span className="flex-1 text-cream-dim break-words">{value}</span>
+    </div>
+  );
+}
+
+/** Replaces the raw Inbound block for CREXi-sourced leads. */
+function CrexiActivityCard({ rawBody }: { rawBody: string | null }) {
+  if (!rawBody) return null;
+
+  // Parse the JSON metadata stored by ensureHotLeadRow
+  let data: Record<string, unknown> = {};
+  try { data = JSON.parse(rawBody); } catch { return null; }
+
+  const signal = typeof data.engagement_signal === "string" ? data.engagement_signal : null;
+  const activityDate = typeof data.activity_date === "string" ? data.activity_date : null;
+  const notes = typeof data.notes === "string" ? data.notes : null;
+  const buyingPower = typeof data.buying_power === "string" ? data.buying_power : null;
+  const proofOfFunds = typeof data.proof_of_funds === "string" ? data.proof_of_funds : null;
+  const leadScore = typeof data.crexi_lead_score === "number" ? data.crexi_lead_score : null;
+
+  // If nothing interesting to show, suppress entirely
+  const hasExtras = notes || buyingPower || proofOfFunds || leadScore;
+  if (!signal && !hasExtras) return null;
+
+  const fmt = (iso: string) =>
+    new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+  return (
+    <div>
+      <Eyebrow tone="muted">CREXi Activity</Eyebrow>
+      <div className="mt-2 rounded-md border border-white/[0.06] bg-white/[0.02] p-3.5 space-y-2.5">
+        {signal && (
+          <p className="font-body text-[12px] text-cream-dim leading-relaxed">{signal}</p>
+        )}
+        {(activityDate || leadScore) && (
+          <div className="flex gap-4 font-mono text-[10.5px] text-cream-subtle">
+            {activityDate && <span>📅 {fmt(activityDate)}</span>}
+            {leadScore && <span>Score {leadScore}</span>}
+          </div>
+        )}
+        {(buyingPower || proofOfFunds) && (
+          <div className="space-y-1 pt-1 border-t border-white/[0.04]">
+            {buyingPower && <Row label="Buying power" value={buyingPower} />}
+            {proofOfFunds && <Row label="Proof of funds" value={proofOfFunds} />}
+          </div>
+        )}
+        {notes && (
+          <div className="pt-1 border-t border-white/[0.04]">
+            <pre className="whitespace-pre-wrap font-body text-[11px] text-cream-subtle leading-relaxed">{notes}</pre>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
