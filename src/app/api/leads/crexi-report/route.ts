@@ -214,7 +214,7 @@ async function ensureHotLeadRow(
   // ❶ Already have a lead for this contact + property (any source)?
   const { data: existing } = await supabase
     .from("leads")
-    .select("id")
+    .select("id, sender_email")
     .eq("organization_id", ORG_ID)
     .eq("contact_id", contactId)
     .eq("property_id", propertyId)
@@ -222,7 +222,20 @@ async function ensureHotLeadRow(
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (existing) return existing.id; // already in inbox — don't duplicate
+  if (existing) {
+    // Heal missing email in-place — older lead rows may have been created
+    // without sender_email if the CREXi report omitted it at the time.
+    // The drafting cron skips leads with null sender_email, so patch it
+    // whenever we now have a resolved email.
+    const resolvedEmail = lead.email ?? null;
+    if (!existing.sender_email && resolvedEmail) {
+      await supabase
+        .from("leads")
+        .update({ sender_email: resolvedEmail, updated_at: new Date().toISOString() })
+        .eq("id", existing.id);
+    }
+    return existing.id;
+  }
 
   // ❷ Already sent something to this contact (any property)?
   const { count: sentCount } = await supabase
