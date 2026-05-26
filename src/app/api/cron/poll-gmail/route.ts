@@ -472,17 +472,17 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
 
       for (const ref of sentRefs) {
         try {
-          // Fast dedup: if already logged AND linked to a lead → fully handled.
-          // If logged but lead_id=null (orphaned bulk/cadence send), we heal it
-          // below rather than skipping — that's what links Eric-style history.
+          // Fast dedup: orphaned comms (lead_id=null) are now healed at lead-
+          // creation time via linkOrphanedComms in intake + crexi-report.
+          // This job only needs to catch emails John sends directly from Gmail
+          // (outside the CRM) — those will never appear in communications at all.
           const { data: alreadyLogged } = await supabase
             .from("communications")
-            .select("id, lead_id")
+            .select("id")
             .eq("external_id", ref.id)
             .maybeSingle();
-          if (alreadyLogged?.lead_id) { skipped++; continue; }
+          if (alreadyLogged) { skipped++; continue; }
 
-          // Fetch full message — needed for both the heal path and new-row path.
           const msg = await getMessage(token.accessToken, ref.id);
           const toHeader = getHeader(msg.payload, "To");
           const subject = getHeader(msg.payload, "Subject");
@@ -509,39 +509,26 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
 
           if (!matchedLead) { skipped++; continue; }
 
-          if (alreadyLogged) {
-            // Row exists but lead_id was null (orphaned) — link it to the
-            // matched lead so it appears in the ContactDrawer thread.
-            await supabase
-              .from("communications")
-              .update({
-                lead_id: matchedLead.id,
-                property_id: (matchedLead.property_id as string | null) ?? null,
-              })
-              .eq("id", alreadyLogged.id);
-          } else {
-            // Brand-new send — insert the full outbound row.
-            const { text: bodyText } = extractBody(msg.payload);
-            await supabase.from("communications").insert({
-              organization_id: ORG_ID,
-              lead_id: matchedLead.id,
-              property_id: (matchedLead.property_id as string | null) ?? null,
-              channel: "email",
-              direction: "outbound",
-              external_id: ref.id,
-              subject,
-              body_preview: bodyText.slice(0, 500),
-              from_address: token.email,
-              to_addresses: [toEmail],
-              occurred_at: sentAt,
-              raw_payload: {
-                gmail_message_id: ref.id,
-                gmail_thread_id: msg.threadId,
-                label_ids: msg.labelIds,
-                source: "gmail_sent_sync",
-              },
-            });
-          }
+          const { text: bodyText } = extractBody(msg.payload);
+          await supabase.from("communications").insert({
+            organization_id: ORG_ID,
+            lead_id: matchedLead.id,
+            property_id: (matchedLead.property_id as string | null) ?? null,
+            channel: "email",
+            direction: "outbound",
+            external_id: ref.id,
+            subject,
+            body_preview: bodyText.slice(0, 500),
+            from_address: token.email,
+            to_addresses: [toEmail],
+            occurred_at: sentAt,
+            raw_payload: {
+              gmail_message_id: ref.id,
+              gmail_thread_id: msg.threadId,
+              label_ids: msg.labelIds,
+              source: "gmail_sent_sync",
+            },
+          });
 
           // Mark the lead as sent so it leaves the action queue
           if (matchedLead.status !== "sent") {

@@ -28,6 +28,7 @@ import { callAnthropic, parseJsonResponse, MODELS } from "@/lib/anthropic";
 import { checkSpam } from "@/lib/spam-filter";
 import { matchProperty, MATCH_CONFIDENCE_THRESHOLD } from "@/lib/property-match";
 import { draftLeadReply } from "@/lib/draft-lead-reply";
+import { linkOrphanedComms } from "@/lib/cre-os/send-crm-email";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // Netlify Pro: up to 60s. Two Claude calls can run long.
@@ -376,6 +377,14 @@ ${body.raw_body || "(empty)"}`;
     );
   }
   const leadId = leadInsert.id;
+
+  // ── 5b. Link orphaned communications for this sender ─────────────────────
+  // Any outbound rows (bulk-AI, cadence, lane-touch) sent to this email before
+  // the leads row existed will have lead_id=null. Link them now so they surface
+  // in the ContactDrawer thread immediately.
+  const resolvedSenderEmail =
+    qualification.sender_email_clean || body.sender_email || null;
+  await linkOrphanedComms(supabase, leadId, resolvedSenderEmail, matched?.id ?? null);
 
   // ── 6. Inbound communication ─────────────────────────────────────────────
   await supabase.from("communications").insert({

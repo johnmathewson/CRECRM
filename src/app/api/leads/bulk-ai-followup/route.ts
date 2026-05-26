@@ -31,7 +31,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getActiveGmailToken } from "@/lib/gmail-auth";
-import { sendMessage } from "@/lib/gmail";
+import { sendCrmEmail } from "@/lib/cre-os/send-crm-email";
 import {
   personalizeTouch,
   archetypeFromContext,
@@ -356,6 +356,28 @@ export async function POST(req: NextRequest) {
     })),
   ];
 
+  // ── Pre-loop: build email → { leadId, contactId } for FK bookkeeping ────────
+  // Bulk sends target a mix of crexi_leads_state IDs and leads IDs. To correctly
+  // set lead_id + contact_id on communications rows, query ALL leads for this
+  // property once up front rather than per-recipient.
+  const emailToLeadInfo = new Map<string, { leadId: string; contactId: string | null }>();
+  {
+    const { data: leadsForProp } = await supabase
+      .from("leads")
+      .select("id, sender_email, contact_id")
+      .eq("organization_id", ORG_ID)
+      .eq("property_id", body.propertyId)
+      .not("status", "in", '("archived","spam")');
+    for (const l of (leadsForProp ?? []) as Array<{ id: string; sender_email: string | null; contact_id: string | null }>) {
+      if (l.sender_email) {
+        emailToLeadInfo.set(l.sender_email.toLowerCase().trim(), {
+          leadId: l.id,
+          contactId: l.contact_id,
+        });
+      }
+    }
+  }
+
   for (const lead of unified) {
     // Skip: no email
     if (!lead.email) {
@@ -482,15 +504,27 @@ export async function POST(req: NextRequest) {
     try {
       const fromHeader = `${SEND_DISPLAY_NAME} <${gmailToken!.email}>`;
       const toHeader = lead.name ? `"${lead.name}" <${lead.email}>` : lead.email;
-      const sentResult = await sendMessage(gmailToken!.accessToken, {
-        to: toHeader,
-        from: fromHeader,
-        subject: personalized.subject,
-        bodyText: personalized.body,
-      });
-      const sentAt = new Date().toISOString();
+      const leadInfo = emailToLeadInfo.get(emailLower) ?? null;
 
-      // Log activity (timeline) + communications (outbound record)
+      const { gmailMessageId: sentMsgId, gmailThreadId: sentThreadId, sentAt } =
+        await sendCrmEmail(supabase, gmailToken!.accessToken, {
+          to: toHeader,
+          from: fromHeader,
+          subject: personalized.subject,
+          bodyText: personalized.body,
+          leadId: leadInfo?.leadId ?? null,
+          propertyId: prop.id,
+          contactId: leadInfo?.contactId ?? null,
+          source: "bulk_ai",
+          // Flip the lead to 'sent' only when there's a confirmed leads row
+          updateLeadStatus: !!leadInfo?.leadId,
+          rawPayloadExtra: {
+            ai_rationale: personalized.rationale,
+            source_lead_id: lead.id,
+          },
+        });
+
+      // Timeline activity (separate from the communications row)
       await supabase.from("activities").insert({
         organization_id: ORG_ID,
         activity_type: "email",
@@ -499,25 +533,9 @@ export async function POST(req: NextRequest) {
         occurred_at: sentAt,
         property_id: prop.id,
       });
-      await supabase.from("communications").insert({
-        organization_id: ORG_ID,
-        property_id: prop.id,
-        channel: "email",
-        direction: "outbound",
-        external_id: sentResult.id,
-        subject: personalized.subject,
-        body_preview: personalized.body.slice(0, 500),
-        from_address: gmailToken!.email,
-        to_addresses: [lead.email],
-        occurred_at: sentAt,
-        raw_payload: {
-          gmail_message_id: sentResult.id,
-          gmail_thread_id: sentResult.threadId,
-          ai_rationale: personalized.rationale,
-          source: "bulk-ai-followup",
-          source_lead_id: lead.id,
-        },
-      });
+
+      // Alias for voice capture + sent array below
+      const sentResult = { id: sentMsgId, threadId: sentThreadId };
 
       // Capture as a voice example so future AI drafts pattern-match on it.
       // Best-effort — failures here don't break the send loop.

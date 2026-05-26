@@ -28,7 +28,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getActiveGmailToken } from "@/lib/gmail-auth";
-import { sendMessage } from "@/lib/gmail";
+import { sendCrmEmail } from "@/lib/cre-os/send-crm-email";
 import { captureVoiceExample } from "@/lib/cre-os/voice-examples";
 
 export const dynamic = "force-dynamic";
@@ -144,22 +144,29 @@ export async function POST(req: NextRequest) {
   const toHeader = recipientName ? `"${recipientName}" <${recipientEmail}>` : recipientEmail;
 
   // Send
-  let sent;
+  let sent: { id: string; threadId: string };
+  let sentAt: string;
   try {
-    sent = await sendMessage(token.accessToken, {
+    const result = await sendCrmEmail(supabase, token.accessToken, {
       to: toHeader,
       from: fromHeader,
       subject: body.subject,
       bodyText: body.bodyText,
+      leadId: null,          // lane touches work against contacts/properties, not leads rows
+      propertyId: prop.id,
+      contactId: resolvedContactId,
+      source: "lane_touch",
+      updateLeadStatus: false,
+      rawPayloadExtra: { lane_touch_source: "lane-touches-send" },
     });
+    sent = { id: result.gmailMessageId, threadId: result.gmailThreadId };
+    sentAt = result.sentAt;
   } catch (err) {
     return NextResponse.json(
       { error: `Gmail send failed: ${err instanceof Error ? err.message : err}` },
       { status: 502 }
     );
   }
-
-  const sentAt = new Date().toISOString();
 
   // Insert activity entry first so we can link from lane_touches
   const { data: activity } = await supabase
@@ -229,29 +236,21 @@ export async function POST(req: NextRequest) {
   }
   const touchId = touch.id;
 
-  // Also write to communications so the Leads-tab state machine and any
-  // downstream reporting that joins on communications.to_addresses can see
-  // this send. (Historically this route only wrote to lane_touches, which
-  // caused leads to NOT show as Touched after a Compose+Send.)
-  await supabase.from("communications").insert({
-    organization_id: ORG_ID,
-    property_id: body.propertyId,
-    channel: "email",
-    direction: "outbound",
-    external_id: sent.id,
-    subject: body.subject,
-    body_preview: body.bodyText.slice(0, 500),
-    from_address: token.email,
-    to_addresses: [recipientEmail],
-    occurred_at: sentAt,
-    raw_payload: {
-      gmail_message_id: sent.id,
-      gmail_thread_id: sent.threadId,
-      source: "lane-touches-send",
-      lane_touch_id: touchId,
-      activity_id: activity?.id,
-    },
-  });
+  // communications row already written by sendCrmEmail above.
+  // Patch in lane_touch_id + activity_id now that we have them.
+  await supabase
+    .from("communications")
+    .update({
+      raw_payload: {
+        gmail_message_id: sent.id,
+        gmail_thread_id: sent.threadId,
+        source: "lane-touches-send",
+        lane_touch_id: touchId,
+        activity_id: activity?.id,
+      },
+    })
+    .eq("external_id", sent.id)
+    .eq("organization_id", ORG_ID);
 
   // Determine the precise source — manual / ai_drafted / ai_edited —
   // based on whether the caller passed the original AI draft AND whether

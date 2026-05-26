@@ -20,7 +20,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getActiveGmailToken } from "@/lib/gmail-auth";
-import { sendMessage } from "@/lib/gmail";
+import { sendCrmEmail } from "@/lib/cre-os/send-crm-email";
 import { captureVoiceExample } from "@/lib/cre-os/voice-examples";
 
 export const dynamic = "force-dynamic";
@@ -85,23 +85,30 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const toHeader = toName ? `"${toName}" <${toEmail}>` : toEmail;
 
   // Send
-  let sent;
+  let sent: { id: string; threadId: string };
+  let sentAt: string;
   try {
-    sent = await sendMessage(token.accessToken, {
+    const result = await sendCrmEmail(supabase, token.accessToken, {
       to: toHeader,
       from: fromHeader,
       subject,
       bodyText: replyBody,
-      threadId, // keeps it in the same Gmail thread
+      threadId,
+      leadId: null,
+      propertyId: inbound.property_id as string | null,
+      contactId: inbound.contact_id as string | null,
+      source: "send_suggested_reply",
+      updateLeadStatus: false,
+      rawPayloadExtra: { parent_inbound_touch_id: inbound.id },
     });
+    sent = { id: result.gmailMessageId, threadId: result.gmailThreadId };
+    sentAt = result.sentAt;
   } catch (err) {
     return NextResponse.json(
       { error: `Gmail send failed: ${err instanceof Error ? err.message : err}` },
       { status: 502 }
     );
   }
-
-  const sentAt = new Date().toISOString();
 
   // Insert outbound reply touch
   const { data: outboundTouch } = await supabase
@@ -130,7 +137,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     .select("id")
     .single();
 
-  // Log activity + outbound communications for cross-reference
+  // Log activity entry on the property timeline
   await supabase.from("activities").insert({
     organization_id: ORG_ID,
     activity_type: "email",
@@ -140,24 +147,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     property_id: inbound.property_id,
     contact_id: inbound.contact_id,
   });
-  await supabase.from("communications").insert({
-    organization_id: ORG_ID,
-    property_id: inbound.property_id,
-    channel: "email",
-    direction: "outbound",
-    external_id: sent.id,
-    subject,
-    body_preview: replyBody.slice(0, 500),
-    from_address: token.email,
-    to_addresses: [toEmail],
-    occurred_at: sentAt,
-    raw_payload: {
-      gmail_message_id: sent.id,
-      gmail_thread_id: sent.threadId,
-      source: "send-suggested-reply",
-      parent_inbound_touch_id: inbound.id,
-    },
-  });
+  // communications row already written by sendCrmEmail above.
 
   // Capture as a voice example. "ai_edited" if the broker changed the AI
   // draft, "ai_drafted" if they sent the AI's suggestion as-is.

@@ -17,7 +17,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getActiveGmailToken } from "@/lib/gmail-auth";
-import { sendMessage } from "@/lib/gmail";
+import { sendCrmEmail } from "@/lib/cre-os/send-crm-email";
 import { captureVoiceExample } from "@/lib/cre-os/voice-examples";
 
 export const dynamic = "force-dynamic";
@@ -69,7 +69,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     .from("leads")
     .select(`
       id, status, sender_email, sender_name, raw_subject, draft_reply,
-      property_id, source, qualifier_summary,
+      property_id, contact_id, source, qualifier_summary,
       organization_id
     `)
     .eq("id", params.id)
@@ -139,18 +139,30 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   const fromHeader = `${SEND_DISPLAY_NAME} <${token.email}>`;
 
-  // ── Send ──
-  let sent;
+  // ── Send + persist ──
+  let gmailMessageId: string;
+  let gmailThreadId: string;
+  let sentAt: string;
   try {
-    sent = await sendMessage(token.accessToken, {
-      to,
-      from: fromHeader,
-      subject,
-      bodyText,
-      inReplyTo: inboundRfcMessageId || undefined,
-      references: inboundRfcMessageId || undefined,
-      threadId: inboundGmailThreadId || undefined,
-    });
+    ({ gmailMessageId, gmailThreadId, sentAt } = await sendCrmEmail(
+      supabase,
+      token.accessToken,
+      {
+        to,
+        from: fromHeader,
+        subject,
+        bodyText,
+        inReplyTo: inboundRfcMessageId || undefined,
+        references: inboundRfcMessageId || undefined,
+        threadId: inboundGmailThreadId || undefined,
+        leadId: lead.id,
+        propertyId: (lead.property_id as string | null) ?? null,
+        contactId: (lead.contact_id as string | null) ?? null,
+        source: "manual",
+        updateLeadStatus: true,
+        additionalLeadUpdates: { final_reply: bodyText },
+      }
+    ));
   } catch (err: any) {
     await supabase.from("lead_events").insert({
       organization_id: ORG_ID,
@@ -163,42 +175,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: err.message }, { status: 502 });
   }
 
-  // ── Persist post-send state ──
-  const sentAt = new Date().toISOString();
-  await supabase
-    .from("leads")
-    .update({
-      final_reply: bodyText,
-      final_sent_at: sentAt,
-      status: "sent",
-      updated_at: sentAt,
-    })
-    .eq("id", lead.id);
-
-  await supabase.from("communications").insert({
-    organization_id: ORG_ID,
-    lead_id: lead.id,
-    // property_id is required by match-reply-to-touch so inbound replies can
-    // be threaded back to this lead instead of creating a duplicate new lead.
-    property_id: (lead.property_id as string | null) ?? null,
-    channel: "email",
-    direction: "outbound",
-    external_id: sent.id,
-    subject,
-    body_preview: bodyText.slice(0, 500),
-    from_address: token.email,
-    to_addresses: [to],
-    occurred_at: sentAt,
-    raw_payload: { gmail_message_id: sent.id, gmail_thread_id: sent.threadId, label_ids: sent.labelIds },
-  });
-
   await supabase.from("lead_events").insert({
     organization_id: ORG_ID,
     lead_id: lead.id,
     event_type: "sent",
     actor: "user",
     summary: `John sent reply to ${to}`,
-    metadata: { gmail_message_id: sent.id, gmail_thread_id: sent.threadId, char_count: bodyText.length },
+    metadata: { gmail_message_id: gmailMessageId, gmail_thread_id: gmailThreadId, char_count: bodyText.length },
   });
 
   // ── Capture voice example for future AI drafts ──
@@ -235,7 +218,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   return NextResponse.json({
     ok: true,
     sent_at: sentAt,
-    gmail_message_id: sent.id,
-    gmail_thread_id: sent.threadId,
+    gmail_message_id: gmailMessageId,
+    gmail_thread_id: gmailThreadId,
   });
 }

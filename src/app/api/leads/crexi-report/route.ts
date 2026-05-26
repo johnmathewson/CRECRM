@@ -30,6 +30,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getActiveGmailToken } from "@/lib/gmail-auth";
 import { parseCrexiReport, type CrexiLead } from "@/lib/cre-os/parse-crexi-report";
 import { findOrCreateContact } from "@/lib/cre-os/find-or-create-contact";
+import { linkOrphanedComms } from "@/lib/cre-os/send-crm-email";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -307,6 +308,11 @@ async function ensureHotLeadRow(
     console.warn("[crexi-report] hot lead row insert failed:", error?.message);
     return null;
   }
+
+  // Link any orphaned outbound communications for this email to the new lead
+  // so the ContactDrawer thread is populated immediately on first open.
+  await linkOrphanedComms(supabase, created.id, senderEmail, propertyId);
+
   return created.id;
 }
 

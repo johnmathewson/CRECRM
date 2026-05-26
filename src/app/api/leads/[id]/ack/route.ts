@@ -18,7 +18,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getActiveGmailToken } from "@/lib/gmail-auth";
-import { sendMessage } from "@/lib/gmail";
+import { sendCrmEmail } from "@/lib/cre-os/send-crm-email";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -57,6 +57,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     .from("leads")
     .select(`
       id, sender_email, sender_name, raw_subject, auto_ack_sent_at, status,
+      property_id, contact_id,
       property:properties(name, headline)
     `)
     .eq("id", params.id)
@@ -112,17 +113,30 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: "Gmail not connected" }, { status: 412 });
   }
 
-  let sent;
+  let gmailMessageId: string;
+  let gmailThreadId: string;
+  let sentAt: string;
   try {
-    sent = await sendMessage(token.accessToken, {
-      to: lead.sender_email,
-      from: `${SEND_DISPLAY_NAME} <${token.email}>`,
-      subject,
-      bodyText: body,
-      inReplyTo: inboundRfcMessageId || undefined,
-      references: inboundRfcMessageId || undefined,
-      threadId: inboundGmailThreadId || undefined,
-    });
+    ({ gmailMessageId, gmailThreadId, sentAt } = await sendCrmEmail(
+      supabase,
+      token.accessToken,
+      {
+        to: lead.sender_email,
+        from: `${SEND_DISPLAY_NAME} <${token.email}>`,
+        subject,
+        bodyText: body,
+        inReplyTo: inboundRfcMessageId || undefined,
+        references: inboundRfcMessageId || undefined,
+        threadId: inboundGmailThreadId || undefined,
+        leadId: lead.id,
+        propertyId: (lead.property_id as string | null) ?? null,
+        contactId: (lead.contact_id as string | null) ?? null,
+        source: "ack",
+        // ack does NOT flip lead to 'sent' — it stamps auto_ack_sent_at below
+        updateLeadStatus: false,
+        rawPayloadExtra: { kind: "auto_ack" },
+      }
+    ));
   } catch (err: any) {
     await supabase.from("lead_events").insert({
       organization_id: ORG_ID,
@@ -135,25 +149,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     throw err;
   }
 
-  const sentAt = new Date().toISOString();
+  // Stamp auto_ack_sent_at — distinct from final_sent_at / status='sent'
   await supabase
     .from("leads")
     .update({ auto_ack_sent_at: sentAt, updated_at: sentAt })
     .eq("id", lead.id);
-
-  await supabase.from("communications").insert({
-    organization_id: ORG_ID,
-    lead_id: lead.id,
-    channel: "email",
-    direction: "outbound",
-    external_id: sent.id,
-    subject,
-    body_preview: body,
-    from_address: token.email,
-    to_addresses: [lead.sender_email],
-    occurred_at: sentAt,
-    raw_payload: { gmail_message_id: sent.id, gmail_thread_id: sent.threadId, kind: "auto_ack" },
-  });
 
   await supabase.from("lead_events").insert({
     organization_id: ORG_ID,
@@ -161,8 +161,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     event_type: "sent",
     actor: "agent",
     summary: `Auto-ack sent to ${lead.sender_email}`,
-    metadata: { gmail_message_id: sent.id, kind: "auto_ack", property_label: propertyLabel },
+    metadata: { gmail_message_id: gmailMessageId, kind: "auto_ack", property_label: propertyLabel },
   });
 
-  return NextResponse.json({ ok: true, sent_at: sentAt, gmail_message_id: sent.id });
+  return NextResponse.json({ ok: true, sent_at: sentAt, gmail_message_id: gmailMessageId });
 }
