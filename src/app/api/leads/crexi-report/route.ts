@@ -171,6 +171,30 @@ function buildEngagementSignal(lead: CrexiLead, propertyName: string | null): st
   return `${lead.fullName} ${action}${where}${when}${role}.`;
 }
 
+// ── Level-of-interest peak preservation ────────────────────────────────
+// CREXi reports can regress — someone who executed a CA weeks ago may
+// appear as a "Visitor" in the next day's report. We preserve the highest
+// LOI ever seen so hot leads don't silently downgrade in crexi_leads_state.
+
+const LOI_RANK: Record<string, number> = {
+  "visitor": 1,
+  "visited page": 1,
+  "opened flyer": 2,
+  "opened om": 2,
+  "requested info": 3,
+  "executed ca": 4,
+  "offer": 4,
+};
+
+function loiRank(loi: string | null | undefined): number {
+  if (!loi) return 0;
+  const lower = loi.trim().toLowerCase();
+  for (const [pattern, rank] of Object.entries(LOI_RANK)) {
+    if (lower.includes(pattern)) return rank;
+  }
+  return 1; // treat unknown as visitor-level
+}
+
 /**
  * For hot leads: ensure a `leads` row exists so they surface in Command
  * "Do This Now". Dedupes against existing leads for this contact + property
@@ -288,7 +312,7 @@ async function upsertLead(supabase: any, propertyId: string, lead: CrexiLead): P
   if (lead.email) {
     const { data } = await supabase
       .from("crexi_leads_state")
-      .select("id")
+      .select("id, level_of_interest")
       .eq("organization_id", ORG_ID)
       .eq("property_id", propertyId)
       .ilike("email", lead.email.trim().toLowerCase())
@@ -300,7 +324,7 @@ async function upsertLead(supabase: any, propertyId: string, lead: CrexiLead): P
     // value avoids LIKE-pattern wildcard issues with names containing %.
     const { data: candidates } = await supabase
       .from("crexi_leads_state")
-      .select("id, name, email")
+      .select("id, name, email, level_of_interest")
       .eq("organization_id", ORG_ID)
       .eq("property_id", propertyId)
       .ilike("name", lead.fullName.trim());
@@ -311,7 +335,8 @@ async function upsertLead(supabase: any, propertyId: string, lead: CrexiLead): P
     }
   }
 
-  const payload = {
+  // Base payload — level_of_interest is handled separately for peak preservation
+  const basePayload = {
     organization_id: ORG_ID,
     property_id: propertyId,
     contact_id: contactId, // ALWAYS set — this is the canonical linkage
@@ -320,7 +345,6 @@ async function upsertLead(supabase: any, propertyId: string, lead: CrexiLead): P
     phone: lead.phone,
     company: lead.company,
     role: lead.industryRole,
-    level_of_interest: lead.levelOfInterest,
     number_of_visits: lead.numberOfVisits,
     last_activity_date: lead.activityDate,
     last_seen_at: new Date().toISOString(),
@@ -328,16 +352,23 @@ async function upsertLead(supabase: any, propertyId: string, lead: CrexiLead): P
   };
 
   if (existing) {
+    // Peak-preserve level_of_interest: only accept the new report's value
+    // if it ranks >= the stored peak. Prevents "Executed CA" → "Visitor"
+    // regression when CREXi downgrades someone between daily reports.
+    const existingLoi = (existing.level_of_interest as string | null) ?? null;
+    const newLoi = lead.levelOfInterest ?? null;
+    const effectiveLoi = loiRank(newLoi) >= loiRank(existingLoi) ? newLoi : existingLoi;
+
     const { error } = await supabase
       .from("crexi_leads_state")
-      .update({ ...payload, updated_at: new Date().toISOString() })
+      .update({ ...basePayload, level_of_interest: effectiveLoi, updated_at: new Date().toISOString() })
       .eq("id", existing.id);
     if (error) return { result: "skipped", contactId: null, crexiLeadsStateId: null };
     return { result: "updated", contactId, crexiLeadsStateId: existing.id };
   } else {
     const { data: inserted, error } = await supabase
       .from("crexi_leads_state")
-      .insert({ ...payload, first_seen_at: new Date().toISOString() })
+      .insert({ ...basePayload, level_of_interest: lead.levelOfInterest, first_seen_at: new Date().toISOString() })
       .select("id")
       .single();
     if (error || !inserted) return { result: "skipped", contactId: null, crexiLeadsStateId: null };

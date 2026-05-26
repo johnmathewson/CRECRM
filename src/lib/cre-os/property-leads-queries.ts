@@ -378,6 +378,17 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
         if (lead.respondedAt && (!existing.respondedAt || lead.respondedAt > existing.respondedAt)) {
           existing.respondedAt = lead.respondedAt;
         }
+        // Promote interest to the higher engagement level — covers the case
+        // where a leads row records "Executed CA" but crexi_leads_state was
+        // overwritten to "Visitor" by a later daily CREXi report.
+        const iRank: Record<LeadInterestLevel, number> = {
+          executed_ca: 5, offer_submitted: 4, info_request: 3,
+          downloaded_om: 2, visited: 1, unknown: 0,
+        };
+        if ((iRank[lead.interest] ?? 0) > (iRank[existing.interest] ?? 0)) {
+          existing.interest = lead.interest;
+          existing.interestRaw = lead.interestRaw ?? existing.interestRaw;
+        }
         return;
       }
       byEmail.set(emailKey, lead);
@@ -509,7 +520,12 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       phone: l.sender_phone,
       company: null,
       role: null,
-      interest: l.urgency === "hot" ? "info_request" : "unknown",
+      // For CREXi-sourced leads, qualifier_summary starts with "CREXi: Executed CA",
+      // "CREXi: Opened OM", etc. — normalizeInterest can parse that precisely.
+      // Fall back to urgency heuristic for non-CREXi sources.
+      interest: l.source === "crexi" && l.qualifier_summary
+        ? normalizeInterest(l.qualifier_summary)
+        : l.urgency === "hot" ? "info_request" : "unknown",
       interestRaw: l.qualifier_summary,
       visitCount: null,
       leadScore: null,
