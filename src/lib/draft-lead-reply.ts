@@ -172,15 +172,25 @@ export async function draftLeadReply(
     qualifier_summary: lead.qualifier_summary || "",
   };
 
-  const intel = await gatherIntel({
-    supabase,
-    organizationId,
-    matchedPropertyId: lead.property_id || null,
-    contactId: lead.contact_id || null,
-    qualification,
-    rawSubject: lead.raw_subject || null,
-    rawBody: lead.raw_body || null,
-  });
+  let intel: Awaited<ReturnType<typeof gatherIntel>>;
+  try {
+    intel = await gatherIntel({
+      supabase,
+      organizationId,
+      matchedPropertyId: lead.property_id || null,
+      contactId: lead.contact_id || null,
+      qualification,
+      rawSubject: lead.raw_subject || null,
+      rawBody: lead.raw_body || null,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    await recordEvent(supabase, organizationId, leadId, "error", "agent", `Intel gather failed: ${message}`, {
+      stage: "intel",
+      tone,
+    });
+    return { ok: false, error: `gatherIntel failed: ${message}` };
+  }
 
   await recordEvent(
     supabase,

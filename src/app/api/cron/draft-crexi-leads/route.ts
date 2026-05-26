@@ -54,15 +54,20 @@ export async function POST(req: NextRequest) {
   );
 
   // ── Find undrafted CREXi leads ──────────────────────────────────────────
+  // Only hot/warm leads with an email address — cold page-viewers and
+  // no-email leads are not actionable and would clog the queue forever.
   const { data: leads, error: fetchErr } = await supabase
     .from("leads")
     .select("id, contact_id, property_id, qualifier_summary, raw_body, sender_name, sender_email")
     .eq("organization_id", ORG_ID)
     .eq("source", "crexi")
     .eq("status", "new")
+    .in("urgency", ["hot", "warm"])
+    .not("sender_email", "is", null)
     .is("draft_reply", null)
     .is("final_sent_at", null)
-    .order("created_at", { ascending: true }) // oldest-first: draft in arrival order
+    .order("urgency", { ascending: true }) // hot before warm
+    .order("created_at", { ascending: true })
     .limit(BATCH_SIZE);
 
   if (fetchErr) {
