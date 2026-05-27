@@ -616,14 +616,27 @@ export function LeadsTab({
                       <LeadStatusPip lead={l} />
                     </td>
                     <td className="py-2.5 text-right whitespace-nowrap">
-                      {l.replyTouchId ? (
-                        <Link
-                          href={`/cre-os/prospector/inbox?touch=${l.replyTouchId}`}
-                          title="Read what they said + send the AI-drafted response"
-                          className="font-mono text-[10px] uppercase tracking-eyebrow text-coral-300 hover:text-coral-200"
-                        >
-                          View reply →
-                        </Link>
+                      {l.repliedAt ? (
+                        l.leadId ? (
+                          // Reply surfaced in main inbox — open ContactDrawer
+                          <button
+                            type="button"
+                            onClick={() => openLead(l.leadId!, { onChange: () => router.refresh() })}
+                            title="Open in inbox — read reply + send AI-drafted response"
+                            className="font-mono text-[10px] uppercase tracking-eyebrow text-coral-300 hover:text-coral-200"
+                          >
+                            View reply →
+                          </button>
+                        ) : l.replyTouchId ? (
+                          // Pure CREXi contact with no lead — fall back to Prospector
+                          <Link
+                            href={`/cre-os/prospector/inbox?touch=${l.replyTouchId}`}
+                            title="Read what they said + send the AI-drafted response"
+                            className="font-mono text-[10px] uppercase tracking-eyebrow text-coral-300 hover:text-coral-200"
+                          >
+                            View reply →
+                          </Link>
+                        ) : null
                       ) : (
                         <button
                           disabled={!l.email}
@@ -852,13 +865,25 @@ function LeadCardMobile({
           )}
 
           <div className="mt-2 pt-2 border-t border-white/[0.04]">
-            {l.replyTouchId ? (
-              <Link
-                href={`/cre-os/prospector/inbox?touch=${l.replyTouchId}`}
-                className="block text-center w-full px-3 py-2 rounded border border-coral-400/40 bg-coral-400/[0.12] hover:bg-coral-400/[0.20] font-mono text-[10.5px] uppercase tracking-eyebrow text-coral-300"
-              >
-                View reply & respond →
-              </Link>
+            {l.repliedAt ? (
+              l.leadId ? (
+                // Reply surfaced in main inbox — open ContactDrawer
+                <button
+                  type="button"
+                  onClick={() => openLead(l.leadId!, { onChange: () => router.refresh() })}
+                  className="block text-center w-full px-3 py-2 rounded border border-coral-400/40 bg-coral-400/[0.12] hover:bg-coral-400/[0.20] font-mono text-[10.5px] uppercase tracking-eyebrow text-coral-300"
+                >
+                  View reply & respond →
+                </button>
+              ) : l.replyTouchId ? (
+                // Pure CREXi contact — fall back to Prospector
+                <Link
+                  href={`/cre-os/prospector/inbox?touch=${l.replyTouchId}`}
+                  className="block text-center w-full px-3 py-2 rounded border border-coral-400/40 bg-coral-400/[0.12] hover:bg-coral-400/[0.20] font-mono text-[10.5px] uppercase tracking-eyebrow text-coral-300"
+                >
+                  View reply & respond →
+                </Link>
+              ) : null
             ) : (
               <button
                 disabled={!l.email}

@@ -67,8 +67,10 @@ export interface PropertyLead {
    *  Pulled from lane_touches.status='responded' rows matched by contact_id. */
   repliedAt: string | null;
   /** The lane_touches.id of the most-recent reply. Used to deep-link from
-   *  the Leads tab to the Prospector Inbox detail panel where the broker
-   *  can read the reply + send the AI-drafted response. */
+   *  the Leads tab to the Prospector Inbox as a fallback for pure-CREXi
+   *  contacts that have no leadId. When leadId is set, the Leads tab uses
+   *  openLead() (ContactDrawer) instead — replyTouchId may be null in that
+   *  case. */
   replyTouchId: string | null;
   /** AI-classified intent of the latest reply, for at-a-glance triage on the
    *  Leads tab. One of: interested / question / declined / hostile / unsubscribe / out_of_office / unclear. */
@@ -133,7 +135,7 @@ function normalizeInterest(s: string | null | undefined): LeadInterestLevel {
 export async function loadPropertyLeads(propertyId: string): Promise<PropertyLeadsSnapshot> {
   const sb = createServerSupabase();
 
-  const [crexiRes, leadsRes, ndaRes, vaultRes, latestReportRes, outboundRes, inboundRepliesRes, sentTouchesRes, crossPropCommsRes, crossPropLaneRes] = await Promise.all([
+  const [crexiRes, leadsRes, ndaRes, vaultRes, latestReportRes, outboundRes, inboundRepliesRes, inboundCommsRes, sentTouchesRes, crossPropCommsRes, crossPropLaneRes] = await Promise.all([
     sb.from("crexi_leads_state")
       .select("id, name, email, phone, company, role, level_of_interest, number_of_visits, last_activity_date, first_seen_at, raw_panel, contact_id")
       .eq("organization_id", ORG_ID)
@@ -180,6 +182,18 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       .eq("property_id", propertyId)
       .eq("status", "responded")
       .order("responded_at", { ascending: false }),
+
+    // Inbound replies via the communications table — catches replies that
+    // went through the email-fallback path (routeAsReplyByEmail) which does
+    // NOT write a lane_touches row. This supplements inboundRepliesRes so the
+    // "Replied" bucket and repliedAt are correct even when Gmail thread-id changed.
+    sb.from("communications")
+      .select("id, lead_id, contact_id, from_address, occurred_at, raw_payload")
+      .eq("organization_id", ORG_ID)
+      .eq("property_id", propertyId)
+      .eq("direction", "inbound")
+      .eq("channel", "email")
+      .order("occurred_at", { ascending: false }),
 
     // Outbound sends via /api/lane-touches/send (the Compose dialog path).
     // These write to lane_touches but historically NOT to communications,
@@ -287,14 +301,25 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
   // ── Build the contact_id → reply AND email → reply maps ──
   // Carries touch_id + intent + summary so the Leads tab can render
   // at-a-glance triage info and deep-link to the inbox detail.
+  //
+  // Sources:
+  //   1. inboundRepliesRes — lane_touches.status='responded' (cadence/compose path)
+  //   2. inboundCommsRes   — communications.direction='inbound' (email-fallback +
+  //      direct-inquiry reply path, which writes comms but may not write lane_touches)
+  // Taking the max across both so neither source is missed.
   type ReplyInfo = {
-    touchId: string;
+    /** lane_touches.id for the Prospector deep-link fallback.
+     *  NULL for replies that came through the communications path — those
+     *  surface via the ContactDrawer (openLead) instead of Prospector. */
+    touchId: string | null;
     repliedAt: string;
     intent: string | null;
     summary: string | null;
   };
   const repliedByContactId = new Map<string, ReplyInfo>();
   const repliedByEmail = new Map<string, ReplyInfo>();
+
+  // Source 1: lane_touches.status='responded'
   for (const r of (inboundRepliesRes.data ?? []) as Array<{
     id: string;
     contact_id: string | null;
@@ -304,7 +329,7 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
     if (!r.responded_at) continue;
     const classification = (r.metadata?.classification as { intent?: string; summary?: string } | null | undefined) ?? null;
     const info: ReplyInfo = {
-      touchId: r.id,
+      touchId: r.id,   // valid lane_touches.id — safe for Prospector deep-link
       repliedAt: r.responded_at,
       intent: classification?.intent ?? null,
       summary: classification?.summary ?? null,
@@ -317,6 +342,36 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
     if (fromEmail) {
       const prev = repliedByEmail.get(fromEmail);
       if (!prev || r.responded_at > prev.repliedAt) repliedByEmail.set(fromEmail, info);
+    }
+  }
+
+  // Source 2: communications.direction='inbound' — fills the gap for
+  // email-fallback replies and direct-inquiry replies that write to
+  // communications but not to lane_touches.
+  for (const c of (inboundCommsRes.data ?? []) as Array<{
+    id: string;
+    lead_id: string | null;
+    contact_id: string | null;
+    from_address: string | null;
+    occurred_at: string;
+    raw_payload: Record<string, unknown> | null;
+  }>) {
+    const classification = (c.raw_payload?.classification as { intent?: string; summary?: string } | null | undefined) ?? null;
+    const info: ReplyInfo = {
+      touchId: null,  // comms row, not a lane_touches row — replyTouchId stays null;
+                      // the ContactDrawer path (via leadId) handles the UI action
+      repliedAt: c.occurred_at,
+      intent: classification?.intent ?? null,
+      summary: classification?.summary ?? null,
+    };
+    if (c.contact_id) {
+      const prev = repliedByContactId.get(c.contact_id);
+      if (!prev || c.occurred_at > prev.repliedAt) repliedByContactId.set(c.contact_id, info);
+    }
+    const fromEmail = (c.from_address ?? "").toLowerCase().trim();
+    if (fromEmail) {
+      const prev = repliedByEmail.get(fromEmail);
+      if (!prev || c.occurred_at > prev.repliedAt) repliedByEmail.set(fromEmail, info);
     }
   }
 
