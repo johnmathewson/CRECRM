@@ -150,7 +150,7 @@ export function ProspectorInboxView({
           <RailStat label="Sent today" value={snapshot.totals.sentToday.toString()} />
           <RailStat label="Sent this week" value={snapshot.totals.sent7d.toString()} />
           <RailStat label="Awaiting reply" value={snapshot.totals.awaitingReply.toString()} />
-          <RailStat label="Replies" value={snapshot.totals.repliesUnread.toString()} tone="coral" />
+          <RailStat label="Replied (in inbox)" value={snapshot.totals.repliesUnread.toString()} tone="coral" />
           <RailStat label="Drafts queued" value={snapshot.totals.drafted.toString()} />
         </div>
       ),
@@ -174,6 +174,12 @@ export function ProspectorInboxView({
       children: (
         <div className="space-y-1.5">
           <Link
+            href="/cre-os/inbox"
+            className="block px-3 py-2 rounded border border-coral-400/30 bg-coral-400/[0.06] hover:bg-coral-400/[0.12] font-body text-[11px] text-coral-300 hover:text-coral-200"
+          >
+            View inbox (replies) →
+          </Link>
+          <Link
             href="/cre-os/prospector"
             className="block px-3 py-2 rounded border border-white/[0.08] bg-white/[0.02] hover:bg-white/[0.06] font-body text-[11px] text-cream-dim hover:text-cream"
           >
@@ -195,14 +201,14 @@ export function ProspectorInboxView({
       <div className="space-y-5">
         <header className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <Eyebrow tone="coral">Prospector · Inbox</Eyebrow>
+            <Eyebrow tone="coral">Prospector · Cadence Manager</Eyebrow>
             <Link href="/cre-os/prospector" className="mt-1 inline-block font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle hover:text-cream">
               ← Back to Prospector
             </Link>
-            <h1 className="mt-1 font-display font-medium text-2xl text-cream">Agent's outbound + replies</h1>
+            <h1 className="mt-1 font-display font-medium text-2xl text-cream">Cadence Manager</h1>
             <p className="mt-2 font-heading text-[13px] text-cream-dim leading-relaxed max-w-3xl">
-              Every cadence touch the agent has sent — and every reply that's come back. Replies still
-              land on the property timeline; this view lets you see the stream live before drilling in.
+              Every outbound touch the agent has sent — what's queued, what's been delivered, what's waiting on a reply.
+              When a contact writes back, it surfaces in your <Link href="/cre-os/inbox" className="text-coral-300 hover:text-coral-200 underline underline-offset-2">main inbox</Link> as a re-opened lead.
             </p>
           </div>
           <button
@@ -216,7 +222,8 @@ export function ProspectorInboxView({
           </button>
         </header>
 
-        {/* Filter chips */}
+        {/* Filter chips — outbound cadence states only.
+            Replies are handled in the main inbox, not here. */}
         <div className="flex flex-wrap items-center gap-2">
           <FilterChip
             label="All"
@@ -236,18 +243,20 @@ export function ProspectorInboxView({
             onClick={() => applyFilter({ status: "drafted" })}
           />
           <FilterChip
-            label="Replies"
-            count={snapshot.totals.repliesUnread}
-            active={activeFilters.status === "replied"}
-            tone="coral"
-            onClick={() => applyFilter({ status: "replied" })}
-          />
-          <FilterChip
             label="Failed"
             active={activeFilters.status === "failed"}
             tone="amber"
             onClick={() => applyFilter({ status: "failed" })}
           />
+          {/* Replies go to the main inbox — surface the count as a link, not a filter */}
+          {snapshot.totals.repliesUnread > 0 && (
+            <Link
+              href="/cre-os/inbox"
+              className="px-2.5 py-1.5 rounded border border-coral-400/40 bg-coral-400/[0.08] font-mono text-[10.5px] uppercase tracking-eyebrow text-coral-300 hover:bg-coral-400/[0.16]"
+            >
+              {snapshot.totals.repliesUnread} {snapshot.totals.repliesUnread === 1 ? "reply" : "replies"} → open inbox
+            </Link>
+          )}
 
           <div className="h-5 w-px bg-white/[0.10] mx-1" />
 
@@ -345,14 +354,27 @@ function TouchRow({
             <div className="font-heading text-[13px] text-cream font-semibold truncate">
               {touch.subject ?? "(no subject)"}
             </div>
-            <div className="shrink-0 font-mono text-[10px] text-cream-subtle">
-              {fmtRelative(stamp)}
+            <div className="shrink-0 flex items-center gap-3">
+              {/* Replied touches are handled in the main inbox — surface a direct link */}
+              {isReply && (
+                <Link
+                  href="/cre-os/inbox"
+                  onClick={(e) => e.stopPropagation()}
+                  className="font-mono text-[10px] uppercase tracking-eyebrow text-coral-300 hover:text-coral-200"
+                  title="Reply surfaced in your main inbox — open to read and respond"
+                >
+                  View in inbox →
+                </Link>
+              )}
+              <span className="font-mono text-[10px] text-cream-subtle">
+                {fmtRelative(stamp)}
+              </span>
             </div>
           </div>
           <div className="font-body text-[11.5px] text-cream-dim truncate mb-1.5">
             {touch.bodyPreview ?? <span className="italic text-cream-subtle">No body</span>}
           </div>
-          {/* AI-read summary on inbound replies — surfaces intent at a glance */}
+          {/* AI-read summary on inbound replies — at-a-glance triage */}
           {isReply && touch.classification && touch.classification.intent !== "unclear" && (
             <div className="mb-1.5 flex items-start gap-2">
               <span className={`shrink-0 font-mono text-[9px] uppercase tracking-eyebrow border px-1.5 py-0.5 rounded ${INTENT_TONE[touch.classification.intent]}`}>
@@ -397,14 +419,7 @@ function TouchDetailPanel({ touch, onClose }: { touch: InboxTouch; onClose: () =
   const [fullBody, setFullBody] = useState<string | null>(touch.bodyFull ?? null);
   const [loading, setLoading] = useState(false);
 
-  // Suggested-reply editor state (only relevant for inbound replies w/ a draft)
   const isReply = touch.direction === "inbound";
-  const draft = touch.classification?.suggestedReply ?? "";
-  const [replyBody, setReplyBody] = useState<string>(draft);
-  const [sending, setSending] = useState(false);
-  const [sendResult, setSendResult] = useState<
-    { ok: true; sentAt: string } | { ok: false; error: string } | null
-  >(null);
 
   useEffect(() => {
     if (touch.bodyFull) return;
@@ -416,35 +431,6 @@ function TouchDetailPanel({ touch, onClose }: { touch: InboxTouch; onClose: () =
       })
       .finally(() => setLoading(false));
   }, [touch.id, touch.bodyFull]);
-
-  // Reset reply editor whenever a different touch is selected
-  useEffect(() => {
-    setReplyBody(touch.classification?.suggestedReply ?? "");
-    setSendResult(null);
-  }, [touch.id, touch.classification?.suggestedReply]);
-
-  async function handleSendReply() {
-    if (!replyBody.trim() || sending) return;
-    setSending(true);
-    setSendResult(null);
-    try {
-      const r = await fetch(`/api/lane-touches/${touch.id}/send-reply`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: replyBody }),
-      });
-      const data = await r.json();
-      if (!r.ok) {
-        setSendResult({ ok: false, error: data?.error ?? `HTTP ${r.status}` });
-      } else {
-        setSendResult({ ok: true, sentAt: data.sent_at });
-      }
-    } catch (err) {
-      setSendResult({ ok: false, error: err instanceof Error ? err.message : String(err) });
-    } finally {
-      setSending(false);
-    }
-  }
 
   return (
     <div data-touch-detail-panel="true">
@@ -510,60 +496,28 @@ function TouchDetailPanel({ touch, onClose }: { touch: InboxTouch; onClose: () =
           )}
         </div>
 
-        {/* Reply editor — always show on inbound replies, even if the AI
-            didn't pre-fill a draft. Broker can either edit the AI's
-            suggestion or write their own from scratch. */}
+        {/* Reply redirect — replies are handled in the main inbox, not here.
+            Show the AI classification summary + a direct link to the inbox. */}
         {isReply && (
-          <div className="rounded border border-teal-400/40 bg-teal-400/[0.04] p-4">
-            <div className="flex items-center justify-between gap-2 mb-2">
-              <div className="font-mono text-[10px] uppercase tracking-eyebrow text-teal-300 font-semibold">
-                {draft ? "Your reply · edit the AI draft and send" : "Your reply · write below and send"}
-              </div>
-              {draft && replyBody.trim() !== draft.trim() && (
-                <div className="font-mono text-[9px] uppercase tracking-eyebrow text-amber">edited</div>
-              )}
+          <div className="rounded border border-coral-400/30 bg-coral-400/[0.04] p-4">
+            <div className="font-mono text-[10px] uppercase tracking-eyebrow text-coral-300 font-semibold mb-2">
+              Reply received — handle in your inbox
             </div>
-            <textarea
-              value={replyBody}
-              onChange={(e) => setReplyBody(e.target.value)}
-              rows={Math.min(14, Math.max(8, replyBody.split("\n").length + 2))}
-              className="w-full px-3 py-2.5 rounded bg-steward-surface/80 border border-teal-400/30 focus:border-teal-400/60 focus:outline-none focus:ring-1 focus:ring-teal-400/40 font-body text-base lg:text-[13px] text-cream placeholder:text-cream-subtle leading-relaxed resize-y cursor-text"
-              placeholder={draft ? "" : "Type your response here…"}
-              readOnly={sending || sendResult?.ok === true}
-              autoFocus
-            />
-            <div className="mt-2 flex items-center justify-between gap-3 flex-wrap">
-              <div className="font-mono text-[9.5px] uppercase tracking-eyebrow text-cream-subtle">
-                → {touch.contactName ?? touch.contactEmail ?? "owner"}
-                {touch.contactEmail && touch.contactName && (
-                  <span className="text-cream-subtle/60"> · {touch.contactEmail}</span>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                {replyBody.trim() !== draft.trim() && !sending && sendResult?.ok !== true && (
-                  <button
-                    onClick={() => setReplyBody(draft)}
-                    className="px-3 py-1.5 rounded border border-white/[0.08] hover:bg-white/[0.04] font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle hover:text-cream"
-                  >
-                    Reset to AI draft
-                  </button>
-                )}
-                <button
-                  onClick={handleSendReply}
-                  disabled={!replyBody.trim() || sending || sendResult?.ok === true}
-                  className="px-4 py-1.5 rounded border border-teal-400/50 bg-teal-400/[0.10] hover:bg-teal-400/[0.18] disabled:opacity-40 disabled:cursor-not-allowed font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-teal-300"
-                >
-                  {sending ? "Sending…" : sendResult?.ok ? "Sent ✓" : "Send reply"}
-                </button>
-              </div>
-            </div>
-            {sendResult && (
-              <div className={`mt-2 font-body text-[11.5px] ${sendResult.ok ? "text-teal-300" : "text-coral-300"}`}>
-                {sendResult.ok
-                  ? `Sent at ${new Date(sendResult.sentAt).toLocaleTimeString()} — threaded under the original reply in Gmail.`
-                  : `Send failed: ${sendResult.error}`}
-              </div>
+            {touch.classification?.summary && (
+              <p className="font-body text-[12.5px] text-cream-dim leading-relaxed mb-3 italic">
+                AI read: {touch.classification.summary}
+              </p>
             )}
+            <p className="font-body text-[12px] text-cream-subtle leading-relaxed mb-4">
+              This reply has surfaced in your main inbox as a re-opened lead. Read the full message
+              and send your response from there — it keeps the thread, AI draft, and contact history all together.
+            </p>
+            <Link
+              href="/cre-os/inbox"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded border border-coral-400/40 bg-coral-400/[0.12] hover:bg-coral-400/[0.20] font-mono text-[10.5px] uppercase tracking-eyebrow text-coral-300"
+            >
+              Open inbox →
+            </Link>
           </div>
         )}
       </div>

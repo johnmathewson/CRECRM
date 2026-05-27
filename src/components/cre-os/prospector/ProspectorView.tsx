@@ -61,7 +61,7 @@ export function ProspectorView({ snapshot }: { snapshot: ProspectorSnapshot }) {
             href="/cre-os/prospector/inbox"
             className="block px-3 py-2 rounded border border-coral-400/30 bg-coral-400/[0.05] hover:bg-coral-400/[0.10] font-body text-[11px] text-cream font-medium transition-colors"
           >
-            Inbox · Agent stream →
+            Cadence Manager →
           </Link>
           <Link
             href="/cre-os/prospector/personas"

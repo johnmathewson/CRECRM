@@ -6,9 +6,9 @@ import {
 import { loadLaneList } from "@/lib/cre-os/prospector-queries";
 
 /**
- * Prospector Inbox — every outbound touch + every reply in one stream.
- * Distinct from /cre-os/inbox (which is unsolicited inbound leads from
- * the marketing site).
+ * Cadence Manager — outbound touch queue, enrollment status, drafted steps.
+ * Replies surface in /cre-os/inbox (main inbox) as re-opened leads.
+ * This page is for managing cadence sends only, not for reading replies.
  */
 export const dynamic = "force-dynamic";
 
