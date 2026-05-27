@@ -20,6 +20,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { classifyReply, type ReplyClassification } from "./classify-reply";
+import { linkOrphanedComms } from "./send-crm-email";
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 
@@ -279,56 +280,120 @@ export async function maybeRouteAsReply(
     }
   }
 
+  // ── 5b. Resolve (or create) a lead for cadence/lane_touches-source replies ─
+  // When the matched parent is a lane_touch, parent.leadId is null. Look up
+  // the existing lead for this contact+property, or create a minimal one, so
+  // step 6 can re-surface it in the main inbox exactly the same way that
+  // communications-source replies are already handled.
+  let resolvedLeadId = parent.leadId;
+  if (parent.sourceTable === "lane_touches" && !resolvedLeadId) {
+    const lookupContactId = resolvedContactId;
+    if (lookupContactId && parent.propertyId) {
+      const { data: existingLead } = await supabase
+        .from("leads")
+        .select("id")
+        .eq("organization_id", ORG_ID)
+        .eq("contact_id", lookupContactId)
+        .eq("property_id", parent.propertyId)
+        .neq("status", "archived")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (existingLead) {
+        resolvedLeadId = (existingLead as { id: string }).id;
+      } else if (msg.fromEmail) {
+        // No lead yet — create a minimal one so the reply surfaces in the
+        // broker's main inbox. linkOrphanedComms will retroactively link any
+        // prior cadence outbound comms that were written with lead_id = null.
+        const { data: newLead } = await supabase
+          .from("leads")
+          .insert({
+            organization_id: ORG_ID,
+            contact_id: lookupContactId,
+            property_id: parent.propertyId,
+            source: "cadence_reply",
+            status: "new",
+            urgency: "warm",
+            sender_email: msg.fromEmail,
+            sender_name: msg.fromName ?? msg.fromEmail,
+            raw_subject: msg.subject,
+            raw_body: msg.bodyText.slice(0, 5000),
+            qualifier_summary: classification.summary || undefined,
+          })
+          .select("id")
+          .single();
+        if (newLead) {
+          resolvedLeadId = (newLead as { id: string }).id;
+          // Pull in any prior orphaned outbound comms (cadence sends that were
+          // written with lead_id = null before this lead existed).
+          await linkOrphanedComms(supabase, resolvedLeadId, msg.fromEmail, parent.propertyId);
+        }
+      }
+    }
+  }
+
   // ── 6. Re-surface the lead in the worklist + write to the drawer thread ──
-  // Only applies when this reply was triggered by a manual send from
-  // leads/[id]/send (sourceTable === "communications" && leadId is set).
-  // Cadence lane_touches replies don't have a direct leads row to update.
-  if (parent.leadId) {
+  // Now runs for BOTH communications-source and lane_touches-source replies.
+  // This is the fix that makes cadence replies visible in the main inbox and
+  // ContactDrawer — previously only communications-source replies triggered this.
+  if (resolvedLeadId) {
     // Write the inbound reply to communications so it appears in the
-    // ContactDrawer thread alongside John's outbound reply.
-    await supabase.from("communications").insert({
-      organization_id: ORG_ID,
-      lead_id: parent.leadId,
-      contact_id: resolvedContactId,
-      property_id: parent.propertyId ?? null,
-      channel: "email",
-      direction: "inbound",
-      external_id: msg.gmailMessageId,
-      subject: msg.subject,
-      body_preview: msg.bodyText.slice(0, 500),
-      from_address: msg.fromEmail,
-      occurred_at: msg.receivedAt,
-      raw_payload: {
-        gmail_message_id: msg.gmailMessageId,
-        gmail_thread_id: msg.gmailThreadId,
-        from_name: msg.fromName,
-        classification,
-      },
-    });
+    // ContactDrawer thread alongside John's outbound messages.
+    // Guard with external_id dedup so a retry doesn't double-insert.
+    const { data: alreadyLogged } = await supabase
+      .from("communications")
+      .select("id")
+      .eq("organization_id", ORG_ID)
+      .eq("external_id", msg.gmailMessageId)
+      .maybeSingle();
+
+    if (!alreadyLogged) {
+      await supabase.from("communications").insert({
+        organization_id: ORG_ID,
+        lead_id: resolvedLeadId,
+        contact_id: resolvedContactId,
+        property_id: parent.propertyId ?? null,
+        channel: "email",
+        direction: "inbound",
+        external_id: msg.gmailMessageId,
+        subject: msg.subject,
+        body_preview: msg.bodyText.slice(0, 500),
+        from_address: msg.fromEmail,
+        occurred_at: msg.receivedAt,
+        raw_payload: {
+          gmail_message_id: msg.gmailMessageId,
+          gmail_thread_id: msg.gmailThreadId,
+          from_name: msg.fromName,
+          classification,
+          source: parent.sourceTable === "lane_touches" ? "cadence_reply" : "direct_reply",
+        },
+      });
+    }
 
     // Re-open the lead so it surfaces in "Do This Now" and the AI can draft
-    // a response to what they said. Only re-open if it was in 'sent' status
-    // (don't clobber a lead that John already re-opened manually).
-    // Clear final_sent_at too — DoThisNow.priority() checks finalSent, so a
-    // re-opened lead with final_sent_at still set would be invisible in the queue.
+    // a response. Only re-open if it was in 'sent' status or 'new' (just
+    // created above). Don't clobber a lead John already re-opened manually.
+    // Clear final_sent_at — DoThisNow.priority() checks finalSent, so a
+    // re-opened lead with final_sent_at still set would be invisible in queue.
     await supabase
       .from("leads")
       .update({
         status: "new",
-        draft_reply: null, // cleared so draftLeadReply can produce a fresh reply
-        final_sent_at: null, // cleared so the lead shows in the action queue
-        raw_subject: msg.subject, // reply subject — used by draftLeadReply first_touch
-        raw_body: msg.bodyText.slice(0, 5000), // reply body — used for drafting context
+        draft_reply: null,            // cleared so draftLeadReply produces a fresh response
+        final_sent_at: null,          // cleared so the lead shows in the action queue
+        raw_subject: msg.subject,     // reply subject — context for AI drafting
+        raw_body: msg.bodyText.slice(0, 5000), // reply body — context for AI drafting
         qualifier_summary: classification.summary || undefined,
         updated_at: msg.receivedAt,
       })
-      .eq("id", parent.leadId)
-      .in("status", ["sent"]);
+      .eq("id", resolvedLeadId)
+      .in("status", ["sent", "new"]);
 
     // Lead-level event visible in the drawer activity tab
     await supabase.from("lead_events").insert({
       organization_id: ORG_ID,
-      lead_id: parent.leadId,
+      lead_id: resolvedLeadId,
       event_type: "replied",
       actor: "system",
       summary: `${msg.fromName || msg.fromEmail || "Contact"} replied — ${classification.summary}`,
@@ -337,6 +402,7 @@ export async function maybeRouteAsReply(
         gmail_thread_id: msg.gmailThreadId,
         intent: classification.intent,
         confidence: classification.confidence,
+        source: parent.sourceTable,
       },
     });
   }
@@ -358,4 +424,162 @@ export async function maybeRouteAsReply(
   });
 
   return { matched: true, touchId: replyRow.id, classification };
+}
+
+/**
+ * Email-based fallback for cadence replies where the Gmail thread-id changed
+ * (forwarded, contact replied from a different client, etc.).
+ *
+ * Called by poll-gmail when the AI classifies an inbound email as
+ * "cadence_reply" but maybeRouteAsReply() returned matched=false.
+ *
+ * Strategy: find the most recent outbound communications row sent to
+ * msg.fromEmail in the last 60 days. If found, run the same classification +
+ * inbound communications insert + lead re-surface as a normal reply match —
+ * but skip the lane_touches/enrollment side (there's no enrollment to update
+ * since we lost the thread link).
+ */
+export async function routeAsReplyByEmail(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: SupabaseClient<any, any, any>,
+  msg: InboundMessage
+): Promise<{ matched: boolean }> {
+  if (!msg.fromEmail) return { matched: false };
+
+  const emailLower = msg.fromEmail.toLowerCase().trim();
+  const cutoffDate = new Date(Date.now() - 60 * 24 * 3600_000).toISOString();
+
+  // Find most recent outbound we sent to this address
+  const { data: outboundRow } = await supabase
+    .from("communications")
+    .select("id, lead_id, property_id, contact_id, subject, body_preview")
+    .eq("organization_id", ORG_ID)
+    .eq("direction", "outbound")
+    .eq("channel", "email")
+    .gte("occurred_at", cutoffDate)
+    .filter("to_addresses::text", "ilike", `%${emailLower}%`)
+    .order("occurred_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!outboundRow) return { matched: false };
+
+  const row = outboundRow as {
+    id: string;
+    lead_id: string | null;
+    property_id: string | null;
+    contact_id: string | null;
+    subject: string | null;
+    body_preview: string | null;
+  };
+
+  // Dedup: don't double-insert if this Gmail message was already logged
+  const { data: alreadyLogged } = await supabase
+    .from("communications")
+    .select("id")
+    .eq("organization_id", ORG_ID)
+    .eq("external_id", msg.gmailMessageId)
+    .maybeSingle();
+  if (alreadyLogged) return { matched: true }; // already handled
+
+  // Classify the reply
+  let classification: ReplyClassification;
+  try {
+    const { data: prop } = row.property_id
+      ? await supabase
+          .from("properties")
+          .select("name, address, asset_type")
+          .eq("organization_id", ORG_ID)
+          .eq("id", row.property_id)
+          .maybeSingle()
+      : { data: null };
+    classification = await classifyReply({
+      inboundBody: msg.bodyText,
+      inboundSubject: msg.subject,
+      parentSubject: row.subject,
+      parentBody: row.body_preview,
+      property: prop ? { name: prop.name, address: prop.address, assetType: prop.asset_type } : undefined,
+      recipient: { name: msg.fromName },
+    });
+  } catch {
+    classification = { intent: "unclear", confidence: 0, summary: "(Classifier error)", suggestedReply: "", classifiedAt: new Date().toISOString(), model: "n/a" };
+  }
+
+  // Resolve contact_id
+  let resolvedContactId = row.contact_id;
+  if (!resolvedContactId) {
+    const { data: ct } = await supabase
+      .from("contacts")
+      .select("id")
+      .eq("organization_id", ORG_ID)
+      .ilike("email", msg.fromEmail.trim())
+      .maybeSingle();
+    if (ct) resolvedContactId = (ct as { id: string }).id;
+  }
+
+  // Re-open / create lead
+  let resolvedLeadId = row.lead_id;
+  if (!resolvedLeadId && resolvedContactId && row.property_id) {
+    const { data: existingLead } = await supabase
+      .from("leads")
+      .select("id")
+      .eq("organization_id", ORG_ID)
+      .eq("contact_id", resolvedContactId)
+      .eq("property_id", row.property_id)
+      .neq("status", "archived")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    resolvedLeadId = (existingLead as { id: string } | null)?.id ?? null;
+  }
+
+  // Write inbound communications row
+  await supabase.from("communications").insert({
+    organization_id: ORG_ID,
+    lead_id: resolvedLeadId,
+    contact_id: resolvedContactId,
+    property_id: row.property_id,
+    channel: "email",
+    direction: "inbound",
+    external_id: msg.gmailMessageId,
+    subject: msg.subject,
+    body_preview: msg.bodyText.slice(0, 500),
+    from_address: msg.fromEmail,
+    occurred_at: msg.receivedAt,
+    raw_payload: {
+      gmail_message_id: msg.gmailMessageId,
+      gmail_thread_id: msg.gmailThreadId,
+      from_name: msg.fromName,
+      classification,
+      source: "cadence_reply_email_fallback",
+    },
+  });
+
+  // Re-open the lead if we found one
+  if (resolvedLeadId) {
+    await supabase
+      .from("leads")
+      .update({
+        status: "new",
+        draft_reply: null,
+        final_sent_at: null,
+        raw_subject: msg.subject,
+        raw_body: msg.bodyText.slice(0, 5000),
+        qualifier_summary: classification.summary || undefined,
+        updated_at: msg.receivedAt,
+      })
+      .eq("id", resolvedLeadId)
+      .in("status", ["sent", "new"]);
+
+    await supabase.from("lead_events").insert({
+      organization_id: ORG_ID,
+      lead_id: resolvedLeadId,
+      event_type: "replied",
+      actor: "system",
+      summary: `${msg.fromName || msg.fromEmail} replied (thread changed) — ${classification.summary}`,
+      metadata: { gmail_message_id: msg.gmailMessageId, intent: classification.intent, source: "email_fallback" },
+    });
+  }
+
+  return { matched: true };
 }

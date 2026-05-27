@@ -28,7 +28,7 @@ import {
   extractBody,
   parseAddress,
 } from "@/lib/gmail";
-import { maybeRouteAsReply } from "@/lib/cre-os/match-reply-to-touch";
+import { maybeRouteAsReply, routeAsReplyByEmail } from "@/lib/cre-os/match-reply-to-touch";
 import {
   classifyInboundEmail,
   collectAttachmentFilenames,
@@ -315,12 +315,25 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
             console.log(`[poll-gmail] ${msg.id} flagged as data_feed — no parser yet, routing to lead intake`);
           }
 
-          // cadence_reply but the thread-id match didn't catch it — could be
-          // a reply on a new thread. Try to find the originating outbound by
-          // sender email and link if possible. Fall through to lead intake
-          // for now (auto-ack still goes out — broker can manually link).
-          if (classification.intent === "cadence_reply") {
-            console.log(`[poll-gmail] ${msg.id} classified as cadence_reply but no thread match — falling through to lead intake`);
+          // cadence_reply but thread-id matching failed (new thread, forwarded,
+          // contact replied from different client). Try email-based fallback:
+          // find the most recent outbound we sent to this address and route as reply.
+          if (classification.intent === "cadence_reply" && fromEmail) {
+            const emailFallback = await routeAsReplyByEmail(supabase, {
+              gmailMessageId: msg.id,
+              gmailThreadId: msg.threadId,
+              fromEmail,
+              fromName,
+              subject,
+              bodyText: text || "",
+              receivedAt: new Date().toISOString(),
+            });
+            if (emailFallback.matched) {
+              console.log(`[poll-gmail] ${msg.id} cadence_reply matched via email fallback (fromEmail=${fromEmail})`);
+              dispatched += 1;
+              continue;
+            }
+            console.log(`[poll-gmail] ${msg.id} cadence_reply: no email match either — falling through to lead intake`);
           }
 
           const intakePayload = {

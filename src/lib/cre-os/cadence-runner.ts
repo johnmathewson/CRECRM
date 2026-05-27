@@ -384,8 +384,9 @@ export async function runCadence(options: CadenceRunOptions = {}): Promise<Caden
     }
 
     // Write the lane_touches row
+    let newTouchId: string | null = null;
     if (!options.dryRun) {
-      const { error: touchErr } = await supabase.from("lane_touches").insert({
+      const { data: touchData, error: touchErr } = await supabase.from("lane_touches").insert({
         organization_id: ORG_ID,
         enrollment_id: enr.id,
         lane_id: lane.id,
@@ -409,9 +410,71 @@ export async function runCadence(options: CadenceRunOptions = {}): Promise<Caden
           template: step.template ?? null,
           approval_mode: mode,
         },
-      });
+      }).select("id").single();
       if (touchErr) {
         result.errors.push(`Enrollment ${enr.id}: touch insert failed: ${touchErr.message}`);
+      } else {
+        newTouchId = (touchData as { id: string } | null)?.id ?? null;
+      }
+
+      // Mirror every sent email step to communications so the message is
+      // visible in the ContactDrawer thread and the main Leads inbox.
+      // This is the "communications as universal message log" principle:
+      // lane_touches tracks cadence state; communications tracks every message.
+      if (touchStatus === "sent" && step.channel === "email" && gmailMessageId && gmailThreadId && contact?.email) {
+        // Resolve the lead for this contact+property (nullable — orphan is
+        // healed later by linkOrphanedComms when a lead is created).
+        const { data: leadRow } = await supabase
+          .from("leads")
+          .select("id")
+          .eq("organization_id", ORG_ID)
+          .eq("contact_id", contact.id)
+          .eq("property_id", property.id)
+          .neq("status", "archived")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const leadId = (leadRow as { id: string } | null)?.id ?? null;
+
+        // Dedup: skip if this Gmail message was already logged (e.g. by poll-gmail)
+        const { data: alreadyLogged } = await supabase
+          .from("communications")
+          .select("id")
+          .eq("organization_id", ORG_ID)
+          .eq("external_id", gmailMessageId)
+          .maybeSingle();
+
+        if (!alreadyLogged) {
+          await supabase.from("communications").insert({
+            organization_id: ORG_ID,
+            channel: "email",
+            direction: "outbound",
+            external_id: gmailMessageId,
+            subject,
+            body_preview: body.slice(0, 500),
+            from_address: gmailToken!.email,
+            to_addresses: [contact.email],
+            occurred_at: sentAt ?? nowIso,
+            is_read: true,
+            contact_id: contact.id,
+            lead_id: leadId,                     // null if no lead yet — healed on reply
+            property_id: property.id,
+            raw_payload: {
+              gmail_message_id: gmailMessageId,
+              gmail_thread_id: gmailThreadId,
+              source: "cadence",
+              lane_touch_id: newTouchId,
+              enrollment_id: enr.id,
+              lane_id: lane.id,
+              step_index: enr.current_step,
+            },
+          });
+
+          // If lead_id is null (no lead exists for this contact+property yet),
+          // this row is an orphan. It will be healed automatically when a lead
+          // is created for this contact — linkOrphanedComms fires in both
+          // maybeRouteAsReply (when they reply) and crexi-report (on import).
+        }
       }
     }
 
