@@ -4,6 +4,13 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning.";
+  if (h < 17) return "Good afternoon.";
+  return "Good evening.";
+}
+
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -28,76 +35,58 @@ export default function LoginPage() {
       return;
     }
 
-    // Land directly in CRE OS — root / is just a redirect to here anyway,
-    // and going to /cre-os first avoids a flash of the redirect bounce.
     router.push("/cre-os");
     router.refresh();
   };
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "linear-gradient(160deg, #0A1615 0%, #0D1F1E 30%, #142827 60%, #0B1918 100%)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontFamily: "-apple-system, 'SF Pro Display', 'Inter', system-ui, sans-serif",
-        color: "#F0EDE4",
-        position: "relative",
-        overflow: "hidden",
-      }}
-    >
-      {/* Ambient orbs */}
-      <div style={{ position: "fixed", top: "-15%", right: "-10%", width: "55vw", height: "55vw", borderRadius: "50%", background: "radial-gradient(circle, rgba(224,122,95,0.12) 0%, rgba(224,122,95,0.04) 40%, transparent 70%)", pointerEvents: "none" }} />
-      <div style={{ position: "fixed", bottom: "-20%", left: "-15%", width: "65vw", height: "65vw", borderRadius: "50%", background: "radial-gradient(circle, rgba(78,205,196,0.10) 0%, rgba(78,205,196,0.03) 40%, transparent 70%)", pointerEvents: "none" }} />
+    <div className="min-h-screen flex flex-col items-center justify-center px-4 py-16 select-none">
 
-      <div
-        style={{
-          width: 400,
-          background: "rgba(255,255,255,0.04)",
-          backdropFilter: "blur(24px) saturate(1.4)",
-          WebkitBackdropFilter: "blur(24px) saturate(1.4)",
-          border: "1px solid rgba(255,255,255,0.08)",
-          borderTopColor: "rgba(255,255,255,0.14)",
-          borderRadius: 6,
-          boxShadow: "0 8px 32px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)",
-          padding: "40px 36px",
-          position: "relative",
-          zIndex: 1,
-        }}
-      >
-        {/* Logo */}
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 32 }}>
-          <div
-            style={{
-              width: 48,
-              height: 48,
-              borderRadius: 6,
-              background: "linear-gradient(135deg, #E07A5F, #E07A5FBB)",
-              boxShadow: "0 4px 20px rgba(224,122,95,0.4)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontWeight: 800,
-              fontSize: 22,
-              color: "white",
-              marginBottom: 16,
-            }}
-          >
-            S
-          </div>
-          <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: 2, color: "#F0EDE4" }}>
-            STEWARDSHIP
-          </span>
-          <span style={{ fontSize: 11, color: "rgba(240,237,228,0.4)", marginTop: 4 }}>
-            CRE Intelligence Platform
-          </span>
+      {/* ── Wordmark ─────────────────────────────────────────────── */}
+      <div className="text-center mb-10">
+        {/* Logo mark */}
+        <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl mb-5"
+          style={{
+            background: "linear-gradient(135deg, #E07A5F 0%, #C66648 100%)",
+            boxShadow: "0 6px 28px rgba(224,122,95,0.50), inset 0 1px 0 rgba(255,255,255,0.20)",
+          }}
+        >
+          <span className="font-display font-bold text-[22px] text-white leading-none">S</span>
         </div>
 
-        <form onSubmit={handleLogin}>
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ display: "block", fontSize: 10.5, color: "rgba(240,237,228,0.45)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 500, marginBottom: 6 }}>
+        {/* Brand name */}
+        <div className="font-display font-semibold text-[22px] text-cream tracking-[0.12em] leading-none mb-2">
+          STEWARDSHIP
+        </div>
+
+        {/* Platform subtitle */}
+        <div className="font-mono text-[9px] uppercase tracking-[0.22em] text-cream-subtle">
+          CRE Intelligence Platform
+        </div>
+
+        {/* Divider */}
+        <div className="mt-6 h-px w-40 mx-auto"
+          style={{ background: "linear-gradient(to right, transparent, rgba(255,255,255,0.10), transparent)" }}
+        />
+      </div>
+
+      {/* ── Login card ───────────────────────────────────────────── */}
+      <div className="glass w-full max-w-[380px] px-8 py-8">
+
+        {/* Greeting */}
+        <div className="mb-7">
+          <h2 className="font-heading font-semibold text-[20px] text-cream leading-tight">
+            {greeting()}
+          </h2>
+          <p className="font-body text-[12.5px] text-cream-subtle mt-1.5">
+            Sign in to your workspace.
+          </p>
+        </div>
+
+        <form onSubmit={handleLogin} className="space-y-4">
+          {/* Email */}
+          <div>
+            <label className="block font-mono text-[9px] uppercase tracking-eyebrow text-cream-subtle mb-1.5">
               Email
             </label>
             <input
@@ -106,23 +95,15 @@ export default function LoginPage() {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="john@johnmathewson.co"
               required
-              style={{
-                width: "100%",
-                padding: "10px 14px",
-                background: "rgba(255,255,255,0.03)",
-                border: "1px solid rgba(255,255,255,0.08)",
-                borderRadius: 4,
-                color: "#F0EDE4",
-                fontSize: 13,
-                outline: "none",
-                fontFamily: "inherit",
-                boxSizing: "border-box",
-              }}
+              autoFocus
+              style={{ fontSize: "13px" }}
+              className="w-full px-3 py-2.5 rounded bg-white/[0.03] border border-white/[0.08] text-cream font-body placeholder:text-cream-subtle/30 focus:outline-none focus:border-coral-400/40 focus:ring-1 focus:ring-coral-400/20 transition-colors"
             />
           </div>
 
-          <div style={{ marginBottom: 24 }}>
-            <label style={{ display: "block", fontSize: 10.5, color: "rgba(240,237,228,0.45)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 500, marginBottom: 6 }}>
+          {/* Password */}
+          <div>
+            <label className="block font-mono text-[9px] uppercase tracking-eyebrow text-cream-subtle mb-1.5">
               Password
             </label>
             <input
@@ -131,63 +112,44 @@ export default function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
               required
-              style={{
-                width: "100%",
-                padding: "10px 14px",
-                background: "rgba(255,255,255,0.03)",
-                border: "1px solid rgba(255,255,255,0.08)",
-                borderRadius: 4,
-                color: "#F0EDE4",
-                fontSize: 13,
-                outline: "none",
-                fontFamily: "inherit",
-                boxSizing: "border-box",
-              }}
+              style={{ fontSize: "13px" }}
+              className="w-full px-3 py-2.5 rounded bg-white/[0.03] border border-white/[0.08] text-cream font-body placeholder:text-cream-subtle/30 focus:outline-none focus:border-coral-400/40 focus:ring-1 focus:ring-coral-400/20 transition-colors"
             />
           </div>
 
+          {/* Error */}
           {error && (
-            <div style={{
-              padding: "8px 12px",
-              marginBottom: 16,
-              borderRadius: 4,
-              background: "rgba(231,76,60,0.15)",
-              border: "1px solid rgba(231,76,60,0.2)",
-              color: "#E74C3C",
-              fontSize: 12,
-            }}>
+            <div className="px-3 py-2.5 rounded border border-coral-400/25 bg-coral-400/[0.08] font-body text-[12px] text-coral-300 leading-snug">
               {error}
             </div>
           )}
 
+          {/* Submit */}
           <button
             type="submit"
             disabled={loading}
+            className="w-full mt-1 py-3 rounded-md font-heading font-semibold text-[12px] uppercase tracking-eyebrow text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             style={{
-              width: "100%",
-              padding: "11px 0",
-              borderRadius: 5,
-              border: "none",
-              cursor: loading ? "not-allowed" : "pointer",
-              fontSize: 13,
-              fontWeight: 600,
-              color: "white",
-              fontFamily: "inherit",
               background: loading
-                ? "rgba(224,122,95,0.5)"
-                : "linear-gradient(135deg, #E07A5F, #E07A5FCC)",
-              boxShadow: "0 3px 16px rgba(224,122,95,0.35)",
-              transition: "all 0.2s ease",
+                ? "rgba(224,122,95,0.45)"
+                : "linear-gradient(135deg, #E07A5F 0%, #C66648 100%)",
+              boxShadow: loading
+                ? "none"
+                : "0 4px 24px rgba(224,122,95,0.38), inset 0 1px 0 rgba(255,255,255,0.12)",
             }}
           >
-            {loading ? "Signing in..." : "Sign In"}
+            {loading ? "Signing in…" : "Sign In"}
           </button>
         </form>
+      </div>
 
-        <div style={{ textAlign: "center", marginTop: 20, fontSize: 10, color: "rgba(240,237,228,0.25)" }}>
-          Stewardship Asset Group — eXp Commercial
+      {/* ── Footer ───────────────────────────────────────────────── */}
+      <div className="mt-8 text-center space-y-1">
+        <div className="font-mono text-[8.5px] uppercase tracking-[0.20em] text-cream-subtle/25">
+          Stewardship Asset Group · eXp Commercial
         </div>
       </div>
+
     </div>
   );
 }
