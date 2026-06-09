@@ -142,14 +142,12 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
   const started = Date.now();
 
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const provided = req.headers.get("x-cron-secret");
-    if (provided !== cronSecret) {
-      return NextResponse.json(
-        { ok: false, poll: { error: "unauthorized" }, acks: {}, sentSync: {}, duration_ms: 0 },
-        { status: 401 }
-      );
-    }
+  const provided = req.headers.get("x-cron-secret");
+  if (!cronSecret || provided !== cronSecret) {
+    return NextResponse.json(
+      { ok: false, poll: { error: "unauthorized" }, acks: {}, sentSync: {}, duration_ms: 0 },
+      { status: 401 }
+    );
   }
 
   const supabase = createClient(
