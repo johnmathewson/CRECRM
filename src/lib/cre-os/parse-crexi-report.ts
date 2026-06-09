@@ -129,10 +129,35 @@ export function parseCrexiReport(buffer: Buffer): ParsedCrexiReport {
   }
 
   // ── Parse Detail sheet (the leads) ──────────────────────────────────────
-  const detailSheetName = wb.SheetNames.find((n) => n.toLowerCase() === "detail");
+  // CREXi has used different sheet names across format versions. Try in order:
+  //   "Detail" (original), "Leads", "Lead Details", "Contacts", "Data"
+  // Fallback: any sheet whose first non-empty row contains "First" or "Email"
+  //   in the first few columns (heuristic for a contact-data sheet).
+  const detailSheetName =
+    wb.SheetNames.find((n) => n.toLowerCase() === "detail") ||
+    wb.SheetNames.find((n) => /^leads?$/i.test(n.trim())) ||
+    wb.SheetNames.find((n) => /lead.?detail|contact|data/i.test(n)) ||
+    wb.SheetNames.find((n) => {
+      // Heuristic: scan first 10 rows of this sheet for a "First"/"Email" header
+      const sheet = wb.Sheets[n];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, blankrows: false });
+      for (let i = 0; i < Math.min(rows.length, 10); i++) {
+        const row = (rows[i] ?? []).map((c: unknown) => String(c ?? "").toLowerCase());
+        if (row.includes("first") || row.includes("email") || row.includes("phone")) return true;
+      }
+      return false;
+    });
+
   if (!detailSheetName) {
-    warnings.push("No 'Detail' sheet found — no leads will be extracted");
+    warnings.push(
+      `No detail sheet found — tried "Detail", "Leads", "Contacts", "Data" and heuristic scan. ` +
+      `Sheets present: [${wb.SheetNames.join(", ")}]. No leads extracted.`
+    );
     return result;
+  }
+  if (detailSheetName.toLowerCase() !== "detail") {
+    warnings.push(`Used sheet "${detailSheetName}" as detail sheet (CREXi format change — original was "Detail")`);
   }
 
   const detail = wb.Sheets[detailSheetName];
