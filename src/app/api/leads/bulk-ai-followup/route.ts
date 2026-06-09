@@ -31,7 +31,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getActiveGmailToken } from "@/lib/gmail-auth";
-import { sendCrmEmail } from "@/lib/cre-os/send-crm-email";
+import { sendCrmEmail, findOrCreateLeadForSend } from "@/lib/cre-os/send-crm-email";
 import {
   personalizeTouch,
   archetypeFromContext,
@@ -504,7 +504,20 @@ export async function POST(req: NextRequest) {
     try {
       const fromHeader = `${SEND_DISPLAY_NAME} <${gmailToken!.email}>`;
       const toHeader = lead.name ? `"${lead.name}" <${lead.email}>` : lead.email;
-      const leadInfo = emailToLeadInfo.get(emailLower) ?? null;
+      let leadInfo = emailToLeadInfo.get(emailLower) ?? null;
+
+      // If no existing leads row, create one so this send anchors in the
+      // ContactDrawer thread and is visible across the CRM.
+      if (!leadInfo) {
+        const newLeadId = await findOrCreateLeadForSend(supabase, {
+          recipientEmail: lead.email!,
+          propertyId: prop.id,
+          contactId: null,
+          senderName: lead.name ?? null,
+          source: "bulk_ai",
+        });
+        if (newLeadId) leadInfo = { leadId: newLeadId, contactId: null };
+      }
 
       const { gmailMessageId: sentMsgId, gmailThreadId: sentThreadId, sentAt } =
         await sendCrmEmail(supabase, gmailToken!.accessToken, {
@@ -516,7 +529,6 @@ export async function POST(req: NextRequest) {
           propertyId: prop.id,
           contactId: leadInfo?.contactId ?? null,
           source: "bulk_ai",
-          // Flip the lead to 'sent' only when there's a confirmed leads row
           updateLeadStatus: !!leadInfo?.leadId,
           rawPayloadExtra: {
             ai_rationale: personalized.rationale,

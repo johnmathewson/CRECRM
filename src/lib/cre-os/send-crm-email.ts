@@ -126,6 +126,71 @@ export async function sendCrmEmail(
 }
 
 /**
+ * Before sending to a contact, call this to find or create the leads row so
+ * every outbound communication has a lead_id and shows in the ContactDrawer.
+ *
+ * Returns the lead_id (existing or newly created), or null on failure.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function findOrCreateLeadForSend(
+  supabase: SupabaseClient<any, any, any>,
+  {
+    recipientEmail,
+    propertyId,
+    contactId,
+    senderName,
+    source,
+  }: {
+    recipientEmail: string;
+    propertyId: string;
+    contactId: string | null;
+    senderName: string | null;
+    source: string;
+  }
+): Promise<string | null> {
+  if (!recipientEmail || !propertyId) return null;
+  const emailLower = recipientEmail.toLowerCase().trim();
+
+  // 1. Look for an existing active lead for this email + property
+  const { data: existing } = await supabase
+    .from("leads")
+    .select("id")
+    .eq("organization_id", ORG_ID)
+    .eq("property_id", propertyId)
+    .ilike("sender_email", emailLower)
+    .not("status", "in", '("archived","spam")')
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existing?.id) return existing.id;
+
+  // 2. No existing lead — create a minimal one so the send is anchored and
+  //    visible in the ContactDrawer thread.
+  const { data: created } = await supabase
+    .from("leads")
+    .insert({
+      organization_id: ORG_ID,
+      property_id: propertyId,
+      contact_id: contactId,
+      sender_email: emailLower,
+      sender_name: senderName ?? null,
+      source,
+      status: "sent",
+      urgency: "warm",
+    })
+    .select("id")
+    .single();
+
+  if (created?.id) {
+    // Retroactively link any prior orphaned communications for this contact
+    await linkOrphanedComms(supabase, created.id, emailLower, propertyId);
+  }
+
+  return created?.id ?? null;
+}
+
+/**
  * After inserting a new leads row, call this to retroactively link any
  * orphaned communications rows (lead_id IS NULL) for the same email address.
  *

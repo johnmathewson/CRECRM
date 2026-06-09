@@ -20,7 +20,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getActiveGmailToken } from "@/lib/gmail-auth";
-import { sendCrmEmail } from "@/lib/cre-os/send-crm-email";
+import { sendCrmEmail, findOrCreateLeadForSend } from "@/lib/cre-os/send-crm-email";
 import { captureVoiceExample } from "@/lib/cre-os/voice-examples";
 
 export const dynamic = "force-dynamic";
@@ -84,6 +84,15 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const fromHeader = `${SEND_DISPLAY_NAME} <${token.email}>`;
   const toHeader = toName ? `"${toName}" <${toEmail}>` : toEmail;
 
+  // Resolve lead_id so this reply appears in the ContactDrawer thread
+  const resolvedLeadId = await findOrCreateLeadForSend(supabase, {
+    recipientEmail: toEmail,
+    propertyId: inbound.property_id as string,
+    contactId: inbound.contact_id as string | null,
+    senderName: toName ?? null,
+    source: "cadence_reply",
+  });
+
   // Send
   let sent: { id: string; threadId: string };
   let sentAt: string;
@@ -94,11 +103,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       subject,
       bodyText: replyBody,
       threadId,
-      leadId: null,
+      leadId: resolvedLeadId,
       propertyId: inbound.property_id as string | null,
       contactId: inbound.contact_id as string | null,
       source: "send_suggested_reply",
-      updateLeadStatus: false,
+      updateLeadStatus: false, // keep lead status as-is; contact already engaged
       rawPayloadExtra: { parent_inbound_touch_id: inbound.id },
     });
     sent = { id: result.gmailMessageId, threadId: result.gmailThreadId };

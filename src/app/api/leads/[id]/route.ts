@@ -38,7 +38,11 @@ export async function GET(
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!lead) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const [{ data: events }, { data: thread }] = await Promise.all([
+  // Fetch events, primary thread (by lead_id), and any orphaned comms for the
+  // same contact+property that haven't been linked yet (lead_id IS NULL).
+  // The orphan fallback surfaces sends that happened before the leads row
+  // existed — e.g. cadence or bulk-AI sends to cold CREXi contacts.
+  const [{ data: events }, { data: primaryThread }, orphanResult] = await Promise.all([
     supabase
       .from("lead_events")
       .select("*")
@@ -49,12 +53,31 @@ export async function GET(
       .select("*")
       .eq("lead_id", id)
       .order("occurred_at", { ascending: true }),
+    lead.contact_id
+      ? supabase
+          .from("communications")
+          .select("*")
+          .eq("organization_id", ORG_ID)
+          .eq("contact_id", lead.contact_id)
+          .eq("property_id", lead.property_id)
+          .is("lead_id", null)
+          .order("occurred_at", { ascending: true })
+      : Promise.resolve({ data: [] as Record<string, unknown>[] }),
   ]);
+
+  // Merge primary + orphaned comms, deduplicate by id, sort chronologically
+  const seen = new Set<string>();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const thread = [...(primaryThread ?? []), ...((orphanResult as any).data ?? [])]
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .filter((c: any) => { if (seen.has(c.id)) return false; seen.add(c.id); return true; })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .sort((a: any, b: any) => new Date(a.occurred_at).getTime() - new Date(b.occurred_at).getTime());
 
   return NextResponse.json({
     lead,
     events: events || [],
-    thread: thread || [],
+    thread,
   });
 }
 

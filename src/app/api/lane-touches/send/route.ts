@@ -28,7 +28,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getActiveGmailToken } from "@/lib/gmail-auth";
-import { sendCrmEmail } from "@/lib/cre-os/send-crm-email";
+import { sendCrmEmail, findOrCreateLeadForSend } from "@/lib/cre-os/send-crm-email";
 import { captureVoiceExample } from "@/lib/cre-os/voice-examples";
 
 export const dynamic = "force-dynamic";
@@ -143,6 +143,16 @@ export async function POST(req: NextRequest) {
   const fromHeader = `${SEND_DISPLAY_NAME} <${token.email}>`;
   const toHeader = recipientName ? `"${recipientName}" <${recipientEmail}>` : recipientEmail;
 
+  // Resolve lead_id — find existing lead or create a minimal one so this
+  // send is visible in the ContactDrawer thread for this contact + property.
+  const resolvedLeadId = await findOrCreateLeadForSend(supabase, {
+    recipientEmail: recipientEmail!,
+    propertyId: prop.id,
+    contactId: resolvedContactId,
+    senderName: recipientName ?? null,
+    source: "outbound_touch",
+  });
+
   // Send
   let sent: { id: string; threadId: string };
   let sentAt: string;
@@ -152,11 +162,11 @@ export async function POST(req: NextRequest) {
       from: fromHeader,
       subject: body.subject,
       bodyText: body.bodyText,
-      leadId: null,          // lane touches work against contacts/properties, not leads rows
+      leadId: resolvedLeadId,
       propertyId: prop.id,
       contactId: resolvedContactId,
       source: "lane_touch",
-      updateLeadStatus: false,
+      updateLeadStatus: !!resolvedLeadId,
       rawPayloadExtra: { lane_touch_source: "lane-touches-send" },
     });
     sent = { id: result.gmailMessageId, threadId: result.gmailThreadId };
