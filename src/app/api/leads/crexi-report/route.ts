@@ -1,28 +1,32 @@
 /**
  * POST /api/leads/crexi-report
  *
- * Parse a Crexi daily Lead Report XLSX attachment from Gmail and upsert
- * every lead into crexi_leads_state, attached to the matching property.
- * For "hot" leads (Executed CA, Opened OM, Requested Info, Offer), also
- * creates a `leads` table row so they surface in Command "Do This Now".
- * Drafting is intentionally decoupled — the scheduled
- * /api/cron/draft-crexi-leads route picks them up in small batches.
+ * Parse a Crexi daily Lead Report attachment from Gmail and upsert every
+ * lead into crexi_leads_state, attached to the matching property. For "hot"
+ * leads (Executed CA, Opened OM, Requested Info, Offer), also creates a
+ * `leads` table row so they surface in Command "Do This Now". Drafting is
+ * intentionally decoupled — the scheduled /api/cron/draft-crexi-leads route
+ * picks them up in small batches.
+ *
+ * Supports two attachment formats:
+ *   • XLSX (per-property, three-sheet format with "Detail" tab) — original format
+ *   • CSV  (all-property "Master Lead Report" — CREXi's newer export format)
  *
  * Body:
  *   { gmail_message_id: string, dryRun?: boolean }
  *
  * Flow:
  *   1. Fetch message via Gmail OAuth token
- *   2. Find the .xlsx attachment
- *   3. Decode + parse with parseCrexiReport()
- *   4. Match property by (a) Detail-sheet address, then (b) name
- *   5. Upsert leads (dedupe by email + property_id; fall back to name + phone)
- *   6. For hot leads: ensure a `leads` row exists (outreach-gate dedupe)
- *   7. Write an import_jobs audit row
+ *   2. Find the .xlsx OR .csv attachment
+ *   3. XLSX: decode + parse with parseCrexiReport() → match single property
+ *      CSV:  parse rows → group by Property ID → match each property by crexi_listing_id
+ *   4. Upsert leads (dedupe by email + property_id; fall back to name + phone)
+ *   5. For hot leads: ensure a `leads` row exists (outreach-gate dedupe)
+ *   6. Write an import_jobs audit row
  *
  * Called by:
  *   • Manual trigger via this endpoint (for backfilling old emails)
- *   • Automatic detection in poll-gmail (filename matches "Lead Report - *.xlsx")
+ *   • Automatic detection in poll-gmail (filename matches Lead Report pattern)
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -46,17 +50,26 @@ async function fetchAttachmentBuffer(accessToken: string, messageId: string): Pr
   if (!msgRes.ok) throw new Error(`Gmail message fetch failed: ${msgRes.status}`);
   const msg = await msgRes.json();
 
-  // Walk parts to find first .xlsx attachment
+  // Walk parts to find first Lead Report attachment — XLSX preferred, CSV fallback.
+  // CREXi switched from .xlsx to .csv in mid-2026; accept both.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function find(part: any): { filename: string; attachmentId: string } | null {
-    if (part?.filename?.endsWith(".xlsx") && part.body?.attachmentId) {
-      return { filename: part.filename, attachmentId: part.body.attachmentId };
+    if (part?.body?.attachmentId) {
+      const fn: string = part.filename || "";
+      if (/\.(xlsx|csv)$/i.test(fn)) {
+        return { filename: fn, attachmentId: part.body.attachmentId };
+      }
     }
     if (part?.parts) {
+      // Prefer XLSX over CSV if both are present
+      let csvHit: { filename: string; attachmentId: string } | null = null;
       for (const p of part.parts) {
         const hit = find(p);
-        if (hit) return hit;
+        if (!hit) continue;
+        if (/\.xlsx$/i.test(hit.filename)) return hit; // XLSX wins immediately
+        if (!csvHit) csvHit = hit;                     // stash first CSV
       }
+      return csvHit;
     }
     return null;
   }
@@ -410,6 +423,184 @@ async function upsertLead(supabase: any, propertyId: string, lead: CrexiLead): P
   }
 }
 
+// ── Master CSV parser ────────────────────────────────────────────────────────
+// CREXi's newer all-property export format. One CSV with all properties.
+// Columns: First,Last,Property,Property Type,Property ID,Address,Email,Phone,
+//          Verification Method,Level of Interest,Crexi Lead Score,Source,
+//          Last Action Date,Company,Industry Role,City,State,Attachments,
+//          Estimated Buying Power,Note 1,Note 2,Note 3,Platform
+
+function parseCsvLine(line: string): string[] {
+  const cols: string[] = [];
+  let cur = "";
+  let inQuote = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuote && line[i + 1] === '"') { cur += '"'; i++; }
+      else { inQuote = !inQuote; }
+    } else if (ch === "," && !inQuote) {
+      cols.push(cur); cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  cols.push(cur);
+  return cols;
+}
+
+function parseDateStr(s: string | null | undefined): string | null {
+  if (!s) return null;
+  // MM/DD/YYYY
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+}
+
+interface MasterCsvGroup {
+  crexiPropertyId: string;
+  propertyName: string;
+  propertyAddress: string;
+  leads: CrexiLead[];
+}
+
+function parseMasterCsv(csvText: string): MasterCsvGroup[] {
+  const lines = csvText.split(/\r?\n/);
+  if (lines.length < 2) return [];
+
+  const headers = parseCsvLine(lines[0]).map(h => h.trim());
+  const idx = (name: string) => headers.findIndex(h => h.toLowerCase() === name.toLowerCase());
+
+  const iFirst     = idx("First");
+  const iLast      = idx("Last");
+  const iPropName  = idx("Property");
+  const iPropId    = idx("Property ID");
+  const iAddress   = idx("Address");
+  const iEmail     = idx("Email");
+  const iPhone     = idx("Phone");
+  const iLoi       = idx("Level of Interest");
+  const iScore     = idx("Crexi Lead Score");
+  const iDate      = idx("Last Action Date");
+  const iCompany   = idx("Company");
+  const iRole      = idx("Industry Role");
+  const iCity      = idx("City");
+  const iState     = idx("State");
+  const iBuyPow    = idx("Estimated Buying Power");
+  const iNote1     = idx("Note 1");
+  const iNote2     = idx("Note 2");
+  const iNote3     = idx("Note 3");
+  const iAttach    = idx("Attachments");
+
+  const groups = new Map<string, MasterCsvGroup>();
+
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const cols = parseCsvLine(lines[i]);
+    const get = (j: number) => (j >= 0 ? (cols[j] ?? "").trim() : "");
+
+    const crexiPropertyId = get(iPropId);
+    const propertyName    = get(iPropName);
+    const propertyAddress = get(iAddress);
+    if (!crexiPropertyId) continue;
+
+    const firstName = get(iFirst) || null;
+    const lastName  = get(iLast) || null;
+    if (!firstName && !lastName) continue;
+
+    const notes = [get(iNote1), get(iNote2), get(iNote3)].filter(Boolean).join("\n\n") || null;
+
+    const normalizePhone = (p: string): string | null => {
+      const digits = p.replace(/\D/g, "");
+      if (digits.length === 10) return `+1${digits}`;
+      if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+      return digits ? `+${digits}` : null;
+    };
+
+    const lead: CrexiLead = {
+      firstName,
+      lastName,
+      fullName: [firstName, lastName].filter(Boolean).join(" "),
+      phone: normalizePhone(get(iPhone)),
+      email: get(iEmail).toLowerCase() || null,
+      company: get(iCompany) || null,
+      industryRole: get(iRole) || null,
+      levelOfInterest: get(iLoi) || null,
+      crexiLeadScore: get(iScore) ? parseFloat(get(iScore)) || null : null,
+      activityDate: parseDateStr(get(iDate)),
+      numberOfVisits: null,
+      estimatedBuyingPower: get(iBuyPow) || null,
+      aumNumber: null,
+      aumValue: null,
+      buyerBackground: null,
+      proofOfFunds: null,
+      confidence: null,
+      notes,
+      raw: {
+        city: get(iCity) || null,
+        state: get(iState) || null,
+        attachments: get(iAttach) || null,
+        property_id: crexiPropertyId,
+        property_name: propertyName,
+        address: propertyAddress,
+      },
+    };
+
+    if (!groups.has(crexiPropertyId)) {
+      groups.set(crexiPropertyId, { crexiPropertyId, propertyName, propertyAddress, leads: [] });
+    }
+    groups.get(crexiPropertyId)!.leads.push(lead);
+  }
+
+  return Array.from(groups.values());
+}
+
+// Match a property by CREXi listing ID (preferred) then by name/address.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function matchPropertyByCrxId(supabase: any, crexiId: string, name: string, address: string): Promise<{ id: string; name: string } | null> {
+  // Strategy 1: direct crexi_listing_id match
+  const { data: byId } = await supabase
+    .from("properties")
+    .select("id, name")
+    .eq("organization_id", ORG_ID)
+    .eq("crexi_listing_id", crexiId)
+    .maybeSingle();
+  if (byId) return byId;
+
+  // Strategy 2: name match + backfill crexi_listing_id
+  if (name) {
+    const { data: byName } = await supabase
+      .from("properties")
+      .select("id, name")
+      .eq("organization_id", ORG_ID)
+      .ilike("name", name)
+      .maybeSingle();
+    if (byName) {
+      await supabase.from("properties").update({ crexi_listing_id: crexiId }).eq("id", byName.id);
+      return byName;
+    }
+  }
+
+  // Strategy 3: address prefix match + backfill
+  if (address) {
+    const street = address.split(",")[0]?.trim();
+    if (street) {
+      const { data: rows } = await supabase
+        .from("properties")
+        .select("id, name")
+        .eq("organization_id", ORG_ID)
+        .ilike("address", `${street}%`);
+      if (rows && rows.length === 1) {
+        await supabase.from("properties").update({ crexi_listing_id: crexiId }).eq("id", rows[0].id);
+        return rows[0];
+      }
+    }
+  }
+
+  return null;
+}
+
 export async function POST(req: NextRequest) {
   let body: { gmail_message_id?: string; dryRun?: boolean };
   try {
@@ -449,10 +640,89 @@ export async function POST(req: NextRequest) {
   try {
     const attachment = await fetchAttachmentBuffer(token.accessToken, body.gmail_message_id);
     if (!attachment) {
-      if (jobId) await supabase.from("import_jobs").update({ status: "failed", error_log: { error: "no xlsx attachment" }, completed_at: new Date().toISOString() }).eq("id", jobId);
-      return NextResponse.json({ error: "No .xlsx attachment found on this message" }, { status: 404 });
+      if (jobId) await supabase.from("import_jobs").update({ status: "failed", error_log: { error: "no attachment found" }, completed_at: new Date().toISOString() }).eq("id", jobId);
+      return NextResponse.json({ error: "No Lead Report attachment found on this message" }, { status: 404 });
     }
 
+    const isCsv = /\.csv$/i.test(attachment.filename);
+
+    // ── CSV path: all-property master format ────────────────────────────────
+    if (isCsv) {
+      const csvText = attachment.buf.toString("utf8");
+      const groups = parseMasterCsv(csvText);
+
+      if (groups.length === 0) {
+        if (jobId) await supabase.from("import_jobs").update({ status: "failed", error_log: { error: "no leads parsed from CSV" }, completed_at: new Date().toISOString() }).eq("id", jobId);
+        return NextResponse.json({ ok: false, error: "CSV parsed but produced 0 lead groups" });
+      }
+
+      let totalLeads = 0, inserted = 0, updated = 0, skipped = 0, hotLeadsQueued = 0;
+      const propertyResults: Array<{ crexiId: string; name: string | null; matched: boolean; leads: number; hot: number }> = [];
+      const unmatchedProperties: string[] = [];
+
+      for (const group of groups) {
+        const prop = await matchPropertyByCrxId(supabase, group.crexiPropertyId, group.propertyName, group.propertyAddress);
+        if (!prop) {
+          unmatchedProperties.push(`${group.crexiPropertyId} "${group.propertyName}"`);
+          skipped += group.leads.length;
+          propertyResults.push({ crexiId: group.crexiPropertyId, name: group.propertyName, matched: false, leads: group.leads.length, hot: 0 });
+          continue;
+        }
+
+        let propHot = 0;
+        if (!body.dryRun) {
+          for (const lead of group.leads) {
+            const r = await upsertLead(supabase, prop.id, lead);
+            if (r.result === "inserted") inserted++;
+            else if (r.result === "updated") updated++;
+            else skipped++;
+
+            if (r.result !== "skipped" && r.contactId && isHotLead(lead)) {
+              const hotId = await ensureHotLeadRow(supabase, r.contactId, prop.id, prop.name, lead, r.crexiLeadsStateId);
+              if (hotId) { hotLeadsQueued++; propHot++; }
+            }
+          }
+        } else {
+          inserted += group.leads.length;
+          propHot = group.leads.filter(isHotLead).length;
+          hotLeadsQueued += propHot;
+        }
+        totalLeads += group.leads.length;
+        propertyResults.push({ crexiId: group.crexiPropertyId, name: prop.name, matched: true, leads: group.leads.length, hot: propHot });
+      }
+
+      if (jobId) {
+        await supabase.from("import_jobs").update({
+          status: "completed",
+          total_records: totalLeads,
+          processed_records: inserted + updated,
+          failed_records: skipped,
+          completed_at: new Date().toISOString(),
+          error_log: {
+            format: "csv_master",
+            filename: attachment.filename,
+            properties: propertyResults,
+            unmatched_properties: unmatchedProperties,
+            hot_leads_queued: hotLeadsQueued,
+          },
+        }).eq("id", jobId);
+      }
+
+      return NextResponse.json({
+        ok: true,
+        dryRun: !!body.dryRun,
+        format: "csv_master",
+        total_leads: totalLeads,
+        inserted,
+        updated,
+        skipped,
+        hot_leads_queued: hotLeadsQueued,
+        properties: propertyResults,
+        unmatched_properties: unmatchedProperties,
+      });
+    }
+
+    // ── XLSX path: per-property format (original) ────────────────────────────
     const parsed = parseCrexiReport(attachment.buf);
     if (parsed.leads.length === 0) {
       if (jobId) await supabase.from("import_jobs").update({ status: "failed", error_log: { error: "no leads parsed", warnings: parsed.warnings }, completed_at: new Date().toISOString() }).eq("id", jobId);
@@ -481,19 +751,8 @@ export async function POST(req: NextRequest) {
         else if (r.result === "updated") updated++;
         else skipped++;
 
-        // For hot leads that were successfully persisted in crexi_leads_state,
-        // also ensure a `leads` table row exists so they appear in Command
-        // "Do This Now". Drafting is decoupled — the cron draft-crexi-leads
-        // scheduled function picks them up in batches.
         if (r.result !== "skipped" && r.contactId && isHotLead(lead)) {
-          const hotLeadId = await ensureHotLeadRow(
-            supabase,
-            r.contactId,
-            propMatch.id,
-            propMatch.name,
-            lead,
-            r.crexiLeadsStateId,
-          );
+          const hotLeadId = await ensureHotLeadRow(supabase, r.contactId, propMatch.id, propMatch.name, lead, r.crexiLeadsStateId);
           if (hotLeadId) hotLeadsQueued++;
         }
       }
@@ -510,6 +769,7 @@ export async function POST(req: NextRequest) {
         failed_records: skipped,
         completed_at: new Date().toISOString(),
         error_log: {
+          format: "xlsx_per_property",
           property: propMatch,
           activity: parsed.activity,
           warnings: parsed.warnings,
@@ -521,6 +781,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       dryRun: !!body.dryRun,
+      format: "xlsx_per_property",
       property: propMatch,
       activity: parsed.activity,
       lead_count: parsed.leads.length,

@@ -40,6 +40,7 @@ import {
 // two different naming conventions depending on which export path was used:
 //   - "Lead Report - Super 8 by Wyndham Valparaiso.xlsx"   (spaces + hyphen)
 //   - "Lead_Report_Liberty_Square_Retail_Center.xlsx"      (underscores)
+//   - "Master_Lead_Report.csv"                             (all-property CSV export)
 // We accept either, plus minor variants ("Lead-Report" with hyphens, etc).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function hasLeadReportXlsx(payload: any): boolean {
@@ -59,13 +60,32 @@ function hasLeadReportXlsx(payload: any): boolean {
   return false;
 }
 
+// Same check for CSV format — CREXi now also exports as CSV.
+// Matches "Lead Report *.csv", "Master_Lead_Report.csv", etc.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function hasLeadReportCsv(payload: any): boolean {
+  if (!payload) return false;
+  const fn: string | undefined = payload.filename;
+  if (fn) {
+    const normalized = fn.toLowerCase().replace(/[_\-.]+/g, " ").trim();
+    if (/lead report/.test(normalized) && /csv\b/.test(normalized)) return true;
+    if (/master lead report/.test(normalized)) return true;
+  }
+  if (Array.isArray(payload.parts)) {
+    for (const p of payload.parts) {
+      if (hasLeadReportCsv(p)) return true;
+    }
+  }
+  return false;
+}
+
 // Secondary signal: even if filename matching fails (e.g. the file was
 // renamed by a forwarder), an email with subject "Lead Report" + any XLSX
-// attachment is almost certainly a CREXi export. Belt + suspenders.
+// or CSV attachment is almost certainly a CREXi export. Belt + suspenders.
 function looksLikeLeadReportEmail(subject: string | null, payload: unknown): boolean {
   if (!subject) return false;
   if (!/lead\s*report/i.test(subject)) return false;
-  return hasAnyXlsxAttachment(payload);
+  return hasAnyXlsxAttachment(payload) || hasAnyCsvAttachment(payload);
 }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function hasAnyXlsxAttachment(payload: any): boolean {
@@ -75,6 +95,18 @@ function hasAnyXlsxAttachment(payload: any): boolean {
   if (Array.isArray(payload.parts)) {
     for (const p of payload.parts) {
       if (hasAnyXlsxAttachment(p)) return true;
+    }
+  }
+  return false;
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function hasAnyCsvAttachment(payload: any): boolean {
+  if (!payload) return false;
+  const fn: string | undefined = payload.filename;
+  if (fn && /\.csv$/i.test(fn)) return true;
+  if (Array.isArray(payload.parts)) {
+    for (const p of payload.parts) {
+      if (hasAnyCsvAttachment(p)) return true;
     }
   }
   return false;
@@ -234,6 +266,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
           // direct inquiries, unsubscribes, spam, etc.).
           const obviousCrexiReport =
             hasLeadReportXlsx(msg.payload) ||
+            hasLeadReportCsv(msg.payload) ||
             looksLikeLeadReportEmail(subject, msg.payload);
 
           let classification: InboundClassification | null = null;
