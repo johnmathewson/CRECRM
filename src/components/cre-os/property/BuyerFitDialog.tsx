@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 
 /**
  * BuyerFitDialog — quick-input modal for generating a 1-page buyer-fit
@@ -36,7 +37,17 @@ export function BuyerFitDialog({
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Lock body scroll while the dialog is open so the page underneath
+  // doesn't move when the modal scrolls
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [open]);
+
   if (!open) return null;
+  if (typeof window === "undefined") return null;
 
   async function handleGenerate() {
     setGenerating(true);
@@ -84,13 +95,17 @@ export function BuyerFitDialog({
     }
   }
 
-  return (
+  // Render via portal to document.body. Otherwise the dialog's
+  // `fixed inset-0` anchors to whichever ancestor has backdrop-blur
+  // (PropertyHeader's sticky bar uses backdrop-blur-md), causing the
+  // modal to render below the fold or off-screen.
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto"
+      className="fixed inset-0 z-[100] flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto p-2 lg:p-12"
       onClick={onClose}
     >
       <div
-        className="my-2 mx-2 lg:my-12 w-full max-w-xl bg-steward-base border border-white/[0.08] rounded shadow-panel-soft"
+        className="w-full max-w-xl bg-steward-base border border-white/[0.08] rounded shadow-panel-soft"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-6 py-4 border-b border-white/[0.05]">
@@ -223,7 +238,8 @@ export function BuyerFitDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
