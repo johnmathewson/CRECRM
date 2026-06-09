@@ -97,31 +97,33 @@ export function parseCrexiReport(buffer: Buffer): ParsedCrexiReport {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const matrix: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, blankrows: false });
 
-    // First col header = property name; row 1 = address; row 2 = descriptor
+    // CREXi sometimes inserts a blank col 0; use firstNonNull to handle both layouts
     if (matrix.length >= 3) {
-      const r0 = matrix[0]?.[0];
-      const r1 = matrix[1]?.[0];
-      const r2 = matrix[2]?.[0];
+      const r0 = firstNonNull(matrix[0]);
+      const r1 = firstNonNull(matrix[1]);
+      const r2 = firstNonNull(matrix[2]);
       if (typeof r0 === "string") result.propertyName = r0.trim();
       if (typeof r1 === "string") result.propertyAddress = r1.trim();
       if (typeof r2 === "string") result.propertyDescriptor = r2.trim();
     }
 
-    // Find the activity-summary header row ("Page Views", "Visitors", ...)
+    // Find the activity-summary header row ("Page Views" anywhere in row)
     let headerIdx = -1;
+    let pageViewsCol = 0;
     for (let i = 0; i < Math.min(matrix.length, 10); i++) {
       const row = matrix[i] ?? [];
-      if (row[0] === "Page Views") { headerIdx = i; break; }
+      const col = row.findIndex((c: unknown) => c === "Page Views");
+      if (col >= 0) { headerIdx = i; pageViewsCol = col; break; }
     }
     if (headerIdx >= 0 && matrix[headerIdx + 1]) {
       const dataRow = matrix[headerIdx + 1];
       result.activity = {
-        pageViews: asInt(dataRow[0]),
-        visitors: asInt(dataRow[1]),
-        openedOmsFlyers: asInt(dataRow[2]),
-        executedCas: asInt(dataRow[3]),
-        offers: asInt(dataRow[4]),
-        infoRequests: asInt(dataRow[5]),
+        pageViews: asInt(dataRow[pageViewsCol]),
+        visitors: asInt(dataRow[pageViewsCol + 1]),
+        openedOmsFlyers: asInt(dataRow[pageViewsCol + 2]),
+        executedCas: asInt(dataRow[pageViewsCol + 3]),
+        offers: asInt(dataRow[pageViewsCol + 4]),
+        infoRequests: asInt(dataRow[pageViewsCol + 5]),
       };
     }
   } else {
@@ -130,11 +132,12 @@ export function parseCrexiReport(buffer: Buffer): ParsedCrexiReport {
 
   // ── Parse Detail sheet (the leads) ──────────────────────────────────────
   // CREXi has used different sheet names across format versions. Try in order:
-  //   "Detail" (original), "Leads", "Lead Details", "Contacts", "Data"
+  //   "Detail" (original), "1 - Detail" (2026 format), "Leads", etc.
   // Fallback: any sheet whose first non-empty row contains "First" or "Email"
   //   in the first few columns (heuristic for a contact-data sheet).
   const detailSheetName =
     wb.SheetNames.find((n) => n.toLowerCase() === "detail") ||
+    wb.SheetNames.find((n) => /\bdetail\b/i.test(n)) ||
     wb.SheetNames.find((n) => /^leads?$/i.test(n.trim())) ||
     wb.SheetNames.find((n) => /lead.?detail|contact|data/i.test(n)) ||
     wb.SheetNames.find((n) => {
@@ -165,12 +168,14 @@ export function parseCrexiReport(buffer: Buffer): ParsedCrexiReport {
   const detailMatrix: any[][] = XLSX.utils.sheet_to_json(detail, { header: 1, defval: null, blankrows: false });
 
   // Also fall back to grabbing property name from detail header if Lead
-  // Report sheet wasn't found
-  if (!result.propertyName && detailMatrix[0]?.[0]) {
-    result.propertyName = String(detailMatrix[0][0]).trim();
+  // Report sheet wasn't found (use firstNonNull — col 0 may be blank)
+  if (!result.propertyName) {
+    const v = firstNonNull(detailMatrix[0] ?? []);
+    if (typeof v === "string") result.propertyName = v.trim();
   }
-  if (!result.propertyAddress && detailMatrix[1]?.[0]) {
-    result.propertyAddress = String(detailMatrix[1][0]).trim();
+  if (!result.propertyAddress) {
+    const v = firstNonNull(detailMatrix[1] ?? []);
+    if (typeof v === "string") result.propertyAddress = v.trim();
   }
 
   // Find the column-headers row by looking for "First" anywhere in the row
@@ -271,6 +276,11 @@ export function parseCrexiReport(buffer: Buffer): ParsedCrexiReport {
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────
+
+/** Returns the first non-null, non-empty cell in a row (handles CREXi's leading blank column) */
+function firstNonNull(row: unknown[]): unknown {
+  return row.find((v) => v != null && v !== "") ?? null;
+}
 
 function asStr(v: unknown): string | null {
   if (v == null) return null;
