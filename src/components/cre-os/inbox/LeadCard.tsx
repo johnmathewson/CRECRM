@@ -87,7 +87,7 @@ export function LeadCard({ lead }: { lead: LeadCardData }) {
             {lead.rawSubject}
           </p>
         )}
-        {lead.bodyPreview && (
+        {lead.bodyPreview && lead.bodyPreview !== lead.qualifierSummary && (
           <p className="font-body text-[11px] text-cream-dim leading-snug line-clamp-2">
             {lead.bodyPreview}
           </p>

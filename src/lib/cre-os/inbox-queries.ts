@@ -154,7 +154,7 @@ export async function loadInboxList(): Promise<LeadCard[]> {
       urgency: r.urgency ?? null,
       qualifierSummary: r.qualifier_summary ?? null,
       rawSubject: r.raw_subject ?? null,
-      bodyPreview: previewBody(r.raw_body),
+      bodyPreview: previewBody(r.raw_body, r.source),
       hasDraft: !!r.draft_reply,
       ackSent: !!r.auto_ack_sent_at,
       finalSent: !!r.final_sent_at,
@@ -257,8 +257,28 @@ export async function loadLeadDetail(id: string): Promise<LeadDetail | null> {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
-function previewBody(body: string | null | undefined): string | null {
+function previewBody(body: string | null | undefined, source?: string | null): string | null {
   if (!body) return null;
+
+  // CREXi and other system sources store JSON in raw_body — extract the
+  // human-readable signal instead of dumping the raw JSON string.
+  const trimmed = body.trimStart();
+  if (trimmed.startsWith("{") || source?.toLowerCase().startsWith("crexi")) {
+    try {
+      const data = JSON.parse(body) as Record<string, unknown>;
+      if (typeof data.engagement_signal === "string" && data.engagement_signal) {
+        return data.engagement_signal;
+      }
+      if (typeof data.level_of_interest === "string" && data.level_of_interest) {
+        const company = typeof data.company === "string" ? data.company : null;
+        const role = typeof data.industry_role === "string" ? data.industry_role : null;
+        return [data.level_of_interest, company, role].filter(Boolean).join(" · ");
+      }
+      // JSON but no useful field — return null so the card just shows qualifierSummary
+      return null;
+    } catch { /* not JSON — fall through to HTML strip */ }
+  }
+
   // Strip HTML tags + excess whitespace; clip to ~160 chars
   const stripped = body
     .replace(/<style[\s\S]*?<\/style>/gi, "")
