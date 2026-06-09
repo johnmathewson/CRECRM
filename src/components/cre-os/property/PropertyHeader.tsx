@@ -7,6 +7,7 @@ import { StatusEditor } from "./StatusEditor";
 import { EditPropertyDialog } from "./EditPropertyDialog";
 import { LogActivityDialog } from "@/components/cre-os/activities/LogActivityDialog";
 import { CreateTaskDialog } from "@/components/cre-os/tasks/CreateTaskDialog";
+import { BuyerFitDialog } from "@/components/cre-os/property/BuyerFitDialog";
 import type { PropertyDetail } from "@/lib/cre-os/property-queries";
 
 const fmtMoney = (n: number | null) => {
@@ -32,6 +33,7 @@ export function PropertyHeader({ p }: { p: PropertyDetail }) {
   const [logActivityOpen, setLogActivityOpen] = useState(false);
   const [taskOpen, setTaskOpen] = useState(false);
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
+  const [buyerFitOpen, setBuyerFitOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   // Close the mobile action menu on outside-click or Escape.
@@ -123,6 +125,7 @@ export function PropertyHeader({ p }: { p: PropertyDetail }) {
               >
                 <MenuItem onClick={() => { setLogActivityOpen(true); setActionMenuOpen(false); }} tone="coral">+ Log activity</MenuItem>
                 <MenuItem onClick={() => { setTaskOpen(true); setActionMenuOpen(false); }} tone="coral">+ Task</MenuItem>
+                <MenuItem onClick={() => { setBuyerFitOpen(true); setActionMenuOpen(false); }} tone="coral">Buyer-fit PDF</MenuItem>
                 <MenuItem onClick={() => { setEditOpen(true); setActionMenuOpen(false); }}>Edit details</MenuItem>
                 <a
                   role="menuitem"
@@ -153,6 +156,13 @@ export function PropertyHeader({ p }: { p: PropertyDetail }) {
               + Task
             </button>
             <button
+              onClick={() => setBuyerFitOpen(true)}
+              className="px-3.5 py-2.5 lg:px-3 lg:py-2 rounded border border-teal-400/40 bg-teal-400/[0.08] text-teal-300 hover:bg-teal-400/[0.18] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
+              title="Generate a 1-page buyer-fit PDF assessment matching this property to a specific buyer's criteria."
+            >
+              Buyer-fit PDF
+            </button>
+            <button
               onClick={() => setEditOpen(true)}
               className="px-3.5 py-2.5 lg:px-3 lg:py-2 rounded border border-white/10 bg-white/[0.03] text-cream hover:bg-white/[0.06] font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
               title="Edit address, pricing, sqft, NOI, cap rate, occupancy, parking, zoning, marketing copy, and notes."
@@ -180,6 +190,12 @@ export function PropertyHeader({ p }: { p: PropertyDetail }) {
         onClose={() => setTaskOpen(false)}
         propertyId={p.id}
         contextLabel={p.name}
+      />
+      <BuyerFitDialog
+        open={buyerFitOpen}
+        onClose={() => setBuyerFitOpen(false)}
+        propertyId={p.id}
+        propertyName={p.name}
       />
     </div>
   );
