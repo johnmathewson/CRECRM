@@ -282,6 +282,22 @@ async function ensureHotLeadRow(
     senderEmail = contact?.email ?? null;
   }
 
+  // ❹ Check if we've already sent an email to this contact about this property.
+  //    If so, create the lead as 'sent' (not 'new') so it doesn't pollute the
+  //    hot inbox — it should only resurface when they reply.
+  const { data: priorSend } = await supabase
+    .from("communications")
+    .select("occurred_at")
+    .eq("organization_id", ORG_ID)
+    .eq("contact_id", contactId)
+    .eq("property_id", propertyId)
+    .eq("direction", "outbound")
+    .order("occurred_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const alreadySent = !!priorSend;
+
   const { data: created, error } = await supabase
     .from("leads")
     .insert({
@@ -289,7 +305,8 @@ async function ensureHotLeadRow(
       contact_id: contactId,
       property_id: propertyId,
       source: "crexi",
-      status: "new",
+      status: alreadySent ? "sent" : "new",
+      final_sent_at: alreadySent ? priorSend?.occurred_at : null,
       sender_name: lead.fullName,
       sender_email: senderEmail,
       sender_phone: lead.phone,
