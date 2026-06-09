@@ -173,17 +173,29 @@ export function parseCrexiReport(buffer: Buffer): ParsedCrexiReport {
     result.propertyAddress = String(detailMatrix[1][0]).trim();
   }
 
-  // Find the column-headers row by looking for "First" in column 0
+  // Find the column-headers row by looking for "First" anywhere in the row
+  // (original format had "First" in col 0; newer CREXi formats may shift columns)
   let headerRowIdx = -1;
-  for (let i = 0; i < Math.min(detailMatrix.length, 15); i++) {
+  for (let i = 0; i < Math.min(detailMatrix.length, 20); i++) {
     const row = detailMatrix[i] ?? [];
-    if (row[0] === "First" || (typeof row[0] === "string" && row[0].toLowerCase() === "first")) {
+    const hasFirst = row.some(
+      (c: unknown) => typeof c === "string" && c.trim().toLowerCase() === "first"
+    );
+    const hasEmail = row.some(
+      (c: unknown) => typeof c === "string" && c.trim().toLowerCase() === "email"
+    );
+    // Require BOTH "First" AND "Email" to avoid false-positive on data rows
+    if (hasFirst && hasEmail) {
       headerRowIdx = i;
       break;
     }
   }
   if (headerRowIdx < 0) {
-    warnings.push("Could not locate 'First' header row in Detail sheet");
+    // Dump first 5 rows for diagnosis
+    const sample = detailMatrix.slice(0, 5).map((r, i) =>
+      `row${i}: [${(r ?? []).slice(0, 8).map((c: unknown) => JSON.stringify(c)).join(", ")}]`
+    ).join(" | ");
+    warnings.push(`Could not locate 'First'+'Email' header row in sheet "${detailSheetName}". Sample: ${sample}`);
     return result;
   }
 
