@@ -243,30 +243,35 @@ export function LeadDetail({ lead }: { lead: LeadDetailData }) {
           </div>
         )}
 
-        {/* Original message */}
-        <Panel
-          eyebrow="Original message"
-          num={1}
-          title={lead.rawSubject ?? "(no subject)"}
-          actions={
-            lead.rawBody && lead.rawBody.length > 600 ? (
-              <button
-                onClick={() => setBodyExpanded(!bodyExpanded)}
-                className="font-heading text-[10px] uppercase tracking-eyebrow text-coral-400 hover:text-coral-300"
-              >
-                {bodyExpanded ? "Collapse" : "Show full"}
-              </button>
-            ) : null
-          }
-        >
-          {lead.rawBody ? (
-            <pre className="whitespace-pre-wrap font-body text-[12px] text-cream-dim leading-relaxed max-w-none">
-              {bodyExpanded ? lead.rawBody : truncate(lead.rawBody, 600)}
-            </pre>
-          ) : (
-            <p className="font-body text-[13px] text-cream-subtle py-4">No message body captured.</p>
-          )}
-        </Panel>
+        {/* Original message / CREXi activity */}
+        {lead.source === "crexi"
+          ? <CrexiLeadCard rawBody={lead.rawBody} qualifierSummary={lead.qualifierSummary} />
+          : (
+            <Panel
+              eyebrow="Original message"
+              num={1}
+              title={lead.rawSubject ?? "(no subject)"}
+              actions={
+                lead.rawBody && lead.rawBody.length > 600 ? (
+                  <button
+                    onClick={() => setBodyExpanded(!bodyExpanded)}
+                    className="font-heading text-[10px] uppercase tracking-eyebrow text-coral-400 hover:text-coral-300"
+                  >
+                    {bodyExpanded ? "Collapse" : "Show full"}
+                  </button>
+                ) : null
+              }
+            >
+              {lead.rawBody ? (
+                <pre className="whitespace-pre-wrap font-body text-[12px] text-cream-dim leading-relaxed max-w-none">
+                  {bodyExpanded ? lead.rawBody : truncate(lead.rawBody, 600)}
+                </pre>
+              ) : (
+                <p className="font-body text-[13px] text-cream-subtle py-4">No message body captured.</p>
+              )}
+            </Panel>
+          )
+        }
 
         {/* Draft reply */}
         <Panel
@@ -411,6 +416,104 @@ export function LeadDetail({ lead }: { lead: LeadDetailData }) {
         </div>
       )}
     </AppShell>
+  );
+}
+
+// ── CREXi lead card — replaces raw JSON "Original message" for crexi source leads ──
+function CrexiLeadCard({ rawBody, qualifierSummary }: { rawBody: string | null; qualifierSummary: string | null }) {
+  let data: Record<string, unknown> = {};
+  try { if (rawBody) data = JSON.parse(rawBody); } catch { /* fall through */ }
+
+  const signal = typeof data.engagement_signal === "string" ? data.engagement_signal : null;
+  const loi = typeof data.level_of_interest === "string" ? data.level_of_interest : null;
+  const company = typeof data.company === "string" ? data.company : null;
+  const role = typeof data.industry_role === "string" ? data.industry_role : null;
+  const activityDate = typeof data.activity_date === "string" ? data.activity_date : null;
+  const buyingPower = typeof data.buying_power === "string" ? data.buying_power : null;
+  const proofOfFunds = typeof data.proof_of_funds === "string" ? data.proof_of_funds : null;
+  const leadScore = typeof data.crexi_lead_score === "number" ? data.crexi_lead_score : null;
+  const notes = typeof data.notes === "string" ? data.notes : null;
+
+  const fmtDate = (iso: string) =>
+    new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+  return (
+    <Panel eyebrow="CREXi activity" num={1} title={signal ?? loi ?? "CREXi lead"}>
+      <div className="space-y-3">
+        {/* Key stats row */}
+        <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-[11.5px] font-body">
+          {loi && (
+            <div>
+              <span className="text-cream-subtle">Level of interest  </span>
+              <span className="text-cream font-semibold">{loi}</span>
+            </div>
+          )}
+          {activityDate && (
+            <div>
+              <span className="text-cream-subtle">Activity  </span>
+              <span className="text-cream font-semibold">{fmtDate(activityDate)}</span>
+            </div>
+          )}
+          {leadScore != null && (
+            <div>
+              <span className="text-cream-subtle">CREXi score  </span>
+              <span className="text-cream font-semibold">{leadScore}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Company / role */}
+        {(company || role) && (
+          <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-[11.5px] font-body">
+            {company && (
+              <div>
+                <span className="text-cream-subtle">Company  </span>
+                <span className="text-cream">{company}</span>
+              </div>
+            )}
+            {role && (
+              <div>
+                <span className="text-cream-subtle">Role  </span>
+                <span className="text-cream">{role}</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Financial profile */}
+        {(buyingPower || proofOfFunds) && (
+          <div className="pt-2 border-t border-white/[0.05] flex flex-wrap gap-x-5 gap-y-1.5 text-[11.5px] font-body">
+            {buyingPower && (
+              <div>
+                <span className="text-cream-subtle">Buying power  </span>
+                <span className="text-cream font-semibold">{buyingPower}</span>
+              </div>
+            )}
+            {proofOfFunds && (
+              <div>
+                <span className="text-cream-subtle">Proof of funds  </span>
+                <span className="text-cream">{proofOfFunds}</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Notes */}
+        {notes && (
+          <div className="pt-2 border-t border-white/[0.05]">
+            <p className="font-body text-[11.5px] text-cream-dim leading-relaxed">{notes}</p>
+          </div>
+        )}
+
+        {/* AI qualifier echo — only if different from signal */}
+        {qualifierSummary && qualifierSummary !== signal && (
+          <div className="pt-2 border-t border-white/[0.05]">
+            <span className="font-heading text-[10px] uppercase tracking-eyebrow text-cream-subtle">AI summary  </span>
+            <p className="mt-1 font-body text-[11.5px] text-cream-dim leading-relaxed">{qualifierSummary}</p>
+          </div>
+        )}
+      </div>
+    </Panel>
   );
 }
 
