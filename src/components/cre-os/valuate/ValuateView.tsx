@@ -113,13 +113,13 @@ export function ValuateView({ context }: { context: ValuateContext }) {
           </p>
         </header>
 
-        {/* The legacy ValuateContent component runs untouched inside the
-            shell. Wrapped in a panel-style container so it visually fits
-            the CRE OS surface. */}
-        <div className="rounded-md border border-white/[0.05] bg-steward-surface/40 p-5 lg:p-6">
-          {/* The legacy tool was designed for a lighter background; clamp its
-              text colors via this scoped style block so its panels don't
-              wash out against the dark CRE OS canvas. */}
+        {/* The legacy ValuateContent runs untouched inside the shell, but
+            it was DESIGNED for a dark theme — every inline style assumes
+            cream text on dark steward-base. The CRE OS AppShell uses
+            canvas-light (slate gradient) so we have to make this section
+            a "dark island" with a solid dark background. Otherwise the
+            cream inline text colors render invisibly on the light canvas. */}
+        <div className="rounded-md border border-white/[0.08] bg-[#0D0D0D] p-5 lg:p-6 shadow-panel-soft">
           <div className="valuate-shell">
             <ValuateContent />
           </div>
