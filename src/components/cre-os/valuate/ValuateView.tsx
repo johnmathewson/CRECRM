@@ -127,20 +127,46 @@ export function ValuateView({ context }: { context: ValuateContext }) {
       </div>
 
       <style jsx global>{`
-        /* Scoped color overrides — only apply when ValuateContent is
-           rendered inside this shell. The legacy tool keeps its original
-           styling everywhere else (/valuate route). */
+        /* The CRE OS AppShell wraps content in .canvas-light which sets
+           --ink to a dark slate (#171C24). The legacy ValuateContent was
+           designed for a DARK theme — it expects cream text on dark
+           backgrounds. Without this override, every input + label + body
+           text resolves to dark slate against the dark steward-surface
+           panel and becomes invisible.
+
+           Solution: re-pin --ink to cream INSIDE .valuate-shell so all
+           text styles in the legacy tool that reference it cascade
+           correctly. Also force input/select/textarea text + placeholders
+           explicitly as belt + suspenders. */
+        .valuate-shell {
+          --ink: 240 237 228; /* cream — matches the dark-theme root */
+          color: rgb(240, 237, 228);
+        }
+        .valuate-shell h1,
+        .valuate-shell h2,
+        .valuate-shell h3,
+        .valuate-shell h4,
+        .valuate-shell h5,
+        .valuate-shell h6,
+        .valuate-shell p,
+        .valuate-shell span,
+        .valuate-shell label,
+        .valuate-shell li,
+        .valuate-shell td,
+        .valuate-shell th {
+          color: rgb(240, 237, 228);
+        }
         .valuate-shell input[type="text"],
         .valuate-shell input[type="number"],
         .valuate-shell input[type="email"],
         .valuate-shell input[type="tel"],
         .valuate-shell select,
         .valuate-shell textarea {
-          color: rgb(var(--ink));
+          color: rgb(240, 237, 228);
         }
         .valuate-shell input::placeholder,
         .valuate-shell textarea::placeholder {
-          color: rgb(var(--ink) / 0.35);
+          color: rgba(240, 237, 228, 0.4);
         }
       `}</style>
     </AppShell>
