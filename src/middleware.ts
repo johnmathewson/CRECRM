@@ -71,7 +71,10 @@ export const config = {
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
      * - api routes (let them handle their own auth)
+     * - .netlify/functions/* (Netlify Functions handle their own auth;
+     *   without this exclusion, background functions get redirected
+     *   to /login and never execute)
      */
-    "/((?!_next/static|_next/image|favicon.ico|api).*)",
+    "/((?!_next/static|_next/image|favicon.ico|api|\\.netlify).*)",
   ],
 };
