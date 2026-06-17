@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { MODELS } from "@/lib/anthropic";
 export const dynamic = "force-dynamic";
 
 const SYSTEM_PROMPT = `You are a commercial real estate listing data extraction specialist. You will receive text extracted from an Offering Memorandum (OM), property brochure, or listing document. Extract all property and listing details into structured JSON.
@@ -86,7 +87,7 @@ export async function POST(req: NextRequest) {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-5",
+        model: MODELS.SONNET,
         max_tokens: 4096,
         system: SYSTEM_PROMPT,
         messages: [{ role: "user", content: userContent }],

@@ -13,17 +13,18 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { MODELS } from "@/lib/anthropic";
 
 export const dynamic = "force-dynamic";
 // 30s should be plenty for parse + a single Haiku roundtrip; bump if huge OMs.
 export const maxDuration = 60;
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
-// Sonnet 4 (not Haiku) for OM extraction. Haiku is fine for rent-roll parse
+// Sonnet (not Haiku) for OM extraction. Haiku is fine for rent-roll parse
 // where the structure is rigid; OMs are prose-heavy and Haiku has been
-// observed to hallucinate prices/NOI. Sonnet stays well under the 22s
-// timeout and is ~6¢/extraction — worth it for multi-million-dollar listings.
-const ANTHROPIC_MODEL = "claude-sonnet-4-20250514";
+// observed to hallucinate prices/NOI. Sonnet is worth the cost for
+// multi-million-dollar listings.
+const ANTHROPIC_MODEL = MODELS.SONNET;
 const ANTHROPIC_VERSION = "2023-06-01";
 
 // Fields we ask Claude to extract from an OM. Subset of the property schema —

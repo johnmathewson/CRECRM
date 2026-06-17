@@ -21,9 +21,10 @@
  */
 
 import type { ContactDetail } from "./relationship-queries";
+import { MODELS } from "@/lib/anthropic";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
-const MODEL = "claude-haiku-4-5-20251001"; // matches CLAUDE.md production model
+const MODEL = MODELS.HAIKU;
 const MAX_TOKENS = 200;
 
 const SYSTEM_PROMPT = `You are a senior CRE broker's attentive associate. Given structured facts about a contact, write ONE sentence (15-30 words) that captures what's worth noticing about this relationship right now.

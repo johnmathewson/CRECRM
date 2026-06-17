@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { MODELS } from "@/lib/anthropic";
 
 // This route connects to Claude with LIVE database context.
 // Uses a SECURITY DEFINER Postgres function to pull all data in one call,
@@ -216,7 +217,7 @@ Use this data to answer John's questions accurately. Reference specific deal nam
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: MODELS.SONNET,
         max_tokens: 1500,
         system: systemPrompt,
         messages: [{ role: "user", content: message }],
