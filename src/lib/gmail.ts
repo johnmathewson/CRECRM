@@ -133,6 +133,26 @@ export async function getMessage(accessToken: string, messageId: string): Promis
   return gmailJson<GmailMessage>(`/messages/${messageId}?format=full`, accessToken);
 }
 
+/**
+ * RFC 2047 encode a header value if it contains any non-ASCII byte.
+ * ASCII-only values pass through unchanged (cheaper, more readable in
+ * raw message dumps). Non-ASCII values become a single base64
+ * encoded-word: =?UTF-8?B?<base64>?= — which Gmail, Apple Mail,
+ * Outlook, and Outlook web all decode correctly.
+ *
+ * Note: RFC 2047 caps a single encoded-word at 75 chars. For the
+ * subject lengths Steward and the rest of the CRM use (well under
+ * 50 chars of source text), the base64 expansion still fits. If we
+ * ever want to encode 100+ char subjects with mostly non-ASCII
+ * content, we'd need to chunk into multiple encoded-words.
+ */
+function encodeHeaderValue(s: string): string {
+  // eslint-disable-next-line no-control-regex
+  if (/^[\x00-\x7F]*$/.test(s)) return s;
+  const b64 = Buffer.from(s, "utf8").toString("base64");
+  return `=?UTF-8?B?${b64}?=`;
+}
+
 export interface SendMessageInput {
   to: string;
   from: string; // "John Mathewson <inquiries@stewardshipcre.com>"
@@ -165,7 +185,7 @@ export async function sendMessage(
   const headers: string[] = [
     `From: ${input.from}`,
     `To: ${input.to}`,
-    `Subject: ${input.subject}`,
+    `Subject: ${encodeHeaderValue(input.subject)}`,
     "MIME-Version: 1.0",
   ];
   if (input.inReplyTo) headers.push(`In-Reply-To: ${input.inReplyTo}`);
