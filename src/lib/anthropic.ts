@@ -41,16 +41,41 @@ export interface AnthropicMessage {
   content: string | any[];
 }
 
+export interface AnthropicToolDefinition {
+  name: string;
+  description: string;
+  input_schema: {
+    type: "object";
+    properties: Record<string, any>;
+    required?: string[];
+  };
+}
+
 export interface AnthropicCallOptions {
   model: AnthropicModel;
   system?: string;
   messages: AnthropicMessage[];
   maxTokens?: number;
   temperature?: number;
+  /** Tool definitions exposed to the model. If omitted, the model can only return text. */
+  tools?: AnthropicToolDefinition[];
+  /** Force a particular tool choice. Default is "auto" when tools are present. */
+  toolChoice?: { type: "auto" | "any" | "tool"; name?: string };
+}
+
+export interface AnthropicContentBlock {
+  type: "text" | "tool_use" | string;
+  text?: string;
+  id?: string;
+  name?: string;
+  input?: any;
 }
 
 export interface AnthropicCallResult {
+  /** Concatenated text across any "text" content blocks. Empty string if only tool_use blocks. */
   text: string;
+  /** Full content array — needed for tool-use loops where we hand the assistant turn back unchanged. */
+  content: AnthropicContentBlock[];
   usage?: { input_tokens: number; output_tokens: number };
   stopReason?: string;
   raw?: any;
@@ -90,6 +115,8 @@ export async function callAnthropic(opts: AnthropicCallOptions): Promise<Anthrop
         temperature: opts.temperature ?? 0.7,
         system: opts.system,
         messages: opts.messages,
+        ...(opts.tools && opts.tools.length > 0 ? { tools: opts.tools } : {}),
+        ...(opts.toolChoice ? { tool_choice: opts.toolChoice } : {}),
       }),
     });
 
@@ -107,8 +134,12 @@ export async function callAnthropic(opts: AnthropicCallOptions): Promise<Anthrop
         // time it happens, not the tenth.
         console.warn(`[anthropic] requested model "${opts.model}" failed; succeeded on fallback "${model}". Tried: ${JSON.stringify(tried)}`);
       }
-      const text = data.content?.[0]?.type === "text" ? data.content[0].text : "";
-      return { text, usage: data.usage, stopReason: data.stop_reason, raw: data };
+      const content: AnthropicContentBlock[] = Array.isArray(data.content) ? data.content : [];
+      const text = content
+        .filter((c) => c.type === "text" && typeof c.text === "string")
+        .map((c) => c.text as string)
+        .join("");
+      return { text, content, usage: data.usage, stopReason: data.stop_reason, raw: data };
     }
 
     const msg = data?.error?.message || `Anthropic API error (status ${res.status})`;
