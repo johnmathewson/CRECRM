@@ -10,5 +10,9 @@
   # function's exported `config.schedule` (see netlify/functions/poll-gmail.mts).
   directory = "netlify/functions"
 
+  # Bundle the agents/ directory (markdown playbooks) with every
+  # function so readFileSync resolves at runtime.
+  included_files = ["agents/**"]
+
 [[plugins]]
   package = "@netlify/plugin-nextjs"

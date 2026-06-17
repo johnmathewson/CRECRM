@@ -1,25 +1,38 @@
 /**
  * POST /api/agents/steward/run
  *
- * Manual trigger for the Steward agent. Used for testing + for the
- * "regenerate brief" button on the sidebar.
+ * Kicks off a Steward brief generation via the Netlify Background
+ * Function (steward-run-background). Returns 202 immediately —
+ * Steward's real run takes 30-90s, well beyond the Netlify Edge
+ * synchronous timeout, so we don't try to wait synchronously here.
  *
- * Body:
+ * Body (all optional):
  *   {
  *     briefType?: "daily" | "weekly",   // defaults to "daily"
  *     briefDate?: "2026-06-17",          // defaults to today's date
- *     dryRun?: boolean,                  // if true, doesn't write to DB
+ *     dryRun?: boolean,                  // if true, skips DB write
  *   }
  *
- * Auth: this endpoint is open for local/internal testing. Add a
- * x-cron-secret header check before exposing it broader.
+ * Response:
+ *   202: { ok: true, status: "queued", message: "..." }
+ *   500: { ok: false, error: "..." }
+ *
+ * Caller polls `daily_briefings` (filter org_id + brief_type + today's
+ * date) to see when the row appears. The sidebar "Today's Brief" view
+ * does exactly this with a 5s refresh.
+ *
+ * Auth: open for now (single-tenant, behind the broker's session). Add
+ * a session check before this is reachable from anywhere John doesn't
+ * personally control.
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { runStewardBrief } from "@/lib/agents/steward";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300; // Steward can run 30-60s on a busy day
+// This route returns ~immediately. The actual agent work happens in
+// the background function. Keep maxDuration small so a hung kick
+// surfaces fast.
+export const maxDuration = 15;
 
 export async function POST(req: NextRequest) {
   let body: { briefType?: "daily" | "weekly"; briefDate?: string; dryRun?: boolean };
@@ -29,30 +42,44 @@ export async function POST(req: NextRequest) {
     body = {};
   }
 
+  // Background function URL. In production, the Next.js route and the
+  // background function live on the same Netlify site, so the function
+  // URL is resolvable via relative path or the URL env var.
+  const baseUrl = process.env.URL || req.nextUrl.origin;
+  const bgUrl = `${baseUrl}/.netlify/functions/steward-run-background`;
+
   try {
-    const result = await runStewardBrief({
-      briefType: body.briefType ?? "daily",
-      briefDate: body.briefDate,
-      dryRun: !!body.dryRun,
+    // Fire-and-forget: kick the background function, don't await its
+    // completion. We get back a 202 from Netlify as soon as it accepts
+    // the request — that's our "queued" signal.
+    const res = await fetch(bgUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
     });
-    return NextResponse.json({
-      ok: true,
-      briefing: {
-        id: result.briefingId,
-        date: result.briefDate,
-        type: result.briefType,
-        sources_read: result.sourcesRead,
-        iterations: result.iterations,
-        tokens: result.tokens,
-        duration_ms: result.durationMs,
-        tool_calls: result.toolCallCount,
-        model: result.modelUsed,
+
+    // Netlify Background Functions return 202. Anything outside 200-299
+    // means the kick itself failed (not the agent — the kick).
+    if (!res.ok && res.status !== 202) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Background function kick failed: HTTP ${res.status} ${text.slice(0, 200)}`);
+    }
+
+    return NextResponse.json(
+      {
+        ok: true,
+        status: "queued",
+        message:
+          "Steward is generating the brief. Poll daily_briefings (filter org + type + date) or refresh the sidebar to see the result.",
+        brief_type: body.briefType ?? "daily",
+        brief_date: body.briefDate ?? new Date().toISOString().slice(0, 10),
+        dry_run: !!body.dryRun,
       },
-      content: result.contentText,
-    });
+      { status: 202 }
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error("[steward.run]", err);
+    console.error("[steward.run] kick failed:", err);
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });
   }
 }
