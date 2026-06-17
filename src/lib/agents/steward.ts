@@ -25,10 +25,18 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { MODELS } from "@/lib/anthropic";
+import { getActiveGmailToken } from "@/lib/gmail-auth";
+import { sendCrmEmail } from "@/lib/cre-os/send-crm-email";
 import { runAgent } from "./run-agent";
+import { renderBriefHtml, renderBriefPlaintext } from "./render-brief";
 import { STEWARD_TOOLS } from "./tools/steward-tools";
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
+
+// Email envelope. Edit these constants OR move to env vars when we
+// want to flip Steward's sender/recipient without a code change.
+const STEWARD_EMAIL_FROM = process.env.STEWARD_EMAIL_FROM ?? "inquiries@stewardshipcre.com";
+const STEWARD_EMAIL_TO = process.env.STEWARD_EMAIL_TO ?? "john@johnmathewson.co";
 
 // Resolve the playbook path at runtime. process.cwd() is the project
 // root in both `next dev` and Netlify builds.
@@ -156,6 +164,13 @@ export async function runStewardBrief(opts: RunStewardOptions): Promise<RunStewa
     };
   }
 
+  // Render once. The HTML version goes in the DB so the sidebar can
+  // serve it without re-rendering, and into the email body. The
+  // markdown stays in content_text so the next brief's
+  // get_yesterday_brief tool returns clean prose.
+  const contentText = agentResult.text;
+  const contentHtml = renderBriefHtml(contentText, { briefDate });
+
   const sb = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -169,8 +184,8 @@ export async function runStewardBrief(opts: RunStewardOptions): Promise<RunStewa
         brief_type: briefType,
         brief_date: briefDate,
         generated_at: new Date().toISOString(),
-        content_text: agentResult.text,
-        content_html: null, // render-brief.ts populates this in a follow-up
+        content_text: contentText,
+        content_html: contentHtml,
         reasoning,
         sources_read: sourcesRead,
         model_used: MODELS.SONNET,
@@ -193,11 +208,66 @@ export async function runStewardBrief(opts: RunStewardOptions): Promise<RunStewa
     throw new Error(`Failed to persist briefing: ${error.message}`);
   }
 
+  const briefingId = data?.id ?? null;
+
+  // ── Email the brief ─────────────────────────────────────────────────
+  // Best-effort: if Gmail OAuth is not configured or the send fails,
+  // record the error on the briefing row but DON'T throw — the brief
+  // itself succeeded and we want the row in place for the sidebar.
+  let emailSentAt: string | null = null;
+  let emailMessageId: string | null = null;
+  let emailError: string | null = null;
+
+  try {
+    const token = await getActiveGmailToken(sb);
+    if (!token) {
+      emailError = "Gmail OAuth not configured — no active token row";
+    } else {
+      const subjectDate = new Date(briefDate + "T12:00:00Z").toLocaleDateString(
+        "en-US",
+        { weekday: "short", month: "long", day: "numeric", timeZone: "America/Chicago" }
+      );
+      const subject =
+        briefType === "weekly"
+          ? `📅 Steward — Week Ahead · ${subjectDate}`
+          : `☀️ Steward — Daily Brief · ${subjectDate}`;
+
+      const sent = await sendCrmEmail(sb, token.accessToken, {
+        to: STEWARD_EMAIL_TO,
+        from: STEWARD_EMAIL_FROM,
+        subject,
+        bodyText: renderBriefPlaintext(contentText),
+        bodyHtml: contentHtml,
+        leadId: null,
+        propertyId: null,
+        contactId: null,
+        source: briefType === "weekly" ? "steward_weekly" : "steward_daily",
+        rawPayloadExtra: { briefing_id: briefingId, brief_date: briefDate },
+      });
+      emailSentAt = sent.sentAt;
+      emailMessageId = sent.gmailMessageId;
+    }
+  } catch (err) {
+    emailError = err instanceof Error ? err.message : String(err);
+  }
+
+  // Stamp delivery state on the briefing row (or the error if it failed).
+  if (briefingId && (emailSentAt || emailError)) {
+    await sb
+      .from("daily_briefings")
+      .update({
+        email_sent_at: emailSentAt,
+        email_message_id: emailMessageId,
+        email_error: emailError,
+      })
+      .eq("id", briefingId);
+  }
+
   return {
-    briefingId: data?.id ?? null,
+    briefingId,
     briefDate,
     briefType,
-    contentText: agentResult.text,
+    contentText,
     reasoning,
     sourcesRead,
     modelUsed: MODELS.SONNET,

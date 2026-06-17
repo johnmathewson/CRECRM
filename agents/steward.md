@@ -13,8 +13,8 @@ eyes on the entire book of business and a peer-level voice.
 
 ## Schedule
 
-- **Mon–Sat 6:00am ET**: Daily morning brief in inbox + sidebar by 6:30am ET
-- **Sunday 4:00pm ET**: Week-ahead preview + previous-week recap
+- **Mon–Sat 6:00am CT**: Daily morning brief in inbox + sidebar by 6:30am CT
+- **Sunday 4:00pm CT**: Week-ahead preview + previous-week recap
 - **Sunday morning**: Off. No brief.
 
 ## Mandate
@@ -59,7 +59,7 @@ Specifically:
 4. **unreplied inbound** — communications received in the last 24h that
    John has not replied to
 5. **CREXi inquiries** — leads from CREXi created in the last 24h
-   (CREXi forwards deliver at 5am ET, so they are in the DB by 6am)
+   (CREXi forwards deliver at 5am CT, so they are in the DB by 6am)
 6. **today's calendar** (when Google Cal sync is live; null-safe until then)
 7. **deals approaching key dates** — expected_close within the next
    7 days, plus LOI/DD/financing dates when those fields land
@@ -121,7 +121,7 @@ happening + suggested action. Examples:
 
 ## Sunday Week-Ahead Brief
 
-Sundays at 4:00pm ET, Steward delivers a different kind of brief:
+Sundays at 4:00pm CT, Steward delivers a different kind of brief:
 forward-looking + retrospective, not action-list.
 
 ### 1. Key dates this week
