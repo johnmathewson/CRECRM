@@ -42,7 +42,7 @@ export const maxDuration = 60;
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function fetchAttachmentBuffer(accessToken: string, messageId: string): Promise<{ filename: string; buf: Buffer } | null> {
+async function fetchAttachmentBuffers(accessToken: string, messageId: string): Promise<Array<{ filename: string; buf: Buffer }>> {
   const msgRes = await fetch(
     `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`,
     { headers: { Authorization: `Bearer ${accessToken}` } }
@@ -50,41 +50,66 @@ async function fetchAttachmentBuffer(accessToken: string, messageId: string): Pr
   if (!msgRes.ok) throw new Error(`Gmail message fetch failed: ${msgRes.status}`);
   const msg = await msgRes.json();
 
-  // Walk parts to find first Lead Report attachment — XLSX preferred, CSV fallback.
-  // CREXi switched from .xlsx to .csv in mid-2026; accept both.
+  // Walk parts and collect EVERY Lead Report attachment in the email.
+  // A single email can carry multiple attachments — e.g. Liberty Square +
+  // Super 8 in one forward. The old code returned the FIRST hit and stopped,
+  // silently dropping the second. We now collect them all and the caller
+  // processes each one as a separate report.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function find(part: any): { filename: string; attachmentId: string } | null {
+  function collect(part: any, out: Array<{ filename: string; attachmentId: string }>): void {
     if (part?.body?.attachmentId) {
       const fn: string = part.filename || "";
       if (/\.(xlsx|csv)$/i.test(fn)) {
-        return { filename: fn, attachmentId: part.body.attachmentId };
+        out.push({ filename: fn, attachmentId: part.body.attachmentId });
       }
     }
-    if (part?.parts) {
-      // Prefer XLSX over CSV if both are present
-      let csvHit: { filename: string; attachmentId: string } | null = null;
-      for (const p of part.parts) {
-        const hit = find(p);
-        if (!hit) continue;
-        if (/\.xlsx$/i.test(hit.filename)) return hit; // XLSX wins immediately
-        if (!csvHit) csvHit = hit;                     // stash first CSV
-      }
-      return csvHit;
+    if (Array.isArray(part?.parts)) {
+      for (const p of part.parts) collect(p, out);
     }
-    return null;
   }
-  const hit = find(msg.payload);
-  if (!hit) return null;
+  const hits: Array<{ filename: string; attachmentId: string }> = [];
+  collect(msg.payload, hits);
+  if (hits.length === 0) return [];
 
-  const attRes = await fetch(
-    `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}/attachments/${hit.attachmentId}`,
-    { headers: { Authorization: `Bearer ${accessToken}` } }
-  );
-  if (!attRes.ok) throw new Error(`Attachment fetch failed: ${attRes.status}`);
-  const att = await attRes.json();
-  const data: string = att.data || "";
-  const buf = Buffer.from(data.replace(/-/g, "+").replace(/_/g, "/"), "base64");
-  return { filename: hit.filename, buf };
+  // De-dupe by attachmentId in case the same part is referenced multiple
+  // times (Gmail occasionally does this for nested multipart structures).
+  const seen = new Set<string>();
+  const unique = hits.filter((h) => {
+    if (seen.has(h.attachmentId)) return false;
+    seen.add(h.attachmentId);
+    return true;
+  });
+
+  // Prefer XLSX over CSV when BOTH exist for the same property (i.e. CREXi
+  // sometimes attaches both formats). Dedupe by filename-without-extension.
+  const byBaseName = new Map<string, { filename: string; attachmentId: string }>();
+  for (const h of unique) {
+    const base = h.filename.replace(/\.(xlsx|csv)$/i, "").toLowerCase();
+    const existing = byBaseName.get(base);
+    if (!existing) {
+      byBaseName.set(base, h);
+    } else {
+      // XLSX wins over CSV for the same property
+      const existingIsXlsx = /\.xlsx$/i.test(existing.filename);
+      const newIsXlsx = /\.xlsx$/i.test(h.filename);
+      if (newIsXlsx && !existingIsXlsx) byBaseName.set(base, h);
+    }
+  }
+
+  // Fetch each attachment binary
+  const results: Array<{ filename: string; buf: Buffer }> = [];
+  for (const hit of Array.from(byBaseName.values())) {
+    const attRes = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}/attachments/${hit.attachmentId}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (!attRes.ok) throw new Error(`Attachment fetch failed for ${hit.filename}: ${attRes.status}`);
+    const att = await attRes.json();
+    const data: string = att.data || "";
+    const buf = Buffer.from(data.replace(/-/g, "+").replace(/_/g, "/"), "base64");
+    results.push({ filename: hit.filename, buf });
+  }
+  return results;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -655,12 +680,119 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const attachment = await fetchAttachmentBuffer(token.accessToken, body.gmail_message_id);
-    if (!attachment) {
+    // Fetch ALL XLSX/CSV attachments — a single email can carry multiple
+    // (e.g. Liberty Square + Super 8 in one forward). Each is processed
+    // independently so one bad file doesn't block the others.
+    const attachments = await fetchAttachmentBuffersResolved(token.accessToken, body.gmail_message_id);
+    if (attachments.length === 0) {
       if (jobId) await supabase.from("import_jobs").update({ status: "failed", error_log: { error: "no attachment found" }, completed_at: new Date().toISOString() }).eq("id", jobId);
       return NextResponse.json({ error: "No Lead Report attachment found on this message" }, { status: 404 });
     }
 
+    // Process each attachment as its own report. Aggregate the results
+    // into a single import_jobs row + response so the caller (poll-gmail)
+    // sees one consolidated outcome for the email.
+    type PerAttachmentResult = {
+      filename: string;
+      format: "xlsx_per_property" | "csv_master";
+      ok: boolean;
+      error?: string;
+      property?: { id: string; name: string } | null;
+      activity?: unknown;
+      lead_count?: number;
+      inserted?: number;
+      updated?: number;
+      skipped?: number;
+      hot_leads_queued?: number;
+      warnings?: string[];
+      properties?: unknown;
+      unmatched_properties?: string[];
+    };
+    const perAttachment: PerAttachmentResult[] = [];
+
+    for (const attachment of attachments) {
+      const r = await processOneAttachment(supabase, attachment, !!body.dryRun);
+      perAttachment.push(r);
+    }
+
+    const okCount = perAttachment.filter((r) => r.ok).length;
+    const failCount = perAttachment.length - okCount;
+    const totalInserted = perAttachment.reduce((s, r) => s + (r.inserted ?? 0), 0);
+    const totalUpdated = perAttachment.reduce((s, r) => s + (r.updated ?? 0), 0);
+    const totalSkipped = perAttachment.reduce((s, r) => s + (r.skipped ?? 0), 0);
+    const totalLeads = perAttachment.reduce((s, r) => s + (r.lead_count ?? 0), 0);
+    const totalHot = perAttachment.reduce((s, r) => s + (r.hot_leads_queued ?? 0), 0);
+
+    if (jobId) {
+      await supabase.from("import_jobs").update({
+        status: okCount > 0 ? "completed" : "failed",
+        total_records: totalLeads,
+        processed_records: totalInserted + totalUpdated,
+        failed_records: totalSkipped,
+        completed_at: new Date().toISOString(),
+        error_log: {
+          attachments: perAttachment,
+          attachment_count: attachments.length,
+          ok_count: okCount,
+          fail_count: failCount,
+          hot_leads_queued: totalHot,
+        },
+      }).eq("id", jobId);
+    }
+
+    return NextResponse.json({
+      ok: okCount > 0,
+      dryRun: !!body.dryRun,
+      attachment_count: attachments.length,
+      ok_count: okCount,
+      fail_count: failCount,
+      total_leads: totalLeads,
+      inserted: totalInserted,
+      updated: totalUpdated,
+      skipped: totalSkipped,
+      hot_leads_queued: totalHot,
+      attachments: perAttachment,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (jobId) await supabase.from("import_jobs").update({ status: "failed", error_log: { error: msg }, completed_at: new Date().toISOString() }).eq("id", jobId);
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+// Thin wrapper that catches errors thrown by the Gmail attachment fetch
+// so the caller can decide how to respond. Returns [] on hard failure.
+async function fetchAttachmentBuffersResolved(accessToken: string, messageId: string): Promise<Array<{ filename: string; buf: Buffer }>> {
+  try {
+    return await fetchAttachmentBuffers(accessToken, messageId);
+  } catch (err) {
+    console.error(`[crexi-report] fetchAttachmentBuffers failed:`, err);
+    return [];
+  }
+}
+
+// Process a single XLSX or CSV attachment. Mirrors the original single-
+// attachment flow but returns a structured result instead of writing to
+// import_jobs directly — the caller aggregates results across attachments
+// into one job row.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function processOneAttachment(supabase: any, attachment: { filename: string; buf: Buffer }, dryRun: boolean): Promise<{
+  filename: string;
+  format: "xlsx_per_property" | "csv_master";
+  ok: boolean;
+  error?: string;
+  property?: { id: string; name: string } | null;
+  activity?: unknown;
+  lead_count?: number;
+  inserted?: number;
+  updated?: number;
+  skipped?: number;
+  hot_leads_queued?: number;
+  warnings?: string[];
+  properties?: unknown;
+  unmatched_properties?: string[];
+}> {
+  try {
     const isCsv = /\.csv$/i.test(attachment.filename);
 
     // ── CSV path: all-property master format ────────────────────────────────
@@ -669,8 +801,7 @@ export async function POST(req: NextRequest) {
       const groups = parseMasterCsv(csvText);
 
       if (groups.length === 0) {
-        if (jobId) await supabase.from("import_jobs").update({ status: "failed", error_log: { error: "no leads parsed from CSV" }, completed_at: new Date().toISOString() }).eq("id", jobId);
-        return NextResponse.json({ ok: false, error: "CSV parsed but produced 0 lead groups" });
+        return { filename: attachment.filename, format: "csv_master", ok: false, error: "CSV parsed but produced 0 lead groups" };
       }
 
       let totalLeads = 0, inserted = 0, updated = 0, skipped = 0, hotLeadsQueued = 0;
@@ -687,7 +818,7 @@ export async function POST(req: NextRequest) {
         }
 
         let propHot = 0;
-        if (!body.dryRun) {
+        if (!dryRun) {
           for (const lead of group.leads) {
             const r = await upsertLead(supabase, prop.id, lead);
             if (r.result === "inserted") inserted++;
@@ -708,60 +839,45 @@ export async function POST(req: NextRequest) {
         propertyResults.push({ crexiId: group.crexiPropertyId, name: prop.name, matched: true, leads: group.leads.length, hot: propHot });
       }
 
-      if (jobId) {
-        await supabase.from("import_jobs").update({
-          status: "completed",
-          total_records: totalLeads,
-          processed_records: inserted + updated,
-          failed_records: skipped,
-          completed_at: new Date().toISOString(),
-          error_log: {
-            format: "csv_master",
-            filename: attachment.filename,
-            properties: propertyResults,
-            unmatched_properties: unmatchedProperties,
-            hot_leads_queued: hotLeadsQueued,
-          },
-        }).eq("id", jobId);
-      }
-
-      return NextResponse.json({
-        ok: true,
-        dryRun: !!body.dryRun,
+      return {
+        filename: attachment.filename,
         format: "csv_master",
-        total_leads: totalLeads,
+        ok: true,
+        lead_count: totalLeads,
         inserted,
         updated,
         skipped,
         hot_leads_queued: hotLeadsQueued,
         properties: propertyResults,
         unmatched_properties: unmatchedProperties,
-      });
+      };
     }
 
     // ── XLSX path: per-property format (original) ────────────────────────────
     const parsed = parseCrexiReport(attachment.buf);
     if (parsed.leads.length === 0) {
-      if (jobId) await supabase.from("import_jobs").update({ status: "failed", error_log: { error: "no leads parsed", warnings: parsed.warnings }, completed_at: new Date().toISOString() }).eq("id", jobId);
-      return NextResponse.json({
+      return {
+        filename: attachment.filename,
+        format: "xlsx_per_property",
         ok: false,
-        error: "Parser ran but produced 0 leads",
-        parsed: { propertyName: parsed.propertyName, propertyAddress: parsed.propertyAddress, warnings: parsed.warnings },
-      });
+        error: `Parser ran but produced 0 leads (parsed: name="${parsed.propertyName}" addr="${parsed.propertyAddress}")`,
+        warnings: parsed.warnings,
+      };
     }
 
     const propMatch = await matchProperty(supabase, parsed, attachment.filename);
     if (!propMatch) {
-      if (jobId) await supabase.from("import_jobs").update({ status: "failed", error_log: { error: "no property match", parsed: { propertyName: parsed.propertyName, propertyAddress: parsed.propertyAddress } }, completed_at: new Date().toISOString() }).eq("id", jobId);
-      return NextResponse.json({
+      return {
+        filename: attachment.filename,
+        format: "xlsx_per_property",
         ok: false,
-        error: "Could not match a property",
-        parsed: { propertyName: parsed.propertyName, propertyAddress: parsed.propertyAddress, leadCount: parsed.leads.length },
-      });
+        error: `Could not match a property (parsed: name="${parsed.propertyName}" addr="${parsed.propertyAddress}" leads=${parsed.leads.length})`,
+        warnings: parsed.warnings,
+      };
     }
 
     let inserted = 0, updated = 0, skipped = 0, hotLeadsQueued = 0;
-    if (!body.dryRun) {
+    if (!dryRun) {
       for (const lead of parsed.leads) {
         const r = await upsertLead(supabase, propMatch.id, lead);
         if (r.result === "inserted") inserted++;
@@ -778,27 +894,10 @@ export async function POST(req: NextRequest) {
       hotLeadsQueued = parsed.leads.filter(isHotLead).length;
     }
 
-    if (jobId) {
-      await supabase.from("import_jobs").update({
-        status: "completed",
-        total_records: parsed.leads.length,
-        processed_records: inserted + updated,
-        failed_records: skipped,
-        completed_at: new Date().toISOString(),
-        error_log: {
-          format: "xlsx_per_property",
-          property: propMatch,
-          activity: parsed.activity,
-          warnings: parsed.warnings,
-          hot_leads_queued: hotLeadsQueued,
-        },
-      }).eq("id", jobId);
-    }
-
-    return NextResponse.json({
-      ok: true,
-      dryRun: !!body.dryRun,
+    return {
+      filename: attachment.filename,
       format: "xlsx_per_property",
+      ok: true,
       property: propMatch,
       activity: parsed.activity,
       lead_count: parsed.leads.length,
@@ -807,10 +906,14 @@ export async function POST(req: NextRequest) {
       skipped,
       hot_leads_queued: hotLeadsQueued,
       warnings: parsed.warnings,
-    });
+    };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (jobId) await supabase.from("import_jobs").update({ status: "failed", error_log: { error: msg }, completed_at: new Date().toISOString() }).eq("id", jobId);
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return {
+      filename: attachment.filename,
+      format: /\.csv$/i.test(attachment.filename) ? "csv_master" : "xlsx_per_property",
+      ok: false,
+      error: msg,
+    };
   }
 }
