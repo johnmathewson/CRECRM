@@ -1,8 +1,11 @@
 /**
- * GET   /api/properties/[id]  — full row
- * PATCH /api/properties/[id]  — partial update (any column on properties)
+ * GET    /api/properties/[id]  — full row
+ * PATCH  /api/properties/[id]  — partial update (any column on properties)
+ * DELETE /api/properties/[id]  — soft delete (sets is_dead=true).
+ *                                 Preserves tied deals/leads/comms history.
  *
- * Used by the Edit Listing modal and the "Publish to Website" toggle.
+ * Used by the Edit Listing modal, the "Publish to Website" toggle, and
+ * the property archive controls (card menu + workspace danger zone).
  * Slug is regenerated from address+city only when address or city changes
  * AND no slug was supplied — preserves existing public URLs by default.
  */
@@ -108,4 +111,50 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
   return NextResponse.json({ property: data });
+}
+
+/**
+ * Soft delete. Sets is_dead=true so the property disappears from active
+ * lists (which already filter `is_dead=false`) but tied history — deals,
+ * leads, communications, sale_comps, listing_metrics — stays intact.
+ * Reversal is a simple PATCH { is_dead: false }.
+ *
+ * Optional body:
+ *   { reason?: string }
+ *     → stored on dead_reason for audit. Defaults to "archived_by_user".
+ *
+ * Returns the archived row so the client can confirm the operation.
+ */
+export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+  // Body is optional — accept empty / missing JSON without error.
+  let reason = "archived_by_user";
+  try {
+    const body = await req.json();
+    if (body && typeof body.reason === "string" && body.reason.trim()) {
+      reason = body.reason.trim().slice(0, 200);
+    }
+  } catch {
+    // empty body → use default
+  }
+
+  const supabase = svc();
+  const { data, error } = await supabase
+    .from("properties")
+    .update({
+      is_dead: true,
+      dead_reason: reason,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", params.id)
+    .eq("organization_id", ORG_ID)
+    .select("id, name, address, is_dead, dead_reason")
+    .single();
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  if (!data) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  return NextResponse.json({ ok: true, property: data });
 }

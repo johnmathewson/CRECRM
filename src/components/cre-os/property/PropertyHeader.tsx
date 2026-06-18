@@ -8,6 +8,7 @@ import { EditPropertyDialog } from "./EditPropertyDialog";
 import { LogActivityDialog } from "@/components/cre-os/activities/LogActivityDialog";
 import { CreateTaskDialog } from "@/components/cre-os/tasks/CreateTaskDialog";
 import { BuyerFitDialog } from "@/components/cre-os/property/BuyerFitDialog";
+import { ArchivePropertyDialog } from "@/components/cre-os/property/ArchivePropertyDialog";
 import type { PropertyDetail } from "@/lib/cre-os/property-queries";
 
 const fmtMoney = (n: number | null) => {
@@ -34,6 +35,7 @@ export function PropertyHeader({ p }: { p: PropertyDetail }) {
   const [taskOpen, setTaskOpen] = useState(false);
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [buyerFitOpen, setBuyerFitOpen] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   // Close the mobile action menu on outside-click or Escape.
@@ -135,6 +137,9 @@ export function PropertyHeader({ p }: { p: PropertyDetail }) {
                 >
                   Run valuation
                 </a>
+                <div className="border-t border-white/[0.06]">
+                  <MenuItem onClick={() => { setArchiveOpen(true); setActionMenuOpen(false); }} tone="danger">Archive property</MenuItem>
+                </div>
               </div>
             )}
           </div>
@@ -175,6 +180,17 @@ export function PropertyHeader({ p }: { p: PropertyDetail }) {
             >
               Run valuation
             </a>
+            {/* Visual separator from constructive actions, then the
+                destructive Archive button. Keeps it discoverable without
+                making it the first thing clicked. */}
+            <div className="hidden lg:block w-px h-6 bg-white/[0.08] mx-1" aria-hidden="true" />
+            <button
+              onClick={() => setArchiveOpen(true)}
+              className="px-3.5 py-2.5 lg:px-3 lg:py-2 rounded border border-coral-500/30 bg-coral-500/[0.05] text-coral-400 hover:bg-coral-500/[0.15] hover:border-coral-400/50 font-heading text-[11px] font-semibold uppercase tracking-eyebrow transition-colors"
+              title="Archive this property. Soft delete — disappears from active lists, history stays intact, reversible."
+            >
+              Archive
+            </button>
           </div>
         </div>
       </div>
@@ -197,6 +213,13 @@ export function PropertyHeader({ p }: { p: PropertyDetail }) {
         propertyId={p.id}
         propertyName={p.name}
       />
+      <ArchivePropertyDialog
+        open={archiveOpen}
+        onClose={() => setArchiveOpen(false)}
+        propertyId={p.id}
+        propertyName={p.name}
+        propertyAddress={fullAddress || null}
+      />
     </div>
   );
 }
@@ -208,11 +231,14 @@ function MenuItem({
 }: {
   onClick: () => void;
   children: React.ReactNode;
-  tone?: "default" | "coral";
+  tone?: "default" | "coral" | "danger";
 }) {
-  const color = tone === "coral"
-    ? "text-coral-300 hover:bg-coral-400/[0.08]"
-    : "text-cream-dim hover:bg-white/[0.04] hover:text-cream";
+  const color =
+    tone === "coral"
+      ? "text-coral-300 hover:bg-coral-400/[0.08]"
+      : tone === "danger"
+        ? "text-coral-400 hover:bg-coral-500/[0.10]"
+        : "text-cream-dim hover:bg-white/[0.04] hover:text-cream";
   return (
     <button
       role="menuitem"

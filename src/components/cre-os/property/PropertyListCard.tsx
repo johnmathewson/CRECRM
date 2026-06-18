@@ -1,7 +1,9 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { StatusBadge } from "@/components/cre-os/StatusBadge";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
+import { ArchivePropertyDialog } from "./ArchivePropertyDialog";
 import type { PropertyCard } from "@/lib/cre-os/property-queries";
 
 const fmtMoney = (n: number | null) => {
@@ -29,6 +31,33 @@ export function PropertyListCard({ p }: { p: PropertyCard }) {
   const stageTone = pillToneForStage(p.pipelineStage);
   const urgent = p.priorityScore >= 3;
   const warm = p.priorityScore >= 1 && p.priorityScore < 3;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [hidden, setHidden] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  // Close menu on outside-click / Escape
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onDown(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setMenuOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
+
+  // Optimistically hide on archive — feels instant, parent refresh will
+  // reconcile when the page re-fetches.
+  if (hidden) return null;
 
   const cardBorder = urgent
     ? "border-l-2 border-l-coral-400 border-y border-r border-y-white/[0.06] border-r-white/[0.06]"
@@ -77,6 +106,49 @@ export function PropertyListCard({ p }: { p: PropertyCard }) {
         </div>
       </div>
 
+      {/* Kebab menu — corner overlay. Click stops the card-level link
+          nav (stopPropagation + preventDefault). Single archive action
+          for now; easy to extend with Edit / Pin / Duplicate later. */}
+      <div className="absolute top-2 right-2 z-10" ref={menuRef}>
+        <button
+          type="button"
+          aria-label="More actions"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setMenuOpen((v) => !v);
+          }}
+          className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity p-1.5 rounded border border-white/[0.08] bg-steward-base/80 hover:bg-steward-mid text-cream-subtle hover:text-cream"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5">
+            <circle cx="12" cy="5" r="1" />
+            <circle cx="12" cy="12" r="1" />
+            <circle cx="12" cy="19" r="1" />
+          </svg>
+        </button>
+        {menuOpen && (
+          <div
+            role="menu"
+            className="absolute right-0 top-full mt-1 w-44 rounded border border-white/[0.10] bg-steward-base shadow-panel-soft overflow-hidden"
+          >
+            <button
+              role="menuitem"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setMenuOpen(false);
+                setArchiveOpen(true);
+              }}
+              className="block w-full text-left px-3.5 py-2.5 font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-coral-400 hover:bg-coral-500/[0.10] transition-colors"
+            >
+              Archive property
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* Intelligence band — what's happening NOW */}
       {(p.priorityScore > 0 || p.daysSinceTouch !== null) && (
         <div className="px-5 py-3 border-t border-white/[0.04] bg-black/20">
@@ -94,6 +166,18 @@ export function PropertyListCard({ p }: { p: PropertyCard }) {
           )}
         </div>
       )}
+
+      {/* Archive dialog — portal-rendered so the card's <a> doesn't trap
+          the fixed overlay. Hides this card optimistically on success
+          while the parent list re-fetches. */}
+      <ArchivePropertyDialog
+        open={archiveOpen}
+        onClose={() => setArchiveOpen(false)}
+        propertyId={p.id}
+        propertyName={p.name}
+        propertyAddress={fullAddress || null}
+        onArchived={() => setHidden(true)}
+      />
     </a>
   );
 }
