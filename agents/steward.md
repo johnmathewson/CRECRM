@@ -59,7 +59,8 @@ Specifically:
 4. **unreplied inbound** — communications received in the last 24h that
    John has not replied to
 5. **CREXi inquiries** — leads from CREXi created in the last 24h
-   (CREXi forwards deliver at 5am CT, so they are in the DB by 6am)
+   (CREXi forwards deliver at ~6pm CT the night before, so the
+   24h lookback at 6am catches them with ~12 hours of cushion)
 6. **today's calendar** (when Google Cal sync is live; null-safe until then)
 7. **deals approaching key dates** — expected_close within the next
    7 days, plus LOI/DD/financing dates when those fields land
