@@ -179,6 +179,7 @@ export interface PropertyDetail {
   yourRole: string | null;
   transactionType: string | null;
   askingPrice: number | null;
+  leaseRate: number | null;
   sqft: number | null;
   units: number | null;
   acreage: number | null;
@@ -186,19 +187,46 @@ export interface PropertyDetail {
   noi: number | null;
   capRate: number | null;
   occupancyPct: number | null;
+  pricePerSf: number | null;
+
+  // Physical attributes — the kind of detail brokers list on a flyer
+  parkingSpaces: number | null;
+  parkingRatio: string | null;
+  zoning: string | null;
+  totalBuildings: number | null;
+  numberOfStories: number | null;
+
+  // Marketing copy + assets — fuel for OM / listing description / flyer
+  headline: string | null;
   description: string | null;
   notes: string | null;
   /** Optional anchor intel for AI outreach about this property — broker-authored.
    *  Injected into the personalizer prompt when present. Lives in properties.marketing_notes. */
   marketingNotes: string | null;
+  /** Marketing bullet points — jsonb array of strings. Used by the marketing
+   *  engine to seed flyer highlights and OM "investment highlights" sections. */
+  highlights: string[];
+  /** Image gallery — jsonb array. Shape varies historically (some have
+   *  {url, caption}, some are bare URLs), so kept loose. */
+  images: any[];
   /** Per-property document inventory + tier — used by the AI to know what
    *  to release and what to gate. Lives in properties.document_inventory. */
   documentInventory: DocumentInventoryItem[];
+  /** Where this property record came from. Useful for distinguishing
+   *  John-curated rows from public-record imports. */
+  dataSource: string | null;
   createdAt: string | null;
+
+  // External listing identity + state
+  crexiUrl: string | null;
+  crexiListingId: string | null;
+  loopnetUrl: string | null;
+  publishToWebsite: boolean | null;
 
   // Owner identity (from CoStar — True Owner is LLC unmask)
   ownerNameRaw: string | null;
   ownerType: string | null;
+  ownerState: string | null;
   ownerPhone: string | null;
   ownerContactName: string | null;
   ownerMailingAddress: string | null;
@@ -212,6 +240,12 @@ export interface PropertyDetail {
   trueOwnerCity: string | null;
   trueOwnerState: string | null;
   trueOwnerZip: string | null;
+  /** Recorded owner — county-record name, may differ from CoStar's
+   *  "owner" (which can be a subsidiary or operating entity). Useful
+   *  for skip-tracing when CoStar's owner is generic. */
+  recordedOwnerName: string | null;
+  recordedOwnerPhone: string | null;
+  recordedOwnerAddress: string | null;
 
   // Loan / debt
   mortgageMaturityDate: string | null;
@@ -222,12 +256,16 @@ export interface PropertyDetail {
   loanInterestRateType: string | null;
   loanType: string | null;
   loanCollateralType: string | null;
+  /** Originating broker/firm on the loan. Useful for refi outreach intel. */
+  loanOriginator: string | null;
 
   // Sale history
   lastSaleDate: string | null;
   lastSalePrice: number | null;
   yearsOwned: number | null;
   estimatedValue: number | null;
+  /** Computed signal score from the prospector enrichment pipeline. */
+  prospectorScore: number | null;
 
   // Listing state
   forSalePrice: number | null;
@@ -238,8 +276,8 @@ export interface PropertyDetail {
   buildingClass: string | null;
   marketName: string | null;
   submarket: string | null;
+  submarketCluster: string | null;
   tenancy: string | null;
-  numberOfStories: number | null;
   percentLeased: number | null;
   vacancyPct: number | null;
   rentPerSfYr: number | null;
@@ -247,14 +285,27 @@ export interface PropertyDetail {
   // Tax
   taxYear: number | null;
   taxTotal: number | null;
+  taxPerSf: number | null;
 
   // Service contacts (CoStar's record)
   propertyManagerName: string | null;
   propertyManagerPhone: string | null;
+  propertyManagerAddress: string | null;
+  salesCompanyName: string | null;
   salesContactName: string | null;
   salesContactPhone: string | null;
+  leasingCompanyName: string | null;
   leasingContactName: string | null;
   leasingContactPhone: string | null;
+
+  // Hotel-specific (asset_type=hospitality)
+  rooms: number | null;
+  hotelBrand: string | null;
+  hotelClass: string | null;
+
+  // Geo (for maps + market context queries)
+  latitude: number | null;
+  longitude: number | null;
 
   // Signals (from prospector enrichment)
   prospectorSignalFlags: string[];
@@ -405,22 +456,29 @@ export async function loadPropertyDetail(slug: string): Promise<PropertyDetail |
     .select(`
       id, slug, name, address, city, state, zip, county, apn,
       asset_type, sub_type, status, pipeline_stage, your_role, transaction_type,
-      asking_price, sqft, units, acreage, year_built, noi, cap_rate, occupancy_pct,
-      description, notes, marketing_notes, document_inventory, created_at,
-      owner_name_raw, owner_type, owner_phone, owner_contact_name,
+      asking_price, lease_rate, sqft, units, acreage, year_built, noi, cap_rate,
+      occupancy_pct, price_per_sf,
+      headline, description, notes, marketing_notes, highlights, images,
+      document_inventory, data_source, created_at,
+      parking_spaces, parking_ratio, zoning, total_buildings, number_of_stories,
+      crexi_url, crexi_listing_id, loopnet_url, publish_to_website,
+      owner_name_raw, owner_type, owner_state, owner_phone, owner_contact_name,
       owner_mailing_address, owner_mailing_city, owner_mailing_state, owner_mailing_zip,
       true_owner_name, true_owner_phone, true_owner_contact_name,
       true_owner_address, true_owner_city, true_owner_state, true_owner_zip,
+      recorded_owner_name, recorded_owner_phone, recorded_owner_address,
       mortgage_origination_date, mortgage_maturity_date, mortgage_balance, mortgage_lender,
-      loan_interest_rate, loan_interest_rate_type, loan_type, loan_collateral_type,
-      last_sale_date, last_sale_price, years_owned, estimated_value,
+      loan_interest_rate, loan_interest_rate_type, loan_type, loan_collateral_type, loan_originator,
+      last_sale_date, last_sale_price, years_owned, estimated_value, prospector_score,
       for_sale_price, for_sale_status, days_on_market,
-      building_class, market_name, submarket, tenancy, number_of_stories,
+      building_class, market_name, submarket, submarket_cluster, tenancy,
       percent_leased, vacancy_pct, rent_per_sf_yr,
-      tax_year, tax_total,
-      property_manager_name, property_manager_phone,
-      sales_contact_name, sales_contact_phone,
-      leasing_contact_name, leasing_contact_phone,
+      tax_year, tax_total, tax_per_sf,
+      property_manager_name, property_manager_phone, property_manager_address,
+      sales_company_name, sales_contact_name, sales_contact_phone,
+      leasing_company_name, leasing_contact_name, leasing_contact_phone,
+      rooms, hotel_brand, hotel_class,
+      latitude, longitude,
       prospector_signal_flags
     `)
     .eq("organization_id", ORG_ID)
@@ -456,6 +514,7 @@ export async function loadPropertyDetail(slug: string): Promise<PropertyDetail |
     yourRole: p.your_role,
     transactionType: p.transaction_type,
     askingPrice: numOrNull(p.asking_price),
+    leaseRate: numOrNull(p.lease_rate),
     sqft: p.sqft ?? null,
     units: p.units ?? null,
     acreage: numOrNull(p.acreage),
@@ -463,15 +522,36 @@ export async function loadPropertyDetail(slug: string): Promise<PropertyDetail |
     noi: numOrNull(p.noi),
     capRate: numOrNull(p.cap_rate),
     occupancyPct: numOrNull(p.occupancy_pct),
+    pricePerSf: numOrNull(p.price_per_sf),
+
+    // Physical attributes
+    parkingSpaces: p.parking_spaces ?? null,
+    parkingRatio: p.parking_ratio ?? null,
+    zoning: p.zoning ?? null,
+    totalBuildings: p.total_buildings ?? null,
+    numberOfStories: p.number_of_stories ?? null,
+
+    // Marketing copy + assets
+    headline: p.headline ?? null,
     description: p.description ?? null,
     notes: p.notes ?? null,
     marketingNotes: p.marketing_notes ?? null,
+    highlights: Array.isArray(p.highlights) ? (p.highlights as string[]) : [],
+    images: Array.isArray(p.images) ? (p.images as any[]) : [],
     documentInventory: (p.document_inventory ?? []) as DocumentInventoryItem[],
+    dataSource: p.data_source ?? null,
     createdAt: p.created_at ?? null,
+
+    // External listing identity
+    crexiUrl: p.crexi_url ?? null,
+    crexiListingId: p.crexi_listing_id ?? null,
+    loopnetUrl: p.loopnet_url ?? null,
+    publishToWebsite: p.publish_to_website ?? null,
 
     // Owner identity
     ownerNameRaw: p.owner_name_raw ?? null,
     ownerType: p.owner_type ?? null,
+    ownerState: p.owner_state ?? null,
     ownerPhone: p.owner_phone ?? null,
     ownerContactName: p.owner_contact_name ?? null,
     ownerMailingAddress: p.owner_mailing_address ?? null,
@@ -485,6 +565,9 @@ export async function loadPropertyDetail(slug: string): Promise<PropertyDetail |
     trueOwnerCity: p.true_owner_city ?? null,
     trueOwnerState: p.true_owner_state ?? null,
     trueOwnerZip: p.true_owner_zip ?? null,
+    recordedOwnerName: p.recorded_owner_name ?? null,
+    recordedOwnerPhone: p.recorded_owner_phone ?? null,
+    recordedOwnerAddress: p.recorded_owner_address ?? null,
 
     // Loan
     mortgageMaturityDate: p.mortgage_maturity_date ?? null,
@@ -495,12 +578,14 @@ export async function loadPropertyDetail(slug: string): Promise<PropertyDetail |
     loanInterestRateType: p.loan_interest_rate_type ?? null,
     loanType: p.loan_type ?? null,
     loanCollateralType: p.loan_collateral_type ?? null,
+    loanOriginator: p.loan_originator ?? null,
 
     // Sale history
     lastSaleDate: p.last_sale_date ?? null,
     lastSalePrice: numOrNull(p.last_sale_price),
     yearsOwned: p.years_owned ?? null,
     estimatedValue: numOrNull(p.estimated_value),
+    prospectorScore: numOrNull(p.prospector_score),
 
     // Listing state
     forSalePrice: numOrNull(p.for_sale_price),
@@ -511,8 +596,8 @@ export async function loadPropertyDetail(slug: string): Promise<PropertyDetail |
     buildingClass: p.building_class ?? null,
     marketName: p.market_name ?? null,
     submarket: p.submarket ?? null,
+    submarketCluster: p.submarket_cluster ?? null,
     tenancy: p.tenancy ?? null,
-    numberOfStories: p.number_of_stories ?? null,
     percentLeased: numOrNull(p.percent_leased),
     vacancyPct: numOrNull(p.vacancy_pct),
     rentPerSfYr: numOrNull(p.rent_per_sf_yr),
@@ -520,14 +605,27 @@ export async function loadPropertyDetail(slug: string): Promise<PropertyDetail |
     // Tax
     taxYear: p.tax_year ?? null,
     taxTotal: numOrNull(p.tax_total),
+    taxPerSf: numOrNull(p.tax_per_sf),
 
     // Service contacts
     propertyManagerName: p.property_manager_name ?? null,
     propertyManagerPhone: p.property_manager_phone ?? null,
+    propertyManagerAddress: p.property_manager_address ?? null,
+    salesCompanyName: p.sales_company_name ?? null,
     salesContactName: p.sales_contact_name ?? null,
     salesContactPhone: p.sales_contact_phone ?? null,
+    leasingCompanyName: p.leasing_company_name ?? null,
     leasingContactName: p.leasing_contact_name ?? null,
     leasingContactPhone: p.leasing_contact_phone ?? null,
+
+    // Hotel-specific
+    rooms: p.rooms ?? null,
+    hotelBrand: p.hotel_brand ?? null,
+    hotelClass: p.hotel_class ?? null,
+
+    // Geo
+    latitude: numOrNull(p.latitude),
+    longitude: numOrNull(p.longitude),
 
     // Signals
     prospectorSignalFlags: (p.prospector_signal_flags as string[]) ?? [],

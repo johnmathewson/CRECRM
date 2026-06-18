@@ -23,9 +23,13 @@ export function OverviewTab({ p }: { p: PropertyDetail }) {
   // Show the CoStar-derived owner/loan/listing panel only when we have any
   // of those fields populated (cold prospects mostly; warm assets may have
   // a subset).
-  const hasOwnershipData = !!(p.trueOwnerName || p.ownerNameRaw || p.ownerPhone || p.trueOwnerPhone);
-  const hasLoanData = !!(p.mortgageMaturityDate || p.mortgageLender || p.mortgageBalance);
+  const hasOwnershipData =
+    !!(p.trueOwnerName || p.ownerNameRaw || p.ownerPhone || p.trueOwnerPhone || p.recordedOwnerName);
+  const hasLoanData = !!(p.mortgageMaturityDate || p.mortgageLender || p.mortgageBalance || p.loanOriginator);
   const hasMarketData = !!(p.forSaleStatus || p.daysOnMarket || p.percentLeased || p.buildingClass);
+  const isHospitality = p.assetType === "hospitality" || !!p.hotelBrand || !!p.rooms;
+  const hasMarketingAssets =
+    !!p.headline || p.highlights.length > 0 || p.images.length > 0 || !!p.crexiUrl || !!p.loopnetUrl;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -43,12 +47,29 @@ export function OverviewTab({ p }: { p: PropertyDetail }) {
           )}
         </Panel>
 
+        {/* Marketing assets — fuel for the future OM/flyer/listing-description
+            generator. Headline, highlights, image count, external listing URLs.
+            Always rendered (empty state has its own copy) so the broker sees
+            the gap and can fill it via Edit details. */}
+        {(hasMarketingAssets || isHospitality) && (
+          <Panel eyebrow="Marketing assets" num={2} title="Inputs the marketing engine will use">
+            <MarketingAssetsPanel p={p} />
+          </Panel>
+        )}
+
+        {/* Hotel intelligence — only renders for hospitality assets. */}
+        {isHospitality && (
+          <Panel eyebrow="Hotel intelligence" num={3} title="Brand · class · keys">
+            <HotelIntelPanel p={p} />
+          </Panel>
+        )}
+
         {/* Marketing notes — anchor intel for AI outreach about THIS property.
             Gets injected into every personalizer prompt that involves this asset.
             Use it for: "Lead with 8.69% cap, not asking price", "Owner motivated
             for 60-day close", "Patel buyer pool is hot here — assume hospitality
             fluency", etc. Edits save instantly — no rebuild. */}
-        <Panel eyebrow="Marketing notes" num={2} title="What the AI should anchor on">
+        <Panel eyebrow="Marketing notes" num={4} title="What the AI should anchor on">
           <MarketingNotesEditor propertyId={p.id} initial={p.marketingNotes ?? ""} />
         </Panel>
 
@@ -177,29 +198,151 @@ export function OverviewTab({ p }: { p: PropertyDetail }) {
 }
 
 function KeyFactsGrid({ p }: { p: PropertyDetail }) {
+  // Compute price-per-SF (use stored if present, else derived from asking/SF).
+  const pricePerSf = p.pricePerSf ?? (p.askingPrice && p.sqft ? p.askingPrice / p.sqft : null);
+
+  // Lease rate is only meaningful on lease transactions; otherwise hide.
+  const showLeaseRate = p.transactionType === "lease" || p.transactionType === "sale_or_lease";
+
   const facts: Array<[string, string | null]> = [
     ["Asset type", p.assetType ? p.assetType.replace("_", " ") : null],
+    ["Sub-type", p.subType?.replace("_", " ") ?? null],
     ["Status", p.status?.replace("_", " ") ?? null],
     ["Pipeline stage", p.pipelineStage],
     ["Your role", p.yourRole?.replace("_", " ") ?? null],
     ["Transaction", p.transactionType?.replace("_", " ") ?? null],
     ["Asking price", p.askingPrice ? fmtMoney(p.askingPrice) : null],
+    ...(showLeaseRate ? ([["Lease rate", p.leaseRate ? `$${p.leaseRate.toFixed(2)}/SF` : null]] as Array<[string, string | null]>) : []),
     ["NOI (in-place)", p.noi ? fmtMoney(p.noi) : null],
     ["Cap rate", p.capRate ? `${(p.capRate * 100).toFixed(2)}%` : null],
+    ["$/SF", pricePerSf ? "$" + pricePerSf.toFixed(2) : null],
     ["Total SF", p.sqft ? p.sqft.toLocaleString() : null],
+    ["Acreage", p.acreage ? `${p.acreage.toFixed(2)}` : null],
+    ["Units", p.units ? p.units.toLocaleString() : null],
     ["Year built", p.yearBuilt ? p.yearBuilt.toString() : null],
     ["Occupancy", p.occupancyPct !== null ? `${(p.occupancyPct * 100).toFixed(0)}%` : null],
-    ["$/SF", p.askingPrice && p.sqft ? "$" + (p.askingPrice / p.sqft).toFixed(2) : null],
+    ["% Leased", p.percentLeased != null ? `${p.percentLeased}%` : null],
+    ["Vacancy", p.vacancyPct != null ? `${p.vacancyPct}%` : null],
+    ["Rent $/SF/yr", p.rentPerSfYr ? `$${p.rentPerSfYr.toFixed(2)}` : null],
+    ["Bldg class", p.buildingClass],
+    ["Tenancy", p.tenancy],
+    ["Stories", p.numberOfStories?.toString() ?? null],
+    ["Buildings", p.totalBuildings?.toString() ?? null],
+    ["Parking spaces", p.parkingSpaces?.toLocaleString() ?? null],
+    ["Parking ratio", p.parkingRatio],
+    ["Zoning", p.zoning],
+    ["Days on market", p.daysOnMarket?.toString() ?? null],
+    ["Submarket", p.submarket ?? p.submarketCluster],
+    ["Market", p.marketName],
+    ["Tax/yr", p.taxTotal ? fmtMoney(p.taxTotal) : null],
+    ["Tax/SF", p.taxPerSf ? `$${p.taxPerSf.toFixed(2)}` : null],
+    ["Estimated value", p.estimatedValue ? fmtMoney(p.estimatedValue) : null],
+    ["Prospector score", p.prospectorScore != null ? p.prospectorScore.toFixed(0) : null],
   ];
+
+  // Only render facts that have a value — keeps the grid scannable.
+  const visible = facts.filter(([, v]) => v !== null && v !== undefined && v !== "");
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3">
-      {facts.map(([k, v]) => (
+      {visible.map(([k, v]) => (
         <div key={k}>
           <div className="font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle">{k}</div>
-          <div className="mt-0.5 font-heading text-[14px] text-cream">{v ?? <span className="text-cream-subtle">—</span>}</div>
+          <div className="mt-0.5 font-heading text-[14px] text-cream">{v}</div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ── Marketing assets panel — the raw material for the future
+// marketing engine. Headline, highlights, image count, external listing
+// URLs, plus a publish-to-website status indicator. Conditional render —
+// hidden entirely when there's nothing marketing-shaped on file yet.
+function MarketingAssetsPanel({ p }: { p: PropertyDetail }) {
+  const hasAny =
+    !!p.headline ||
+    p.highlights.length > 0 ||
+    p.images.length > 0 ||
+    !!p.crexiUrl ||
+    !!p.loopnetUrl ||
+    !!p.description;
+  if (!hasAny) {
+    return (
+      <p className="font-body text-[13px] text-cream-subtle py-2">
+        No marketing assets on file yet. Add a headline, highlights, and images via Edit details, or wait for the
+        listing-description generator to seed them.
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-5">
+      {p.headline && (
+        <section>
+          <Eyebrow tone="muted">Headline</Eyebrow>
+          <p className="mt-1 font-display text-[18px] text-cream leading-snug">{p.headline}</p>
+        </section>
+      )}
+      {p.highlights.length > 0 && (
+        <section>
+          <Eyebrow tone="muted">Highlights ({p.highlights.length})</Eyebrow>
+          <ul className="mt-2 space-y-1.5 font-body text-[12.5px] text-cream-dim list-disc list-inside marker:text-coral-400">
+            {p.highlights.map((h, i) => (
+              <li key={i}>{h}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {(p.crexiUrl || p.loopnetUrl || p.publishToWebsite != null || p.images.length > 0) && (
+        <section className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
+          <Fact label="Images on file" value={p.images.length > 0 ? p.images.length.toString() : null} />
+          <Fact
+            label="On website"
+            value={p.publishToWebsite == null ? null : p.publishToWebsite ? "yes" : "no"}
+            tone={p.publishToWebsite ? "teal" : "default"}
+          />
+          {p.crexiUrl && (
+            <div>
+              <div className="font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle">CREXi</div>
+              <a
+                href={p.crexiUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-0.5 inline-block font-heading text-[12px] text-teal-300 hover:text-teal-200 underline-offset-2 hover:underline truncate"
+              >
+                view listing →
+              </a>
+            </div>
+          )}
+          {p.loopnetUrl && (
+            <div>
+              <div className="font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle">LoopNet</div>
+              <a
+                href={p.loopnetUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-0.5 inline-block font-heading text-[12px] text-teal-300 hover:text-teal-200 underline-offset-2 hover:underline truncate"
+              >
+                view listing →
+              </a>
+            </div>
+          )}
+        </section>
+      )}
+    </div>
+  );
+}
+
+// Hotel-specific panel — rendered only when asset_type=hospitality.
+// Captures brand/class/key-count — facts every hotel buyer asks about
+// in the first 30 seconds of a call.
+function HotelIntelPanel({ p }: { p: PropertyDetail }) {
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
+      <Fact label="Flag / brand" value={p.hotelBrand} tone={p.hotelBrand ? "coral" : "default"} />
+      <Fact label="Class" value={p.hotelClass} />
+      <Fact label="Keys" value={p.rooms?.toLocaleString() ?? null} />
+      <Fact label="Year built" value={p.yearBuilt?.toString() ?? null} />
     </div>
   );
 }
@@ -431,11 +574,14 @@ function OwnerLoanPanel({ p }: { p: PropertyDetail }) {
     : null;
   return (
     <div className="space-y-5">
-      {/* Owner */}
-      {(p.trueOwnerName || p.ownerNameRaw) && (
+      {/* Owner — up to three identities can be on file:
+            1. True Owner (CoStar LLC unmask) — the entity that actually controls
+            2. Recorded Owner (CoStar mailing record) — what shows on tax bill
+            3. County-recorded owner — the deed record (most authoritative) */}
+      {(p.trueOwnerName || p.ownerNameRaw || p.recordedOwnerName) && (
         <section>
           <Eyebrow tone="muted">Owner</Eyebrow>
-          <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {p.trueOwnerName && (
               <OwnerCard
                 label="True Owner (LLC unmask)"
@@ -451,7 +597,7 @@ function OwnerLoanPanel({ p }: { p: PropertyDetail }) {
             )}
             {p.ownerNameRaw && p.ownerNameRaw !== p.trueOwnerName && (
               <OwnerCard
-                label="Recorded Owner"
+                label="Recorded Owner (CoStar)"
                 name={p.ownerNameRaw}
                 contactName={p.ownerContactName}
                 phone={p.ownerPhone}
@@ -461,6 +607,20 @@ function OwnerLoanPanel({ p }: { p: PropertyDetail }) {
                 zip={p.ownerMailingZip}
               />
             )}
+            {p.recordedOwnerName &&
+              p.recordedOwnerName !== p.trueOwnerName &&
+              p.recordedOwnerName !== p.ownerNameRaw && (
+                <OwnerCard
+                  label="Recorded Owner (county deed)"
+                  name={p.recordedOwnerName}
+                  contactName={null}
+                  phone={p.recordedOwnerPhone}
+                  address={p.recordedOwnerAddress}
+                  city={null}
+                  state={null}
+                  zip={null}
+                />
+              )}
           </div>
         </section>
       )}
@@ -475,9 +635,11 @@ function OwnerLoanPanel({ p }: { p: PropertyDetail }) {
             <Fact label="Origination" value={p.mortgageOriginationDate ? new Date(p.mortgageOriginationDate).toLocaleDateString() : null} />
             <Fact label="Origination amount" value={p.mortgageBalance ? fmtMoney(p.mortgageBalance) : null} />
             <Fact label="Lender" value={p.mortgageLender} />
+            <Fact label="Originator" value={p.loanOriginator} />
             <Fact label="Rate" value={p.loanInterestRate != null ? `${p.loanInterestRate}%` : null} />
             <Fact label="Rate type" value={p.loanInterestRateType} />
             <Fact label="Loan type" value={p.loanType} />
+            <Fact label="Collateral type" value={p.loanCollateralType} />
           </div>
         </section>
       )}
@@ -503,19 +665,37 @@ function OwnerLoanPanel({ p }: { p: PropertyDetail }) {
         </section>
       )}
 
-      {/* Service contacts (property manager / listing broker on CoStar's record) */}
+      {/* Service contacts (property manager + listing brokers on CoStar's record).
+          Company names + property-manager mailing address surface here so the
+          marketing engine can reference current representation when generating
+          OM / flyer copy. */}
       {(p.propertyManagerName || p.salesContactName || p.leasingContactName) && (
         <section>
           <Eyebrow tone="muted">Service contacts</Eyebrow>
           <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-3">
             {p.propertyManagerName && (
-              <ContactCard label="Property Mgr" name={p.propertyManagerName} phone={p.propertyManagerPhone} />
+              <ContactCard
+                label="Property Mgr"
+                name={p.propertyManagerName}
+                phone={p.propertyManagerPhone}
+                sub={p.propertyManagerAddress}
+              />
             )}
-            {p.salesContactName && (
-              <ContactCard label="Sales Contact" name={p.salesContactName} phone={p.salesContactPhone} />
+            {(p.salesContactName || p.salesCompanyName) && (
+              <ContactCard
+                label="Sales Contact"
+                name={p.salesContactName ?? p.salesCompanyName ?? ""}
+                phone={p.salesContactPhone}
+                sub={p.salesContactName && p.salesCompanyName ? p.salesCompanyName : null}
+              />
             )}
-            {p.leasingContactName && (
-              <ContactCard label="Leasing Contact" name={p.leasingContactName} phone={p.leasingContactPhone} />
+            {(p.leasingContactName || p.leasingCompanyName) && (
+              <ContactCard
+                label="Leasing Contact"
+                name={p.leasingContactName ?? p.leasingCompanyName ?? ""}
+                phone={p.leasingContactPhone}
+                sub={p.leasingContactName && p.leasingCompanyName ? p.leasingCompanyName : null}
+              />
             )}
           </div>
         </section>
@@ -555,18 +735,31 @@ function OwnerCard({
   );
 }
 
-function ContactCard({ label, name, phone }: { label: string; name: string; phone?: string | null }) {
+function ContactCard({
+  label,
+  name,
+  phone,
+  sub,
+}: {
+  label: string;
+  name: string;
+  phone?: string | null;
+  /** Optional secondary line — company name, mailing address, etc. */
+  sub?: string | null;
+}) {
   return (
     <div className="rounded border border-white/[0.05] bg-white/[0.02] p-3">
       <div className="font-mono text-[9.5px] uppercase tracking-eyebrow text-cream-subtle">{label}</div>
       <div className="mt-1 font-heading text-[12.5px] text-cream font-semibold truncate">{name}</div>
+      {sub && <div className="mt-0.5 font-mono text-[10px] text-cream-subtle truncate">{sub}</div>}
       {phone && <div className="mt-0.5 font-mono text-[10.5px] text-teal-300">📞 {phone}</div>}
     </div>
   );
 }
 
-function Fact({ label, value, tone = "default" }: { label: string; value: string | null | undefined; tone?: "default" | "coral" }) {
-  const color = tone === "coral" ? "text-coral-300" : "text-cream";
+function Fact({ label, value, tone = "default" }: { label: string; value: string | null | undefined; tone?: "default" | "coral" | "teal" }) {
+  const color =
+    tone === "coral" ? "text-coral-300" : tone === "teal" ? "text-teal-300" : "text-cream";
   return (
     <div>
       <div className="font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle">{label}</div>
