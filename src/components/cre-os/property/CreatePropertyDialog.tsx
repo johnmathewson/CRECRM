@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PROPERTY_STATUS_ORDER, PROPERTY_STATUS_META } from "@/lib/cre-os/property-status";
+import type { PropertyMatch } from "@/app/api/properties/match/route";
 
 /**
  * CreatePropertyDialog — adds a new property AND auto-pairs a deal so it
@@ -40,13 +41,73 @@ export function CreatePropertyDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // ── Fuzzy-match against the 15k properties already in the DB. As the
+  // broker types an address or name, surface candidate matches. Pick one
+  // → navigate to the existing property page (skip the create flow). If
+  // no match feels right, the broker dismisses and continues creating.
+  const [matches, setMatches] = useState<PropertyMatch[]>([]);
+  const [matchSearching, setMatchSearching] = useState(false);
+  const [matchDismissedFor, setMatchDismissedFor] = useState<string>("");
+  const lastQueryRef = useRef<string>("");
+
   // Reset on close
   useEffect(() => {
     if (!open) {
       setError(null);
       setBusy(false);
+      setMatches([]);
+      setMatchDismissedFor("");
     }
   }, [open]);
+
+  // Debounced match search. Triggers on either address OR name typing.
+  // The longer of the two is used as the query — usually that's what
+  // the broker is actively working on. Dismissal is sticky per query
+  // text so the panel doesn't pop back up immediately after dismiss.
+  useEffect(() => {
+    if (!open) return;
+    const query = (address.length >= name.length ? address : name).trim();
+    if (query.length < 3) {
+      setMatches([]);
+      lastQueryRef.current = "";
+      return;
+    }
+    if (query === matchDismissedFor) {
+      setMatches([]);
+      return;
+    }
+    lastQueryRef.current = query;
+    setMatchSearching(true);
+    const timer = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/properties/match?q=${encodeURIComponent(query)}&limit=5`);
+        if (lastQueryRef.current !== query) return; // stale response
+        if (!r.ok) {
+          setMatches([]);
+          return;
+        }
+        const json = await r.json();
+        setMatches((json.matches ?? []) as PropertyMatch[]);
+      } catch {
+        setMatches([]);
+      } finally {
+        if (lastQueryRef.current === query) setMatchSearching(false);
+      }
+    }, 280);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [open, address, name, matchDismissedFor]);
+
+  function pickMatch(m: PropertyMatch) {
+    onClose();
+    router.push(`/cre-os/properties/${m.slug ?? m.id}`);
+  }
+
+  function dismissMatches() {
+    setMatchDismissedFor((address.length >= name.length ? address : name).trim());
+    setMatches([]);
+  }
 
   // ESC closes
   useEffect(() => {
@@ -155,6 +216,70 @@ export function CreatePropertyDialog({
               className={fieldCls}
             />
           </Field>
+
+          {/* ── Fuzzy match against the 15k properties in the DB ───────
+              Surfaces existing records as the broker types. Click one
+              to open the existing property workspace; skip to keep
+              creating new. */}
+          {(matchSearching || matches.length > 0) && (
+            <div className="rounded border border-teal-400/30 bg-teal-400/[0.05] p-3 -mt-2">
+              <div className="flex items-center justify-between mb-2">
+                <div className="font-mono text-[9.5px] uppercase tracking-eyebrow text-teal-300">
+                  {matchSearching
+                    ? "Searching your book…"
+                    : `${matches.length} possible match${matches.length === 1 ? "" : "es"} already in your book`}
+                </div>
+                {matches.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={dismissMatches}
+                    className="font-mono text-[10px] text-cream-subtle hover:text-cream underline-offset-2 hover:underline"
+                  >
+                    none of these — keep creating new
+                  </button>
+                )}
+              </div>
+              {matches.length > 0 && (
+                <div className="space-y-1.5">
+                  {matches.map((m) => {
+                    const subline = [m.address, m.city, m.state].filter(Boolean).join(" · ");
+                    const confidence = Math.round(m.match_score * 100);
+                    const tone =
+                      confidence >= 70
+                        ? "text-teal-300"
+                        : confidence >= 40
+                          ? "text-amber-300"
+                          : "text-cream-subtle";
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => pickMatch(m)}
+                        className="w-full text-left p-2 rounded border border-white/[0.06] bg-white/[0.02] hover:bg-teal-400/[0.10] hover:border-teal-400/40 transition-colors"
+                      >
+                        <div className="flex items-baseline justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="font-heading text-[12.5px] text-cream truncate">
+                              {m.name || m.address || "(unnamed property)"}
+                            </div>
+                            <div className="font-mono text-[10.5px] text-cream-subtle truncate mt-0.5">
+                              {subline}
+                              {m.asset_type ? ` · ${m.asset_type}` : ""}
+                              {m.sqft ? ` · ${m.sqft.toLocaleString()} sf` : ""}
+                            </div>
+                          </div>
+                          <div className={`font-mono text-[10px] whitespace-nowrap shrink-0 ${tone}`}>
+                            {confidence}% match
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-3 gap-3">
             <Field label="City">
               <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Valparaiso" className={fieldCls} />
