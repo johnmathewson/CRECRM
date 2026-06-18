@@ -183,10 +183,10 @@ export function CreatePropertyDialog({
       onClick={onClose}
     >
       <div
-        className="my-2 mx-2 lg:my-12 w-full max-w-2xl bg-steward-base border border-white/[0.08] rounded shadow-panel-soft"
+        className="my-2 mx-2 lg:my-12 w-full max-w-2xl bg-steward-base border border-white/[0.08] rounded shadow-panel-soft flex flex-col max-h-[calc(100vh-1rem)] lg:max-h-[calc(100vh-6rem)]"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-6 py-4 border-b border-white/[0.06] flex items-center justify-between">
+        <div className="px-6 py-4 border-b border-white/[0.06] flex items-center justify-between shrink-0">
           <div>
             <div className="font-mono text-[9px] uppercase tracking-eyebrow text-coral-400">
               New property
@@ -204,7 +204,7 @@ export function CreatePropertyDialog({
           </button>
         </div>
 
-        <div className="px-6 py-5 space-y-5">
+        <div className="px-6 py-5 space-y-5 overflow-y-auto flex-1">
           {/* Address-first — that's how a broker thinks about a property */}
           <Field label="Address" hint="Most direct way to identify the property.">
             <input
@@ -401,22 +401,25 @@ export function CreatePropertyDialog({
               {error}
             </div>
           )}
+        </div>
 
-          <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/[0.04]">
-            <button
-              onClick={onClose}
-              className="px-3.5 py-2 rounded border border-white/[0.08] bg-white/[0.02] hover:bg-white/[0.06] font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-cream-dim hover:text-cream"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={submit}
-              disabled={busy}
-              className="px-4 py-2 rounded border border-coral-400/40 bg-coral-400/[0.12] hover:bg-coral-400/[0.20] font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-coral-300 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {busy ? "Adding…" : "Add property"}
-            </button>
-          </div>
+        {/* Pinned action bar — always visible regardless of body scroll
+            depth, so the broker never loses sight of Save when the match
+            panel or future fields push the body taller than the viewport. */}
+        <div className="px-6 py-3 border-t border-white/[0.06] flex items-center justify-end gap-2 shrink-0 bg-steward-base rounded-b">
+          <button
+            onClick={onClose}
+            className="px-3.5 py-2 rounded border border-white/[0.08] bg-white/[0.02] hover:bg-white/[0.06] font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-cream-dim hover:text-cream"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={busy}
+            className="px-4 py-2 rounded border border-coral-400/40 bg-coral-400/[0.12] hover:bg-coral-400/[0.20] font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-coral-300 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {busy ? "Adding…" : "Add property"}
+          </button>
         </div>
       </div>
     </div>
