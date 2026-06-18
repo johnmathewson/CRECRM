@@ -75,7 +75,7 @@ export function TodayBriefView({ brief }: { brief: TodayBriefingRow | null }) {
 
   return (
     <AppShell rail={rail}>
-      <div className="space-y-6">
+      <div className="today-shell rounded-md border border-white/[0.08] bg-[#0D0D0D] p-6 lg:p-8 shadow-panel-soft space-y-6">
         <header className="flex items-start justify-between gap-4">
           <div>
             <Eyebrow tone="coral">Steward · Chief Operating Officer</Eyebrow>
