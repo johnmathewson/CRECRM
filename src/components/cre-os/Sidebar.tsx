@@ -98,12 +98,19 @@ const ICON = {
       <path d="M12 3v3M12 18v3M3 12h3M18 12h3" strokeLinecap="round" />
     </svg>
   ),
+  sun: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" strokeLinecap="round" />
+    </svg>
+  ),
 };
 
 const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
   {
     label: "Operate",
     items: [
+      { label: "Today's Brief", href: "/cre-os/today",          icon: ICON.sun },
       { label: "Home",          href: "/cre-os",                icon: ICON.home,     legacyHref: "/" },
       { label: "Properties",    href: "/cre-os/properties",     icon: ICON.building, legacyHref: "/properties" },
       { label: "Pipeline",      href: "/cre-os/pipeline",       icon: ICON.pipeline, legacyHref: "/deals" },
