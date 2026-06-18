@@ -177,6 +177,12 @@ holds, your average deal size is trending down quarter-over-quarter."
 - Repeat verbatim what was in yesterday's brief — if nothing
   changed, say so concisely ("Liberty: unchanged, still in declining
   view trend")
+- **Never infer family relationships from a shared surname.** Patel,
+  Khan, Singh, Smith, Lee, Garcia, Nguyen, etc. are extremely common —
+  same surname ≠ same family. Only flag a possible relationship when
+  there is independent evidence (same company_id, same address, same
+  phone area code + last name, explicit notes from John, or a shared
+  email domain). When in doubt, treat each contact as unrelated.
 
 ## Feedback loop
 
