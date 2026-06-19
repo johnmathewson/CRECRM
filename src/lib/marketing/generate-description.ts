@@ -23,7 +23,10 @@ import type { MarketingPropertyContext } from "./property-context";
 export interface GeneratedDescription {
   headline: string;
   description: string;
+  /** Physical / use-case bullets — what the building IS. */
   highlights: string[];
+  /** Investment-thesis bullets — why someone should BUY it. OM-style. */
+  investment_highlights: string[];
   /** Steward-style — facts Claude wanted to flag but couldn't fit. Optional. */
   observations?: string[];
 }
@@ -64,7 +67,8 @@ Output is structured JSON ONLY. No preamble, no closing remarks. Schema:
 {
   "headline": "string — building-led, ≤70 chars. Examples: '37,000 SF Flex Industrial — Merrillville, IN' or 'Anchored Retail Center — 48k SF — Lake County' or '4-Acre Industrial Site — Crown Point'. Do NOT lead with price. Do NOT include '$X/SF' or cap rate.",
   "description": "string — 120-220 words. 2-4 short paragraphs. Para 1: building + location + the headline use case. Para 2: flexibility / use-case options / zoning context. Para 3 (optional): location/access. Last sentence: soft CTA. NEVER quote comps, prices, pro forma math, or market positioning.",
-  "highlights": ["string", "..."] — 4-6 bullets, 5-12 words each. Lead with concrete physical facts and use cases. NO pricing benchmarks. NO comp references.",
+  "highlights": ["string", "..."] — 4-6 PHYSICAL / USE-CASE bullets, 5-12 words each. What the building IS and how it can be used. Examples: '37,000 SF flex industrial, M1 zoning' / '1.82-acre site — room for outdoor storage' / 'Vacant — immediate owner-user occupancy'.",
+  "investment_highlights": ["string", "..."] — 4-7 INVESTMENT-THESIS bullets, 6-14 words each. Why a buyer should buy. THESIS-level only. Examples: 'Owner-user play — build equity vs. paying rent' / 'M1 zoning expands the qualified buyer pool at exit' / 'Vacant delivery — buyer controls timing and configuration' / 'Subdivision potential for multi-tenant income mix' / '1031-exchange eligible'. FORBIDDEN in these bullets (same as description): specific comp addresses, '$X/SF above median', 'X% cap rate', stabilized income figures, 'below replacement cost' unless replacement cost is in the data, or any other pricing/comp-positioning content. Thesis only — abstract investor angles. If you cannot say something thesis-level without quoting comps or prices, OMIT it.",
   "observations": ["string", "..."] — INTERNAL ONLY, never goes public. Things YOU as the agent want to flag to John: data gaps, comp warnings, listing risks, things to confirm with the seller. Each one a single sentence.
 }
 
@@ -170,10 +174,11 @@ export async function generateDescription(ctx: MarketingPropertyContext): Promis
       `Description generator returned non-JSON. Raw: ${response.text.slice(0, 400)}`
     );
   }
-  // Normalize: ensure highlights is an array of strings, even if model
-  // produced objects (rare but possible).
+  // Normalize: ensure all array fields are arrays of strings.
   if (!Array.isArray(parsed.highlights)) parsed.highlights = [];
   parsed.highlights = parsed.highlights.map((h) => String(h)).slice(0, 8);
+  if (!Array.isArray(parsed.investment_highlights)) parsed.investment_highlights = [];
+  parsed.investment_highlights = parsed.investment_highlights.map((h) => String(h)).slice(0, 8);
   parsed.headline = String(parsed.headline ?? "").trim();
   parsed.description = String(parsed.description ?? "").trim();
   if (parsed.observations && !Array.isArray(parsed.observations)) {

@@ -76,6 +76,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         headline: generated.headline || null,
         description: generated.description || null,
         highlights: generated.highlights ?? [],
+        investment_highlights: generated.investment_highlights ?? [],
         updated_at: new Date().toISOString(),
       })
       .eq("id", propertyId)

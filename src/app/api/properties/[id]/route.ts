@@ -25,7 +25,7 @@ const PATCHABLE_FIELDS = new Set([
   "asking_price", "lease_rate", "sqft", "acreage", "year_built",
   "parking_spaces", "parking_ratio", "zoning",
   "noi", "cap_rate", "price_per_sf", "occupancy_pct",
-  "description", "highlights", "notes", "marketing_notes", "document_inventory", "crexi_url", "loopnet_url",
+  "description", "highlights", "investment_highlights", "notes", "marketing_notes", "document_inventory", "crexi_url", "loopnet_url",
   // LoopNet/CoStar shared performance-report URL — token rotates every
   // ~30 days, so John refreshes it monthly via the property edit form.
   // loopnet_share_url_set_at is auto-stamped server-side on update below.

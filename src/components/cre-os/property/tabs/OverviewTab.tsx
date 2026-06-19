@@ -76,6 +76,7 @@ export function OverviewTab({ p }: { p: PropertyDetail }) {
             initialHeadline={p.headline}
             initialDescription={p.description}
             initialHighlights={p.highlights}
+            initialInvestmentHighlights={p.investmentHighlights}
           />
         </Panel>
 

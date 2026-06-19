@@ -29,6 +29,7 @@ interface PreviewPayload {
   headline: string;
   description: string;
   highlights: string[];
+  investment_highlights: string[];
   observations?: string[];
 }
 
@@ -47,11 +48,13 @@ export function MarketingCopyPanel({
   initialHeadline,
   initialDescription,
   initialHighlights,
+  initialInvestmentHighlights,
 }: {
   propertyId: string;
   initialHeadline: string | null;
   initialDescription: string | null;
   initialHighlights: string[];
+  initialInvestmentHighlights: string[];
 }) {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("view");
@@ -60,11 +63,13 @@ export function MarketingCopyPanel({
   const [savedHeadline, setSavedHeadline] = useState(initialHeadline ?? "");
   const [savedDescription, setSavedDescription] = useState(initialDescription ?? "");
   const [savedHighlights, setSavedHighlights] = useState<string[]>(initialHighlights ?? []);
+  const [savedInvestmentHighlights, setSavedInvestmentHighlights] = useState<string[]>(initialInvestmentHighlights ?? []);
 
   // Edit buffer — only used in EDIT mode.
   const [editHeadline, setEditHeadline] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editHighlights, setEditHighlights] = useState("");
+  const [editInvestmentHighlights, setEditInvestmentHighlights] = useState("");
 
   // Preview buffer — only used in PREVIEW mode.
   const [preview, setPreview] = useState<PreviewPayload | null>(null);
@@ -75,12 +80,16 @@ export function MarketingCopyPanel({
   const [, startTransition] = useTransition();
 
   const isEmpty =
-    !savedHeadline && !savedDescription && (savedHighlights?.length ?? 0) === 0;
+    !savedHeadline &&
+    !savedDescription &&
+    (savedHighlights?.length ?? 0) === 0 &&
+    (savedInvestmentHighlights?.length ?? 0) === 0;
 
   function beginEdit() {
     setEditHeadline(savedHeadline);
     setEditDescription(savedDescription);
     setEditHighlights((savedHighlights ?? []).join("\n"));
+    setEditInvestmentHighlights((savedInvestmentHighlights ?? []).join("\n"));
     setMode("edit");
     setError(null);
   }
@@ -98,6 +107,10 @@ export function MarketingCopyPanel({
         .split("\n")
         .map((s) => s.trim())
         .filter(Boolean);
+      const investment_highlights = editInvestmentHighlights
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
       const r = await fetch(`/api/properties/${propertyId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -105,6 +118,7 @@ export function MarketingCopyPanel({
           headline: editHeadline.trim() || null,
           description: editDescription.trim() || null,
           highlights,
+          investment_highlights,
         }),
       });
       if (!r.ok) {
@@ -114,6 +128,7 @@ export function MarketingCopyPanel({
       setSavedHeadline(editHeadline.trim());
       setSavedDescription(editDescription.trim());
       setSavedHighlights(highlights);
+      setSavedInvestmentHighlights(investment_highlights);
       setMode("view");
       startTransition(() => router.refresh());
     } catch (err) {
@@ -160,6 +175,7 @@ export function MarketingCopyPanel({
           headline: preview.headline || null,
           description: preview.description || null,
           highlights: preview.highlights ?? [],
+          investment_highlights: preview.investment_highlights ?? [],
         }),
       });
       if (!r.ok) {
@@ -169,6 +185,7 @@ export function MarketingCopyPanel({
       setSavedHeadline(preview.headline);
       setSavedDescription(preview.description);
       setSavedHighlights(preview.highlights);
+      setSavedInvestmentHighlights(preview.investment_highlights);
       setPreview(null);
       setContextSummary(null);
       setMode("view");
@@ -209,12 +226,20 @@ export function MarketingCopyPanel({
           placeholder="Marketing copy — 200-400 words is typical for CREXi / LoopNet."
           className={`${inputCls} font-body resize-y`}
         />
-        <FieldLabel>Highlights — one per line</FieldLabel>
+        <FieldLabel>Highlights (physical / use-case) — one per line</FieldLabel>
         <textarea
           value={editHighlights}
           onChange={(e) => setEditHighlights(e.target.value)}
-          rows={6}
-          placeholder={"4-6 short bullets, lead with concrete fact each line.\nExample:\n37,000 SF flex, 100% vacant at close\n$4M ask — $108/SF"}
+          rows={5}
+          placeholder={"4-6 short bullets — what the building IS.\nExample:\n37,000 SF flex industrial, M1 zoning\n1.82-acre site, vacant"}
+          className={`${inputCls} font-mono text-[11.5px] resize-y`}
+        />
+        <FieldLabel>Investment highlights — one per line</FieldLabel>
+        <textarea
+          value={editInvestmentHighlights}
+          onChange={(e) => setEditInvestmentHighlights(e.target.value)}
+          rows={5}
+          placeholder={"4-7 thesis bullets — why someone should BUY.\nExample:\nOwner-user play — build equity vs. paying rent\nM1 zoning expands the qualified buyer pool"}
           className={`${inputCls} font-mono text-[11.5px] resize-y`}
         />
         {error && <ErrorBox>{error}</ErrorBox>}
@@ -235,7 +260,7 @@ export function MarketingCopyPanel({
           Preview — not saved yet. Read it, then Save or Regenerate.
         </div>
 
-        <RenderCopy headline={preview.headline} description={preview.description} highlights={preview.highlights} />
+        <RenderCopy headline={preview.headline} description={preview.description} highlights={preview.highlights} investmentHighlights={preview.investment_highlights ?? []} />
 
         {preview.observations && preview.observations.length > 0 && (
           <div className="rounded border border-amber-400/30 bg-amber-400/[0.04] p-3">
@@ -291,7 +316,7 @@ export function MarketingCopyPanel({
           </p>
         </div>
       ) : (
-        <RenderCopy headline={savedHeadline} description={savedDescription} highlights={savedHighlights} />
+        <RenderCopy headline={savedHeadline} description={savedDescription} highlights={savedHighlights} investmentHighlights={savedInvestmentHighlights} />
       )}
 
       {error && <ErrorBox>{error}</ErrorBox>}
@@ -314,10 +339,12 @@ function RenderCopy({
   headline,
   description,
   highlights,
+  investmentHighlights,
 }: {
   headline: string;
   description: string;
   highlights: string[];
+  investmentHighlights: string[];
 }) {
   return (
     <div className="space-y-4">
@@ -335,9 +362,19 @@ function RenderCopy({
           </p>
         </div>
       )}
+      {investmentHighlights.length > 0 && (
+        <div>
+          <Eyebrow tone="muted">Investment highlights · {investmentHighlights.length}</Eyebrow>
+          <ul className="mt-1.5 space-y-1 font-body text-[12.5px] text-cream-dim list-disc list-inside marker:text-teal-300 leading-relaxed">
+            {investmentHighlights.map((h, i) => (
+              <li key={i}>{h}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       {highlights.length > 0 && (
         <div>
-          <Eyebrow tone="muted">Highlights · {highlights.length}</Eyebrow>
+          <Eyebrow tone="muted">Property highlights · {highlights.length}</Eyebrow>
           <ul className="mt-1.5 space-y-1 font-body text-[12.5px] text-cream-dim list-disc list-inside marker:text-coral-400 leading-relaxed">
             {highlights.map((h, i) => (
               <li key={i}>{h}</li>

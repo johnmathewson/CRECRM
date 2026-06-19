@@ -203,9 +203,13 @@ export interface PropertyDetail {
   /** Optional anchor intel for AI outreach about this property — broker-authored.
    *  Injected into the personalizer prompt when present. Lives in properties.marketing_notes. */
   marketingNotes: string | null;
-  /** Marketing bullet points — jsonb array of strings. Used by the marketing
-   *  engine to seed flyer highlights and OM "investment highlights" sections. */
+  /** Marketing bullet points — jsonb array of strings. PHYSICAL / use-case
+   *  highlights of the building (what it IS, how it can be used). */
   highlights: string[];
+  /** Investment-thesis bullets — jsonb array of strings. WHY a buyer should
+   *  buy. OM-style. Separate from `highlights` so the UI can render them as
+   *  their own section and the flyer/OM can pull just the thesis bullets. */
+  investmentHighlights: string[];
   /** Image gallery — jsonb array. Shape varies historically (some have
    *  {url, caption}, some are bare URLs), so kept loose. */
   images: any[];
@@ -458,7 +462,7 @@ export async function loadPropertyDetail(slug: string): Promise<PropertyDetail |
       asset_type, sub_type, status, pipeline_stage, your_role, transaction_type,
       asking_price, lease_rate, sqft, units, acreage, year_built, noi, cap_rate,
       occupancy_pct, price_per_sf,
-      headline, description, notes, marketing_notes, highlights, images,
+      headline, description, notes, marketing_notes, highlights, investment_highlights, images,
       document_inventory, data_source, created_at,
       parking_spaces, parking_ratio, zoning, total_buildings, number_of_stories,
       crexi_url, crexi_listing_id, loopnet_url, publish_to_website,
@@ -537,6 +541,7 @@ export async function loadPropertyDetail(slug: string): Promise<PropertyDetail |
     notes: p.notes ?? null,
     marketingNotes: p.marketing_notes ?? null,
     highlights: Array.isArray(p.highlights) ? (p.highlights as string[]) : [],
+    investmentHighlights: Array.isArray(p.investment_highlights) ? (p.investment_highlights as string[]) : [],
     images: Array.isArray(p.images) ? (p.images as any[]) : [],
     documentInventory: (p.document_inventory ?? []) as DocumentInventoryItem[],
     dataSource: p.data_source ?? null,
