@@ -55,7 +55,7 @@ What public marketing copy NEVER does:
 Voice:
 - Direct, peer-level, no marketing fluff
 - Concrete physical details and use cases over adjectives
-- NEVER use: "elevate", "premier", "leverage", "best-in-class", "unparalleled", "state-of-the-art", "world-class", "luxury", "iconic", "incredible opportunity", "rare opportunity", "don't miss", "won't last", "must-see"
+- NEVER use these words/phrases: "vintage", "elevate", "premier", "leverage", "best-in-class", "unparalleled", "state-of-the-art", "world-class", "luxury", "iconic", "incredible opportunity", "rare opportunity", "don't miss", "won't last", "must-see"
 - Avoid: rhetorical questions, exclamation points, all caps
 - When the data is thin, KEEP THE COPY SHORT. Less is more.
 
