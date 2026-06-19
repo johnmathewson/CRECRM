@@ -5,6 +5,7 @@ import { Panel } from "@/components/cre-os/Panel";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { StatusBadge } from "@/components/cre-os/StatusBadge";
 import { TaskRow } from "@/components/cre-os/tasks/TaskRow";
+import { MarketingCopyPanel } from "@/components/cre-os/property/MarketingCopyPanel";
 import type { PropertyDetail, DocumentInventoryItem } from "@/lib/cre-os/property-queries";
 
 const fmtMoney = (n: number | null) => {
@@ -64,12 +65,26 @@ export function OverviewTab({ p }: { p: PropertyDetail }) {
           </Panel>
         )}
 
+        {/* Listing copy — the AI-generated headline + description + highlights
+            that go to CREXi, LoopNet, the firm website, and inbound listing
+            assessments. Editable inline + regenerable. The agent pulls
+            property facts + nearby comps + voice profile, writes a draft, and
+            John saves what he likes. */}
+        <Panel eyebrow="Listing copy" num={4} title="AI-drafted public marketing">
+          <MarketingCopyPanel
+            propertyId={p.id}
+            initialHeadline={p.headline}
+            initialDescription={p.description}
+            initialHighlights={p.highlights}
+          />
+        </Panel>
+
         {/* Marketing notes — anchor intel for AI outreach about THIS property.
             Gets injected into every personalizer prompt that involves this asset.
             Use it for: "Lead with 8.69% cap, not asking price", "Owner motivated
             for 60-day close", "Patel buyer pool is hot here — assume hospitality
             fluency", etc. Edits save instantly — no rebuild. */}
-        <Panel eyebrow="Marketing notes" num={4} title="What the AI should anchor on">
+        <Panel eyebrow="Marketing notes" num={5} title="What the AI should anchor on">
           <MarketingNotesEditor propertyId={p.id} initial={p.marketingNotes ?? ""} />
         </Panel>
 
