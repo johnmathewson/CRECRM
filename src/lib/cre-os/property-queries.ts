@@ -210,6 +210,11 @@ export interface PropertyDetail {
    *  buy. OM-style. Separate from `highlights` so the UI can render them as
    *  their own section and the flyer/OM can pull just the thesis bullets. */
   investmentHighlights: string[];
+  /** Public URL of the latest generated Offering Memorandum PDF in the
+   *  marketing-pdfs Storage bucket. Null when no OM has been generated. */
+  omPdfUrl: string | null;
+  /** When the latest OM was generated. Surfaced in the UI as "Generated X ago". */
+  omGeneratedAt: string | null;
   /** Image gallery — jsonb array. Shape varies historically (some have
    *  {url, caption}, some are bare URLs), so kept loose. */
   images: any[];
@@ -463,6 +468,7 @@ export async function loadPropertyDetail(slug: string): Promise<PropertyDetail |
       asking_price, lease_rate, sqft, units, acreage, year_built, noi, cap_rate,
       occupancy_pct, price_per_sf,
       headline, description, notes, marketing_notes, highlights, investment_highlights, images,
+      om_pdf_url, om_generated_at,
       document_inventory, data_source, created_at,
       parking_spaces, parking_ratio, zoning, total_buildings, number_of_stories,
       crexi_url, crexi_listing_id, loopnet_url, publish_to_website,
@@ -542,6 +548,8 @@ export async function loadPropertyDetail(slug: string): Promise<PropertyDetail |
     marketingNotes: p.marketing_notes ?? null,
     highlights: Array.isArray(p.highlights) ? (p.highlights as string[]) : [],
     investmentHighlights: Array.isArray(p.investment_highlights) ? (p.investment_highlights as string[]) : [],
+    omPdfUrl: (p.om_pdf_url as string | null) ?? null,
+    omGeneratedAt: (p.om_generated_at as string | null) ?? null,
     images: Array.isArray(p.images) ? (p.images as any[]) : [],
     documentInventory: (p.document_inventory ?? []) as DocumentInventoryItem[],
     dataSource: p.data_source ?? null,
