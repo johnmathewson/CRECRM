@@ -59,7 +59,20 @@ export async function loadPropertyMarketingContext(propertyId: string): Promise<
 
   if (propErr || !property) return null;
 
-  const since36mo = new Date(Date.now() - 36 * 30 * 86_400_000).toISOString().slice(0, 10);
+  // Case-insensitive match on city + asset_type. The properties table
+  // and the comp tables don't share a casing convention — properties
+  // stores "MERRILLVILLE" + "industrial", while comps store
+  // "Merrillville" + "Industrial". `.eq()` is case-sensitive and was
+  // silently dropping every comp. `.ilike()` fixes that.
+  //
+  // The date filter is intentionally NOT applied at the query level
+  // anymore: lease_comps in particular have null lease_date for many
+  // rows, and a `.gte` against null is false — excluding good comps.
+  // Instead we order by date desc (nulls last) and take the top 10,
+  // which is effectively "most recent comps, including undated ones
+  // if recents are thin."
+  const city = property.city ?? "__none__";
+  const assetType = property.asset_type ?? "__none__";
 
   const [saleRes, leaseRes, voiceRes] = await Promise.all([
     sb
@@ -68,10 +81,9 @@ export async function loadPropertyMarketingContext(propertyId: string): Promise<
         "id, address, city, state, asset_type, sale_date, sale_price, price_per_sqft, cap_rate, sqft, year_built, buyer, seller, notes"
       )
       .eq("organization_id", ORG_ID)
-      .eq("city", property.city ?? "__none__")
-      .eq("asset_type", property.asset_type ?? "__none__")
-      .gte("sale_date", since36mo)
-      .order("sale_date", { ascending: false })
+      .ilike("city", city)
+      .ilike("asset_type", assetType)
+      .order("sale_date", { ascending: false, nullsFirst: false })
       .limit(10),
     sb
       .from("lease_comps")
@@ -79,10 +91,9 @@ export async function loadPropertyMarketingContext(propertyId: string): Promise<
         "id, address, city, state, asset_type, tenant_name, lease_date, rent_per_sqft, sqft, lease_type, term_months, notes"
       )
       .eq("organization_id", ORG_ID)
-      .eq("city", property.city ?? "__none__")
-      .eq("asset_type", property.asset_type ?? "__none__")
-      .gte("lease_date", since36mo)
-      .order("lease_date", { ascending: false })
+      .ilike("city", city)
+      .ilike("asset_type", assetType)
+      .order("lease_date", { ascending: false, nullsFirst: false })
       .limit(10),
     sb
       .from("broker_voice_profile")
