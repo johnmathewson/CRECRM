@@ -24,6 +24,9 @@ const PATCHABLE_FIELDS = new Set([
   "asset_type", "transaction_type", "status", "your_role",
   "asking_price", "lease_rate", "sqft", "acreage", "year_built",
   "parking_spaces", "parking_ratio", "zoning",
+  // Location anchoring — for properties without a clean street
+  // address. Set via PropertyLocationPicker (click-to-pin map).
+  "latitude", "longitude", "apn", "county",
   "noi", "cap_rate", "price_per_sf", "occupancy_pct",
   "description", "highlights", "investment_highlights", "notes", "marketing_notes", "document_inventory", "crexi_url", "loopnet_url",
   // LoopNet/CoStar shared performance-report URL — token rotates every

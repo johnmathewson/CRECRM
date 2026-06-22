@@ -16,8 +16,20 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import type { PropertyDetail } from "@/lib/cre-os/property-queries";
+
+// Leaflet needs `window` on first mount, so the location picker
+// must be loaded client-side only. ssr:false skips it at build.
+const PropertyLocationPicker = dynamic(
+  () => import("@/components/cre-os/property/PropertyLocationPicker").then((m) => m.PropertyLocationPicker),
+  { ssr: false, loading: () => (
+    <div className="h-64 rounded border border-white/[0.08] bg-steward-surface/40 flex items-center justify-center">
+      <span className="font-mono text-[10.5px] text-cream-subtle">Loading map…</span>
+    </div>
+  )}
+);
 
 interface Props {
   open: boolean;
@@ -55,6 +67,10 @@ interface FullPropertyRow {
   loopnet_url: string | null;
   description: string | null;
   notes: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  apn: string | null;
+  county: string | null;
 }
 
 const ASSET_TYPES = [
@@ -106,6 +122,13 @@ export function EditPropertyDialog({ open, property, onClose }: Props) {
   const [loopnetUrl, setLoopnetUrl] = useState("");
   const [description, setDescription] = useState("");
   const [notes, setNotes] = useState("");
+  // Location anchoring — for properties without a clean street address.
+  // PropertyLocationPicker is the click-to-pin map; these three fields
+  // are the spatial truth the valuation tool reads.
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
+  const [apn, setApn] = useState<string | null>(null);
+  const [county, setCounty] = useState("");
   const [busy, setBusy] = useState(false);
   const [hydrating, setHydrating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -154,6 +177,10 @@ export function EditPropertyDialog({ open, property, onClose }: Props) {
         setLoopnetUrl(p.loopnet_url ?? "");
         setDescription(p.description ?? "");
         setNotes(p.notes ?? "");
+        setLatitude(p.latitude ?? null);
+        setLongitude(p.longitude ?? null);
+        setApn(p.apn ?? null);
+        setCounty(p.county ?? "");
       })
       .catch((err) => setError(err?.message || String(err)))
       .finally(() => setHydrating(false));
@@ -204,6 +231,10 @@ export function EditPropertyDialog({ open, property, onClose }: Props) {
         loopnet_url: orNull(loopnetUrl),
         description: orNull(description),
         notes: orNull(notes),
+        latitude: latitude,
+        longitude: longitude,
+        apn: apn,
+        county: orNull(county),
       };
 
       const res = await fetch(`/api/properties/${property.id}`, {
@@ -273,10 +304,10 @@ export function EditPropertyDialog({ open, property, onClose }: Props) {
           </Section>
 
           <Section label="Location">
-            <Field label="Address">
-              <input value={address} onChange={(e) => setAddress(e.target.value)} className={inputCls} />
+            <Field label="Address" hint="Optional — leave blank for vacant land or unaddressed parcels and use the map pin below.">
+              <input value={address} onChange={(e) => setAddress(e.target.value)} className={inputCls} placeholder="e.g. 8474 Colorado St — or leave blank" />
             </Field>
-            <div className="grid grid-cols-3 gap-3 mt-3">
+            <div className="grid grid-cols-4 gap-3 mt-3">
               <Field label="City">
                 <input value={city} onChange={(e) => setCity(e.target.value)} className={inputCls} />
               </Field>
@@ -286,6 +317,30 @@ export function EditPropertyDialog({ open, property, onClose }: Props) {
               <Field label="Zip">
                 <input value={zip} onChange={(e) => setZip(e.target.value)} className={inputCls} />
               </Field>
+              <Field label="County">
+                <input value={county} onChange={(e) => setCounty(e.target.value)} className={inputCls} placeholder="Lake" />
+              </Field>
+            </div>
+
+            {/* Spatial anchor — click-to-pin map. Replaces the
+                address as the geocoding source when the property has
+                no clean street address (vacant land, multi-parcel
+                campuses, pre-platted sites). */}
+            <div className="mt-4">
+              <div className="font-mono text-[9.5px] uppercase tracking-eyebrow text-cream-subtle mb-2">
+                Map pin · spatial anchor
+              </div>
+              <PropertyLocationPicker
+                initialLatitude={latitude}
+                initialLongitude={longitude}
+                initialApn={apn}
+                fallbackAddress={[address, city, stateCode, zip].filter(Boolean).join(", ")}
+                onChange={(next) => {
+                  setLatitude(next.latitude);
+                  setLongitude(next.longitude);
+                  setApn(next.apn);
+                }}
+              />
             </div>
           </Section>
 
