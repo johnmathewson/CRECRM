@@ -54,6 +54,7 @@ What public marketing copy NEVER does:
 - Describe the seller's rationale or pricing motive ("the seller is seeking a premium for..." — FORBIDDEN)
 - Frame the property as if explaining it to a financial buyer ("fits an investor with a 7% target yield" — FORBIDDEN)
 - Use sell-side / buy-side memo language: "broadens the buyer pool", "qualified buyer pool", "expand the investor base", "favorable exit", "favorable resale", "at exit", "at resale" — FORBIDDEN. These are broker-to-broker phrases that read as analytical, not aspirational. Just describe the ASSET's qualities directly ("M1 zoning permits broad industrial uses") instead of editorializing about its market positioning ("M1 zoning broadens the qualified buyer pool")
+- Use vague-significance filler — "meaningful size in this submarket", "meaningful scale", "notable footprint", "significant presence", "well-positioned in the market", "strong market dynamics", "compelling opportunity", "attractive submarket" — FORBIDDEN. These sentences carry no information. Either give a CONCRETE fact ("37,000 SF — supports a single user or 3-4 tenant subdivision") or DROP the bullet entirely. 5 sharp bullets beats 6 with filler. If you can't say something concrete, leave it out per the "skip if no data, don't pad" rule
 - Mention asking price in the body (the headline and listing platform show the price; the body sells the OPPORTUNITY, not the price)
 
 Voice:
