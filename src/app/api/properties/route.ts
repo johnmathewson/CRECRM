@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
     };
 
     const optionalFields = [
-      "address", "city", "state", "zip", "zoning",
+      "address", "city", "state", "zip", "zoning", "county",
       "asking_price", "lease_rate", "sqft", "acreage",
       "year_built", "parking_spaces", "parking_ratio",
       "noi", "cap_rate", "price_per_sf", "occupancy_pct",
@@ -100,6 +100,10 @@ export async function POST(req: NextRequest) {
       "source_import",
       // publish-path fields
       "headline", "images",
+      // Spatial anchor — for vacant land / unaddressed parcels.
+      // Allows the broker to drop a pin instead of providing a
+      // street address. Valuation tool reads lat/lng first.
+      "latitude", "longitude", "apn",
     ];
 
     for (const field of optionalFields) {

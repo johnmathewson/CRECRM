@@ -1,9 +1,20 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { PROPERTY_STATUS_ORDER, PROPERTY_STATUS_META } from "@/lib/cre-os/property-status";
 import type { PropertyMatch } from "@/app/api/properties/match/route";
+
+// Leaflet needs `window` on first mount — ssr:false so it skips at build.
+const PropertyLocationPicker = dynamic(
+  () => import("@/components/cre-os/property/PropertyLocationPicker").then((m) => m.PropertyLocationPicker),
+  { ssr: false, loading: () => (
+    <div className="h-64 rounded border border-white/[0.08] bg-steward-surface/40 flex items-center justify-center">
+      <span className="font-mono text-[10.5px] text-cream-subtle">Loading map…</span>
+    </div>
+  )}
+);
 
 // localStorage key for the in-progress create-property draft. Versioned
 // so a future shape change doesn't try to hydrate stale fields.
@@ -62,6 +73,11 @@ export function CreatePropertyDialog({
   const [sqft, setSqft] = useState("");
   const [status, setStatus] = useState<string>("listed");
   const [notes, setNotes] = useState("");
+  // Spatial anchor — for vacant land / unaddressed parcels. Pin-drop
+  // map below the city/state/zip row writes these.
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
+  const [apn, setApn] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -220,15 +236,17 @@ export function CreatePropertyDialog({
 
   async function submit() {
     setError(null);
-    if (!name.trim() && !address.trim()) {
-      setError("Provide at least a property name or address.");
+    // Need at least one of: name, address, or a map pin. The map pin
+    // alone is enough — vacant land / unaddressed parcels work that way.
+    if (!name.trim() && !address.trim() && (latitude === null || longitude === null)) {
+      setError("Provide a property name, an address, or drop a pin on the map.");
       return;
     }
     setBusy(true);
     try {
       const payload: Record<string, any> = {
         // Use address+city as a friendly default name when the broker leaves it blank
-        name: name.trim() || `${address}${city ? ", " + city : ""}`,
+        name: name.trim() || `${address}${city ? ", " + city : ""}` || "Untitled property",
         address: address.trim() || undefined,
         city: city.trim() || undefined,
         state: state.trim() || undefined,
@@ -238,6 +256,10 @@ export function CreatePropertyDialog({
         status,
         notes: notes.trim() || undefined,
         create_deal: true,
+        // Spatial anchor — pinned via the map. Saved as null if not set.
+        latitude: latitude,
+        longitude: longitude,
+        apn: apn,
       };
       if (askingPrice && transactionType === "sale") {
         const n = Number(askingPrice.replace(/[$,]/g, ""));
@@ -415,6 +437,30 @@ export function CreatePropertyDialog({
             <Field label="Zip">
               <input value={zip} onChange={(e) => setZip(e.target.value)} placeholder="46383" className={fieldCls} />
             </Field>
+          </div>
+
+          {/* Map pin · spatial anchor. Required for any property
+              without a clean street address (vacant land, multi-
+              parcel campuses). The valuation tool reads lat/lng
+              before address. */}
+          <div>
+            <div className="font-mono text-[9.5px] uppercase tracking-eyebrow text-cream-subtle mb-2">
+              Map pin · spatial anchor
+              <span className="ml-2 normal-case text-cream-subtle italic font-body text-[10px]">
+                — leave address blank and drop a pin for unaddressed parcels
+              </span>
+            </div>
+            <PropertyLocationPicker
+              initialLatitude={latitude}
+              initialLongitude={longitude}
+              initialApn={apn}
+              fallbackAddress={[address, city, state, zip].filter(Boolean).join(", ")}
+              onChange={(next) => {
+                setLatitude(next.latitude);
+                setLongitude(next.longitude);
+                setApn(next.apn);
+              }}
+            />
           </div>
 
           <Field label="Display name (optional)" hint="Defaults to the address if blank. A nickname helps when one address has multiple deals.">
