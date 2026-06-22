@@ -110,18 +110,58 @@ function drawHero(
 ) {
   if (heroImage) {
     try {
-      doc.addImage(heroImage.data, heroImage.format, 0, 0, PAGE_W, HERO_H);
+      // Aspect-ratio-preserving "cover" fit: scale the image so it fills
+      // the 612×216 hero box on the shorter dimension, then center-crop
+      // the overflow by clipping to the box. NEVER stretch.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const props: any = (doc as any).getImageProperties(heroImage.data);
+      const imgW = Number(props.width);
+      const imgH = Number(props.height);
+      if (Number.isFinite(imgW) && Number.isFinite(imgH) && imgW > 0 && imgH > 0) {
+        const imgAspect = imgW / imgH;
+        const boxAspect = PAGE_W / HERO_H;
+        let drawW: number, drawH: number, offsetX: number, offsetY: number;
+        if (imgAspect > boxAspect) {
+          // Image is wider than box — match height, center-crop horizontally
+          drawH = HERO_H;
+          drawW = HERO_H * imgAspect;
+          offsetX = -(drawW - PAGE_W) / 2;
+          offsetY = 0;
+        } else {
+          // Image is taller than box — match width, center-crop vertically
+          drawW = PAGE_W;
+          drawH = PAGE_W / imgAspect;
+          offsetX = 0;
+          offsetY = -(drawH - HERO_H) / 2;
+        }
+        // Clip to the hero box so the overflow doesn't bleed into
+        // the content area below.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const anyDoc = doc as any;
+        anyDoc.saveGraphicsState();
+        anyDoc.rect(0, 0, PAGE_W, HERO_H);
+        anyDoc.clip();
+        anyDoc.discardPath();
+        doc.addImage(heroImage.data, heroImage.format, offsetX, offsetY, drawW, drawH);
+        anyDoc.restoreGraphicsState();
+        return;
+      }
+      // Fallback if dimensions couldn't be read: at least don't stretch —
+      // draw the image at native aspect from the top-left and accept
+      // whatever it looks like rather than distorting it.
+      doc.addImage(heroImage.data, heroImage.format, 0, 0, PAGE_W, PAGE_W / 1.78);
+      // Cover the overflow below the hero band with white
+      setFill(doc, C.white);
+      doc.rect(0, HERO_H, PAGE_W, PAGE_H - HERO_H, "F");
       return;
     } catch (err) {
-      // Fall through to the no-image branding below
-      console.error("[flyer] addImage failed:", err);
+      console.error("[flyer] hero render failed:", err);
     }
   }
   // No-image fallback: solid teal band so the layout still has a top
   // anchor and brand color block.
   setFill(doc, C.teal);
   doc.rect(0, 0, PAGE_W, HERO_H, "F");
-  // Bronze hairline accent
   setFill(doc, C.bronze);
   doc.rect(MARGIN_X, HERO_H - 32, 48, 2, "F");
   setText(doc, C.white);
@@ -222,25 +262,36 @@ function drawStatsStrip(doc: jsPDF, ctx: MarketingPropertyContext, y: number): n
 
   if (slots.length === 0) return y;
 
-  // Draw a cream band behind the strip
-  const stripH = 56;
+  // Cream band behind the strip. Tighter vertical rhythm: label sits
+  // on a fixed top-padding, value baseline lands at a fixed offset
+  // below — gives a consistent visual line across all three columns
+  // regardless of label or value length.
+  const stripH = 60;
   setFill(doc, C.creamHi);
   doc.rect(MARGIN_X, y, CONTENT_W, stripH, "F");
 
+  // Thin bronze separators between columns
+  setFill(doc, C.bronze);
   const colW = CONTENT_W / slots.length;
+  for (let i = 1; i < slots.length; i++) {
+    doc.rect(MARGIN_X + i * colW, y + 14, 0.6, stripH - 28, "F");
+  }
+
   for (let i = 0; i < slots.length; i++) {
     const sx = MARGIN_X + i * colW + 14;
+    // Label: 7pt bold uppercase, baseline at y+22 (top of text ~y+15)
     setText(doc, C.inkSoft);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(7);
-    doc.text(slots[i].label, sx, y + 18, { charSpace: 1.1 });
+    doc.text(slots[i].label, sx, y + 22, { charSpace: 1.1 });
+    // Value: 20pt bold, baseline at y+50 (top of text ~y+30)
     setText(doc, C.teal);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(20);
-    doc.text(slots[i].value, sx, y + 42);
+    doc.text(slots[i].value, sx, y + 50);
   }
 
-  return y + stripH + 18;
+  return y + stripH + 22;
 }
 
 // ── Section: Two-column body (Investment Highlights | Property Facts) ────
@@ -269,7 +320,12 @@ function drawBody(doc: jsPDF, ctx: MarketingPropertyContext, y: number): number 
     leftY += 16;
 
     // Each bullet: bronze ALLCAPS header (first ~6 words) + ink body
-    // (remaining text). Mirrors Liberty Square pattern.
+    // (remaining text). Matches Liberty Square pattern. Fixed line-
+    // heights so the rhythm is consistent across bullets regardless
+    // of header/body length.
+    const HEADER_LH = 12;
+    const BODY_LH = 11;
+    const BULLET_GAP = 10;
     for (const b of ih.slice(0, 6)) {
       const words = b.split(/\s+/);
       const headerCount = Math.min(words.length, 7);
@@ -282,19 +338,21 @@ function drawBody(doc: jsPDF, ctx: MarketingPropertyContext, y: number): number 
       const headerLines: string[] = doc.splitTextToSize(header, leftW);
       for (const ln of headerLines) {
         doc.text(ln, leftX, leftY, { charSpace: 0.4 });
-        leftY += 11;
+        leftY += HEADER_LH;
       }
       if (body) {
         setText(doc, C.ink);
         doc.setFont("helvetica", "normal");
         doc.setFontSize(8);
         const bodyLines: string[] = doc.splitTextToSize(body, leftW);
+        // Tiny gap between header and body line
+        leftY += 2;
         for (const ln of bodyLines) {
           doc.text(ln, leftX, leftY);
-          leftY += 10;
+          leftY += BODY_LH;
         }
       }
-      leftY += 7;
+      leftY += BULLET_GAP;
     }
   }
 
@@ -334,25 +392,41 @@ function drawBody(doc: jsPDF, ctx: MarketingPropertyContext, y: number): number 
     facts.push(["Asset Type", at.charAt(0).toUpperCase() + at.slice(1)]);
   }
 
-  setText(doc, C.ink);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
+  // Fixed-rhythm fact rows. Each row: label baseline at +8, value
+  // baseline at +20, hairline at +25, row height = 28 (or +12 per
+  // wrapped line for multi-line values). Keeps the right column
+  // visually aligned regardless of which facts render.
+  const ROW_H = 28;
+  const LABEL_DY = 8;
+  const VALUE_DY = 20;
+  const HAIRLINE_DY = 25;
+  const WRAP_DY = 12;
+
   for (const [k, v] of facts) {
+    // Label
     setText(doc, C.inkSoft);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(7);
-    doc.text(k.toUpperCase(), rightX, rightY, { charSpace: 0.7 });
+    doc.text(k.toUpperCase(), rightX, rightY + LABEL_DY, { charSpace: 0.7 });
+    // Value (may wrap)
     setText(doc, C.ink);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8.5);
     const lines: string[] = doc.splitTextToSize(v, rightW);
     for (let i = 0; i < lines.length; i++) {
-      doc.text(lines[i], rightX, rightY + 10 + i * 10);
+      doc.text(lines[i], rightX, rightY + VALUE_DY + i * WRAP_DY);
     }
-    rightY += 12 + Math.max(lines.length - 1, 0) * 10 + 6;
+    const extraWrap = Math.max(0, lines.length - 1) * WRAP_DY;
+    // Hairline UNDER the row, consistent gap from value baseline
     setDraw(doc, C.hairline);
     doc.setLineWidth(0.3);
-    doc.line(rightX, rightY - 4, rightX + rightW, rightY - 4);
+    doc.line(
+      rightX,
+      rightY + HAIRLINE_DY + extraWrap,
+      rightX + rightW,
+      rightY + HAIRLINE_DY + extraWrap
+    );
+    rightY += ROW_H + extraWrap;
   }
 
   return Math.max(leftY, rightY) + 8;
