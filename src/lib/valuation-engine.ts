@@ -16,7 +16,17 @@ import { geocodeAddress, GeocodedAddress } from "./geocoder";
 // ── Types ──────────────────────────────────────────────────
 
 export interface ValuationRequest {
-  address: string;
+  /** Display address. Optional when latitude+longitude are provided
+   *  (vacant land, addressless parcels — caller drops a pin instead). */
+  address?: string;
+  /** Direct spatial anchor — skips geocoding entirely. Preferred over
+   *  address when both are present (broker's map pin is more accurate
+   *  than a string lookup). */
+  latitude?: number;
+  longitude?: number;
+  /** Assessor parcel number. Saved to the property record if the
+   *  valuation is promoted, not used for the comp lookup itself. */
+  apn?: string;
   assetType?: string;
   sqft?: number;
   yearBuilt?: number;
@@ -203,10 +213,38 @@ export async function runValuation(
   const key = supabaseKey || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
   const supabase = createClient(url, key);
 
-  // 1. Geocode the subject address
-  const geocoded = await geocodeAddress(request.address);
-  if (!geocoded) {
-    throw new Error(`Could not geocode address: ${request.address}`);
+  // 1. Resolve the spatial anchor — prefer the explicit lat/lng
+  // (broker dropped a pin) over geocoding the address. This lets
+  // vacant land and addressless parcels run a valuation without
+  // depending on the geocoder. The synthesized `geocoded` object
+  // mirrors the geocodeAddress() shape so the rest of the engine
+  // doesn't need to branch.
+  let geocoded: NonNullable<Awaited<ReturnType<typeof geocodeAddress>>>;
+  if (
+    typeof request.latitude === "number" &&
+    typeof request.longitude === "number" &&
+    Number.isFinite(request.latitude) &&
+    Number.isFinite(request.longitude)
+  ) {
+    geocoded = {
+      lat: request.latitude,
+      lng: request.longitude,
+      formattedAddress:
+        request.address?.trim() || `${request.latitude.toFixed(5)}, ${request.longitude.toFixed(5)}`,
+      city: "",
+      state: "",
+      zip: "",
+      county: "",
+    };
+  } else {
+    if (!request.address || !request.address.trim()) {
+      throw new Error("Either an address or latitude+longitude must be provided.");
+    }
+    const g = await geocodeAddress(request.address);
+    if (!g) {
+      throw new Error(`Could not geocode address: ${request.address}`);
+    }
+    geocoded = g;
   }
 
   const assetType = request.assetType || "Retail";
@@ -429,7 +467,7 @@ export async function runValuation(
 
   return {
     subject: {
-      address: request.address,
+      address: request.address ?? geocoded.formattedAddress,
       geocoded,
       assetType,
       sqft: request.sqft || null,

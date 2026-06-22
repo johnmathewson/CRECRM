@@ -1,9 +1,22 @@
 "use client";
 
 import { useState, useRef, DragEvent } from "react";
+import dynamic from "next/dynamic";
 import * as XLSX from "xlsx";
 import Panel from "./panel";
 import { btnPrimary, btnSecondary, inputStyle, selectStyle, FormField } from "./modal";
+
+// Map pin · spatial anchor for vacant land + addressless parcels.
+// ssr:false because Leaflet needs `window` on first mount. Loaded only
+// when the broker reveals the picker via the "Drop a pin instead" toggle.
+const PropertyLocationPicker = dynamic(
+  () => import("./cre-os/property/PropertyLocationPicker").then((m) => m.PropertyLocationPicker),
+  { ssr: false, loading: () => (
+    <div style={{ height: 256, borderRadius: 4, background: "#1A1A1A", border: "1px solid rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <span style={{ fontFamily: "monospace", fontSize: 10, color: "#807E76" }}>Loading map…</span>
+    </div>
+  )}
+);
 
 // ── Types ──────────────────────────────────────────────────
 
@@ -105,6 +118,12 @@ const ALL_EXTS = [...SPREADSHEET_EXTS, ...IMAGE_EXTS, "pdf"];
 export default function ValuateContent() {
   // Form state
   const [address, setAddress] = useState("");
+  // Spatial anchor — for properties without a clean address. When set,
+  // the valuation engine uses lat/lng directly and skips geocoding.
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
+  const [apn, setApn] = useState<string | null>(null);
+  const [showPinPicker, setShowPinPicker] = useState(false);
   const [assetType, setAssetType] = useState("");
   const [totalSqft, setTotalSqft] = useState("");
   const [yearBuilt, setYearBuilt] = useState("");
@@ -334,8 +353,9 @@ export default function ValuateContent() {
 
   // ── Run valuation ──────────────────────────────────────
   const runValuation = async () => {
-    if (!address.trim()) {
-      setError("Please enter a property address.");
+    const hasPin = latitude !== null && longitude !== null;
+    if (!address.trim() && !hasPin) {
+      setError("Enter a property address or drop a pin on the map.");
       return;
     }
 
@@ -364,7 +384,12 @@ export default function ValuateContent() {
       : parsedUnits.reduce((sum, u) => sum + u.sqft, 0) || undefined;
 
     const body: any = {
-      address: address.trim(),
+      address: address.trim() || undefined,
+      // Spatial anchor — when set, the engine uses these directly and
+      // skips geocoding. Required when address is blank.
+      latitude: latitude ?? undefined,
+      longitude: longitude ?? undefined,
+      apn: apn ?? undefined,
       assetType: assetType || undefined,
       sqft: computedSqft,
       yearBuilt: yearBuilt ? parseInt(yearBuilt) : undefined,
@@ -504,15 +529,57 @@ export default function ValuateContent() {
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <Panel title="Subject Property" actions={<span />}>
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <FormField label="Property Address *">
+              <FormField label={latitude !== null && longitude !== null ? "Property Address (optional — pin is set)" : "Property Address *"}>
                 <input
                   style={inputStyle}
-                  placeholder="123 Main St, City, State"
+                  placeholder="123 Main St, City, State — or drop a pin below"
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && !loading && runValuation()}
                 />
               </FormField>
+
+              {/* Spatial-anchor toggle — for vacant land / addressless
+                  parcels. When a pin is set, the engine uses lat/lng
+                  directly and skips geocoding the address. */}
+              <div style={{ marginTop: 8, marginBottom: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowPinPicker((v) => !v)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    padding: 0,
+                    color: latitude !== null && longitude !== null ? "rgb(94,234,212)" : "rgba(240,237,228,0.6)",
+                    fontSize: 11,
+                    fontFamily: "monospace",
+                    textDecoration: "underline",
+                    textUnderlineOffset: 2,
+                    cursor: "pointer",
+                  }}
+                >
+                  {showPinPicker
+                    ? "Hide map"
+                    : latitude !== null && longitude !== null
+                      ? `Pin set: ${latitude.toFixed(5)}, ${longitude.toFixed(5)} — click to adjust`
+                      : "Drop a pin instead (for vacant land / unaddressed parcels)"}
+                </button>
+                {showPinPicker && (
+                  <div style={{ marginTop: 8 }}>
+                    <PropertyLocationPicker
+                      initialLatitude={latitude}
+                      initialLongitude={longitude}
+                      initialApn={apn}
+                      fallbackAddress={address}
+                      onChange={(next) => {
+                        setLatitude(next.latitude);
+                        setLongitude(next.longitude);
+                        setApn(next.apn);
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
 
               <FormField label="Asset Type">
                 <select

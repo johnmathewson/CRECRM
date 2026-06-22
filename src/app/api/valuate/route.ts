@@ -21,8 +21,19 @@ export async function POST(req: NextRequest) {
   try {
     const body: ValuationRequest = await req.json();
 
-    if (!body.address) {
-      return NextResponse.json({ error: "Address is required" }, { status: 400 });
+    // Either an address OR a lat/lng pin is required. lat/lng is
+    // preferred (more accurate, skips geocoding) — broker drops a pin
+    // for vacant land / unaddressed parcels.
+    const hasPin =
+      typeof body.latitude === "number" &&
+      typeof body.longitude === "number" &&
+      Number.isFinite(body.latitude) &&
+      Number.isFinite(body.longitude);
+    if (!body.address && !hasPin) {
+      return NextResponse.json(
+        { error: "Either an address or a map pin (latitude+longitude) is required" },
+        { status: 400 }
+      );
     }
 
     // Run the valuation engine
@@ -46,7 +57,7 @@ export async function POST(req: NextRequest) {
       return new NextResponse(Buffer.from(pdfBytes), {
         headers: {
           "Content-Type": "application/pdf",
-          "Content-Disposition": `attachment; filename="${safeName(body.address)}_BOV.pdf"`,
+          "Content-Disposition": `attachment; filename="${safeName(body.address ?? result.subject.geocoded.formattedAddress ?? "subject")}_BOV.pdf"`,
         },
       });
     }
@@ -224,7 +235,7 @@ function buildReportData(result: ValuationResult, request: ValuationRequest): Re
   }
 
   return {
-    propertyName: request.address,
+    propertyName: request.address ?? result.subject.geocoded.formattedAddress,
     propertyAddress: result.subject.geocoded.formattedAddress,
     propertyType: result.subject.assetType,
     totalSF: request.sqft,
