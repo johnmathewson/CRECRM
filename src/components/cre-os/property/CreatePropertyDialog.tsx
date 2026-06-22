@@ -5,6 +5,30 @@ import { useRouter } from "next/navigation";
 import { PROPERTY_STATUS_ORDER, PROPERTY_STATUS_META } from "@/lib/cre-os/property-status";
 import type { PropertyMatch } from "@/app/api/properties/match/route";
 
+// localStorage key for the in-progress create-property draft. Versioned
+// so a future shape change doesn't try to hydrate stale fields.
+const DRAFT_KEY = "crecrm:create_property_draft:v1";
+
+interface DraftShape {
+  name: string;
+  address: string;
+  city: string;
+  state: string;
+  zip: string;
+  assetType: string;
+  transactionType: "sale" | "lease";
+  askingPrice: string;
+  leaseRate: string;
+  sqft: string;
+  status: string;
+  notes: string;
+  savedAt: string;
+}
+
+function clearDraft() {
+  try { window.localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
+}
+
 /**
  * CreatePropertyDialog — adds a new property AND auto-pairs a deal so it
  * shows up in the pipeline immediately. The Phase 8 unlock for "I want to
@@ -41,6 +65,14 @@ export function CreatePropertyDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // ── Draft autosave to localStorage ────────────────────────────────────
+  // Persist every field on change so the broker can close the dialog mid-
+  // fill (or refresh the page) without losing work. Hydrated on open;
+  // cleared after a successful create. "Discard draft" button restores
+  // a blank form.
+  const [draftRestored, setDraftRestored] = useState(false);
+  const hydratedRef = useRef(false);
+
   // ── Fuzzy-match against the 15k properties already in the DB. As the
   // broker types an address or name, surface candidate matches. Pick one
   // → navigate to the existing property page (skip the create flow). If
@@ -50,6 +82,67 @@ export function CreatePropertyDialog({
   const [matchDismissedFor, setMatchDismissedFor] = useState<string>("");
   const lastQueryRef = useRef<string>("");
 
+  // Hydrate from localStorage draft on open. Runs ONCE per open cycle —
+  // hydratedRef prevents the autosave effect from clobbering the draft
+  // before we've read it on first render.
+  useEffect(() => {
+    if (!open || hydratedRef.current) return;
+    hydratedRef.current = true;
+    try {
+      const raw = window.localStorage.getItem(DRAFT_KEY);
+      if (!raw) return;
+      const draft = JSON.parse(raw) as Partial<DraftShape>;
+      let any = false;
+      if (draft.name) { setName(draft.name); any = true; }
+      if (draft.address) { setAddress(draft.address); any = true; }
+      if (draft.city) { setCity(draft.city); any = true; }
+      if (draft.state) { setState(draft.state); any = true; }
+      if (draft.zip) { setZip(draft.zip); any = true; }
+      if (draft.assetType) { setAssetType(draft.assetType); any = true; }
+      if (draft.transactionType) { setTransactionType(draft.transactionType); any = true; }
+      if (draft.askingPrice) { setAskingPrice(draft.askingPrice); any = true; }
+      if (draft.leaseRate) { setLeaseRate(draft.leaseRate); any = true; }
+      if (draft.sqft) { setSqft(draft.sqft); any = true; }
+      if (draft.status) { setStatus(draft.status); any = true; }
+      if (draft.notes) { setNotes(draft.notes); any = true; }
+      if (any) setDraftRestored(true);
+    } catch {
+      // Corrupt draft — drop it silently rather than blocking the dialog
+      try { window.localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
+    }
+  }, [open]);
+
+  // Persist current form state to localStorage on every change. Skips
+  // the first render after hydration so we don't overwrite the draft
+  // with the default values before the broker has typed anything.
+  useEffect(() => {
+    if (!open || !hydratedRef.current) return;
+    try {
+      const draft: DraftShape = {
+        name, address, city, state, zip, assetType, transactionType,
+        askingPrice, leaseRate, sqft, status, notes,
+        savedAt: new Date().toISOString(),
+      };
+      // Don't write a draft that's effectively empty (saves the user
+      // from seeing a "draft restored" banner just because they opened
+      // and closed the dialog without typing).
+      const hasContent = !!(
+        name.trim() || address.trim() || city.trim() ||
+        askingPrice || leaseRate || sqft || notes.trim()
+      );
+      if (hasContent) {
+        window.localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+      } else {
+        window.localStorage.removeItem(DRAFT_KEY);
+      }
+    } catch {
+      /* localStorage may be unavailable in private windows — ignore */
+    }
+  }, [
+    open, name, address, city, state, zip, assetType, transactionType,
+    askingPrice, leaseRate, sqft, status, notes,
+  ]);
+
   // Reset on close
   useEffect(() => {
     if (!open) {
@@ -57,6 +150,10 @@ export function CreatePropertyDialog({
       setBusy(false);
       setMatches([]);
       setMatchDismissedFor("");
+      // Reset hydration guard so next open re-reads the draft (in
+      // case the broker closed without saving and is coming back).
+      hydratedRef.current = false;
+      setDraftRestored(false);
     }
   }, [open]);
 
@@ -162,6 +259,9 @@ export function CreatePropertyDialog({
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+      // Successful create — drop the draft so the next "Add Property"
+      // opens to a clean form.
+      clearDraft();
       onClose();
       // Navigate to the new property workspace — broker can keep filling out details there
       const slug = json.property?.slug || json.property?.id;
@@ -205,6 +305,31 @@ export function CreatePropertyDialog({
         </div>
 
         <div className="px-6 py-5 space-y-5 overflow-y-auto flex-1">
+          {/* Restored-draft banner. Shows once when we hydrate fields
+              from a prior in-progress draft so the broker knows where
+              the data came from. "Discard" clears the form back to a
+              clean slate. */}
+          {draftRestored && (
+            <div className="rounded border border-teal-400/30 bg-teal-400/[0.06] px-3 py-2 flex items-center justify-between gap-3">
+              <div className="font-body text-[12px] text-teal-300">
+                Draft restored. Your fields auto-save as you type — close any time without losing work.
+              </div>
+              <button
+                onClick={() => {
+                  clearDraft();
+                  setName(""); setAddress(""); setCity(""); setState("IN"); setZip("");
+                  setAssetType("retail"); setTransactionType(defaultTransactionType);
+                  setAskingPrice(""); setLeaseRate(""); setSqft("");
+                  setStatus("listed"); setNotes("");
+                  setDraftRestored(false);
+                }}
+                className="font-mono text-[10.5px] text-cream-subtle hover:text-cream underline underline-offset-2"
+              >
+                Discard draft
+              </button>
+            </div>
+          )}
+
           {/* Address-first — that's how a broker thinks about a property */}
           <Field label="Address" hint="Most direct way to identify the property.">
             <input
