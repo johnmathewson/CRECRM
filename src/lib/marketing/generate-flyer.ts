@@ -292,41 +292,80 @@ function drawStatsStrip(doc: jsPDF, ctx: MarketingPropertyContext, y: number): n
 // ── Section: Property description paragraph ─────────────────────────────
 
 /**
- * Short description block between the stats strip and the two-column
- * body. Pulls the first paragraph of properties.description (the AI
- * marketing copy). Truncates to ~60 words so it stays a hook, not a
- * full read. Skipped entirely if no description exists.
+ * Property description block that fills the space between the two-
+ * column body and the footer. Rendered AFTER the body so the body
+ * takes its natural height first and the description sizes itself
+ * to fit the remaining vertical room.
+ *
+ * Pulls properties.description, fits to the available height by
+ * dropping paragraphs from the end if needed (cleanest truncation —
+ * we never truncate mid-sentence).
  */
-function drawDescription(doc: jsPDF, ctx: MarketingPropertyContext, y: number): number {
+function drawDescription(doc: jsPDF, ctx: MarketingPropertyContext, y: number): void {
   const desc = ctx.property.description;
-  if (!desc) return y;
+  if (!desc) return;
 
-  // Take just the first paragraph
-  const firstPara = desc.split(/\n\s*\n/)[0]?.trim() ?? "";
-  if (!firstPara) return y;
+  // Footer is the bottom 88pt. Need ~16pt breathing room above footer.
+  const footerTop = PAGE_H - 88;
+  const headerH = 28; // label hairline + uppercase title
+  const bottomPad = 16;
+  const available = footerTop - bottomPad - (y + headerH);
+  if (available < 24) return; // no room — skip rather than crowd
 
-  // Soft cap at ~60 words so the flyer stays scannable.
-  const words = firstPara.split(/\s+/);
-  const capped = words.length > 60 ? words.slice(0, 60).join(" ") + "…" : firstPara;
-
-  // Bronze hairline + small uppercase label, then the body paragraph
+  // Bronze hairline + label
   setFill(doc, C.bronze);
   doc.rect(MARGIN_X, y, 32, 1.5, "F");
   setText(doc, C.teal);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(8);
-  doc.text("THE OPPORTUNITY", MARGIN_X, y + 14, { charSpace: 1.2 });
+  doc.text("PROPERTY DESCRIPTION", MARGIN_X, y + 14, { charSpace: 1.2 });
 
+  // Drop paragraphs from the end until the remaining text fits.
+  const paragraphs: string[] = desc.split(/\n\s*\n/).map((p: string) => p.trim()).filter(Boolean);
+  const LH = 12;
+  const FONT_SIZE = 9;
+  const PARA_GAP = 6;
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(FONT_SIZE);
+
+  function measureLines(text: string): number {
+    const lines: string[] = doc.splitTextToSize(text, CONTENT_W);
+    return lines.length;
+  }
+  function totalHeight(paras: string[]): number {
+    let h = 0;
+    for (const p of paras) h += measureLines(p) * LH + PARA_GAP;
+    return h - PARA_GAP; // no trailing gap
+  }
+
+  let kept = paragraphs.slice();
+  while (kept.length > 1 && totalHeight(kept) > available) {
+    kept.pop();
+  }
+  // If even one paragraph doesn't fit, soft-truncate that single
+  // paragraph by sentence boundary.
+  if (kept.length === 1 && totalHeight(kept) > available) {
+    const sentences = kept[0].split(/(?<=[.!?])\s+/);
+    while (sentences.length > 1 && totalHeight([sentences.join(" ")]) > available) {
+      sentences.pop();
+    }
+    kept = [sentences.join(" ")];
+  }
+
+  // Render
   setText(doc, C.ink);
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-  const lines: string[] = doc.splitTextToSize(capped, CONTENT_W);
-  let cy = y + 30;
-  for (const ln of lines) {
-    doc.text(ln, MARGIN_X, cy);
-    cy += 12;
+  doc.setFontSize(FONT_SIZE);
+  let cy = y + headerH;
+  for (const p of kept) {
+    const lines: string[] = doc.splitTextToSize(p, CONTENT_W);
+    for (const ln of lines) {
+      doc.text(ln, MARGIN_X, cy);
+      cy += LH;
+    }
+    cy += PARA_GAP;
   }
-  return cy + 16;
 }
 
 // ── Section: Two-column body (Investment Highlights | Property Facts) ────
@@ -542,8 +581,10 @@ export async function generateFlyer(ctx: MarketingPropertyContext): Promise<Gene
   drawHero(doc, heroImage);
   let cy = drawIdentity(doc, ctx);
   cy = drawStatsStrip(doc, ctx, cy);
-  cy = drawDescription(doc, ctx, cy);
-  drawBody(doc, ctx, cy);
+  const bodyEndY = drawBody(doc, ctx, cy);
+  // Description fills the blank between the body and the footer.
+  // Sizes itself to fit whatever vertical space is left.
+  drawDescription(doc, ctx, bodyEndY);
   drawFooter(doc);
 
   const pdfBytes = doc.output("arraybuffer") as ArrayBuffer;
