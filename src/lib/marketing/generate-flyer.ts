@@ -26,18 +26,26 @@ import type { MarketingPropertyContext } from "./property-context";
 
 type RGB = [number, number, number];
 
-// Brand palette — same as generate-om.ts (kept inline for first ship,
-// can be lifted into a shared brand.ts when we add the 3rd generator).
+// Stewardship brand palette — matches stewardshipcre.com:
+//   bg #0D0D0D (page) · surface #1A1A1A (raised) · surfaceHi #282828
+//   coral #E07A5F (accent) · coralDim #EA9A82 (softer)
+//   cream #F0EDE4 (text) · cream-alpha for muted / hairlines
+// Different from generate-om.ts (which used eXp Commercial's
+// teal/bronze on white per the actual OM template). The flyer
+// adopts Stewardship's visual identity even though we name eXp
+// Commercial as the brokerage in the contact strip.
 const C: Record<string, RGB> = {
-  white: [255, 255, 255],
-  teal: [45, 59, 58],
-  tealDim: [70, 86, 84],
-  bronze: [166, 124, 82],
-  cream: [247, 245, 240],
-  creamHi: [240, 237, 228],
-  ink: [58, 58, 58],
-  inkSoft: [110, 110, 110],
-  hairline: [220, 218, 212],
+  bg: [13, 13, 13],
+  surface: [26, 26, 26],
+  surfaceHi: [40, 40, 40],
+  coral: [224, 122, 95],
+  coralDim: [234, 154, 130],
+  coralDeep: [198, 102, 72],
+  cream: [240, 237, 228],
+  creamMuted: [180, 175, 165],
+  creamSubtle: [130, 126, 118],
+  hairline: [60, 58, 54],
+  black: [0, 0, 0],
 };
 
 const PAGE_W = 612;
@@ -139,14 +147,14 @@ function drawHero(
         // cleanly with addImage. We explicitly mask the overflow
         // below the hero band with a white rectangle so nothing
         // bleeds into the content area below.
-        setFill(doc, C.white);
+        setFill(doc, C.bg);
         doc.rect(0, HERO_H, PAGE_W, PAGE_H - HERO_H, "F");
         return;
       }
       // Dimension-read failed: still don't stretch — draw at a sane
       // landscape aspect and mask the overflow.
       doc.addImage(heroImage.data, heroImage.format, 0, 0, PAGE_W, PAGE_W / 1.78);
-      setFill(doc, C.white);
+      setFill(doc, C.bg);
       doc.rect(0, HERO_H, PAGE_W, PAGE_H - HERO_H, "F");
       return;
     } catch (err) {
@@ -155,11 +163,11 @@ function drawHero(
   }
   // No-image fallback: solid teal band so the layout still has a top
   // anchor and brand color block.
-  setFill(doc, C.teal);
+  setFill(doc, C.surface);
   doc.rect(0, 0, PAGE_W, HERO_H, "F");
-  setFill(doc, C.bronze);
+  setFill(doc, C.coral);
   doc.rect(MARGIN_X, HERO_H - 32, 48, 2, "F");
-  setText(doc, C.white);
+  setText(doc, C.cream);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
   doc.text("PROPERTY FOR SALE", MARGIN_X, HERO_H - 12, { charSpace: 1.5 });
@@ -171,7 +179,7 @@ function drawIdentity(doc: jsPDF, ctx: MarketingPropertyContext): number {
   const p = ctx.property;
   let cy = HERO_H + 30;
 
-  setText(doc, C.bronze);
+  setText(doc, C.coral);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.text("eXp COMMERCIAL", MARGIN_X, cy, { charSpace: 1.5 });
@@ -179,7 +187,7 @@ function drawIdentity(doc: jsPDF, ctx: MarketingPropertyContext): number {
 
   // Property name — split into two lines if multi-word
   const name = (p.name ?? "Property").toUpperCase();
-  setText(doc, C.teal);
+  setText(doc, C.coral);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(24);
   const nameLines: string[] = doc.splitTextToSize(name, CONTENT_W);
@@ -200,7 +208,7 @@ function drawIdentity(doc: jsPDF, ctx: MarketingPropertyContext): number {
     return parts.join(" · ");
   })();
   if (tagline) {
-    setText(doc, C.tealDim);
+    setText(doc, C.cream);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
     doc.text(tagline.toUpperCase(), MARGIN_X, cy, { charSpace: 0.5 });
@@ -212,7 +220,7 @@ function drawIdentity(doc: jsPDF, ctx: MarketingPropertyContext): number {
     .filter(Boolean)
     .join(" | ");
   if (addressBits) {
-    setText(doc, C.ink);
+    setText(doc, C.cream);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8.5);
     doc.text(addressBits.toUpperCase(), MARGIN_X, cy, { charSpace: 0.5 });
@@ -262,11 +270,11 @@ function drawStatsStrip(doc: jsPDF, ctx: MarketingPropertyContext, y: number): n
   // below — gives a consistent visual line across all three columns
   // regardless of label or value length.
   const stripH = 60;
-  setFill(doc, C.creamHi);
+  setFill(doc, C.surface);
   doc.rect(MARGIN_X, y, CONTENT_W, stripH, "F");
 
   // Thin bronze separators between columns
-  setFill(doc, C.bronze);
+  setFill(doc, C.coral);
   const colW = CONTENT_W / slots.length;
   for (let i = 1; i < slots.length; i++) {
     doc.rect(MARGIN_X + i * colW, y + 14, 0.6, stripH - 28, "F");
@@ -275,12 +283,12 @@ function drawStatsStrip(doc: jsPDF, ctx: MarketingPropertyContext, y: number): n
   for (let i = 0; i < slots.length; i++) {
     const sx = MARGIN_X + i * colW + 14;
     // Label: 7pt bold uppercase, baseline at y+22 (top of text ~y+15)
-    setText(doc, C.inkSoft);
+    setText(doc, C.creamMuted);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(7);
     doc.text(slots[i].label, sx, y + 22, { charSpace: 1.1 });
     // Value: 20pt bold, baseline at y+50 (top of text ~y+30)
-    setText(doc, C.teal);
+    setText(doc, C.coral);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(20);
     doc.text(slots[i].value, sx, y + 50);
@@ -313,9 +321,9 @@ function drawDescription(doc: jsPDF, ctx: MarketingPropertyContext, y: number): 
   if (available < 24) return; // no room — skip rather than crowd
 
   // Bronze hairline + label
-  setFill(doc, C.bronze);
+  setFill(doc, C.coral);
   doc.rect(MARGIN_X, y, 32, 1.5, "F");
-  setText(doc, C.teal);
+  setText(doc, C.coral);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(8);
   doc.text("PROPERTY DESCRIPTION", MARGIN_X, y + 14, { charSpace: 1.2 });
@@ -354,7 +362,7 @@ function drawDescription(doc: jsPDF, ctx: MarketingPropertyContext, y: number): 
   }
 
   // Render
-  setText(doc, C.ink);
+  setText(doc, C.cream);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(FONT_SIZE);
   let cy = y + headerH;
@@ -382,14 +390,14 @@ function drawBody(doc: jsPDF, ctx: MarketingPropertyContext, y: number): number 
   let leftY = y;
   const ih: string[] = Array.isArray(p.investment_highlights) ? p.investment_highlights : [];
   if (ih.length > 0) {
-    setText(doc, C.teal);
+    setText(doc, C.coral);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(13);
     doc.text("INVESTMENT", leftX, leftY, { charSpace: 0.6 });
     leftY += 14;
     doc.text("HIGHLIGHTS", leftX, leftY, { charSpace: 0.6 });
     leftY += 8;
-    setFill(doc, C.bronze);
+    setFill(doc, C.coral);
     doc.rect(leftX, leftY, 32, 1.5, "F");
     leftY += 16;
 
@@ -406,7 +414,7 @@ function drawBody(doc: jsPDF, ctx: MarketingPropertyContext, y: number): number 
       const header = words.slice(0, headerCount).join(" ").toUpperCase();
       const body = words.slice(headerCount).join(" ");
 
-      setText(doc, C.bronze);
+      setText(doc, C.coral);
       doc.setFont("helvetica", "bold");
       doc.setFontSize(9);
       const headerLines: string[] = doc.splitTextToSize(header, leftW);
@@ -415,7 +423,7 @@ function drawBody(doc: jsPDF, ctx: MarketingPropertyContext, y: number): number 
         leftY += HEADER_LH;
       }
       if (body) {
-        setText(doc, C.ink);
+        setText(doc, C.cream);
         doc.setFont("helvetica", "normal");
         doc.setFontSize(8);
         const bodyLines: string[] = doc.splitTextToSize(body, leftW);
@@ -432,12 +440,12 @@ function drawBody(doc: jsPDF, ctx: MarketingPropertyContext, y: number): number 
 
   // ── RIGHT: Property Facts ─────────
   let rightY = y;
-  setText(doc, C.teal);
+  setText(doc, C.coral);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(13);
   doc.text("PROPERTY FACTS", rightX, rightY, { charSpace: 0.6 });
   rightY += 8;
-  setFill(doc, C.bronze);
+  setFill(doc, C.coral);
   doc.rect(rightX, rightY, 32, 1.5, "F");
   rightY += 14;
 
@@ -478,12 +486,12 @@ function drawBody(doc: jsPDF, ctx: MarketingPropertyContext, y: number): number 
 
   for (const [k, v] of facts) {
     // Label
-    setText(doc, C.inkSoft);
+    setText(doc, C.creamMuted);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(7);
     doc.text(k.toUpperCase(), rightX, rightY + LABEL_DY, { charSpace: 0.7 });
     // Value (may wrap)
-    setText(doc, C.ink);
+    setText(doc, C.cream);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8.5);
     const lines: string[] = doc.splitTextToSize(v, rightW);
@@ -513,19 +521,19 @@ function drawFooter(doc: jsPDF) {
   const footerY = PAGE_H - 88;
 
   // Teal background band
-  setFill(doc, C.teal);
+  setFill(doc, C.surface);
   doc.rect(0, footerY, PAGE_W, PAGE_H - footerY, "F");
 
   // Bronze accent
-  setFill(doc, C.bronze);
+  setFill(doc, C.coral);
   doc.rect(MARGIN_X, footerY + 14, 32, 1.5, "F");
 
-  setText(doc, C.bronze);
+  setText(doc, C.coral);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(7);
   doc.text("EXCLUSIVELY LISTED BY", MARGIN_X, footerY + 28, { charSpace: 1.2 });
 
-  setText(doc, C.white);
+  setText(doc, C.cream);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(13);
   doc.text("JOHN MATHEWSON", MARGIN_X, footerY + 46);
@@ -536,7 +544,7 @@ function drawFooter(doc: jsPDF) {
   doc.text("Commercial Real Estate Broker", MARGIN_X, footerY + 58);
 
   // Right-aligned brokerage info
-  setText(doc, C.bronze);
+  setText(doc, C.coral);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.text("eXp COMMERCIAL", PAGE_W - MARGIN_X, footerY + 30, { align: "right", charSpace: 1.2 });
@@ -577,6 +585,12 @@ export async function generateFlyer(ctx: MarketingPropertyContext): Promise<Gene
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const heroUrl: string | null = images.length > 0 ? (images[0] as any).url ?? null : null;
   const heroImage = heroUrl ? await fetchImageBytes(heroUrl) : null;
+
+  // Paint the entire page dark first. jsPDF defaults to no background
+  // (white). Without this, any area not explicitly filled later would
+  // render white — wrong for the Stewardship dark theme.
+  setFill(doc, C.bg);
+  doc.rect(0, 0, PAGE_W, PAGE_H, "F");
 
   drawHero(doc, heroImage);
   let cy = drawIdentity(doc, ctx);

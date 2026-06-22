@@ -53,6 +53,7 @@ What public marketing copy NEVER does:
 - Quote stabilized income or pro forma math ("approximately $407,000 annually" — FORBIDDEN)
 - Describe the seller's rationale or pricing motive ("the seller is seeking a premium for..." — FORBIDDEN)
 - Frame the property as if explaining it to a financial buyer ("fits an investor with a 7% target yield" — FORBIDDEN)
+- Use sell-side / buy-side memo language: "broadens the buyer pool", "qualified buyer pool", "expand the investor base", "favorable exit", "favorable resale", "at exit", "at resale" — FORBIDDEN. These are broker-to-broker phrases that read as analytical, not aspirational. Just describe the ASSET's qualities directly ("M1 zoning permits broad industrial uses") instead of editorializing about its market positioning ("M1 zoning broadens the qualified buyer pool")
 - Mention asking price in the body (the headline and listing platform show the price; the body sells the OPPORTUNITY, not the price)
 
 Voice:
