@@ -9,6 +9,7 @@ import { LogActivityDialog } from "@/components/cre-os/activities/LogActivityDia
 import { CreateTaskDialog } from "@/components/cre-os/tasks/CreateTaskDialog";
 import { BuyerFitDialog } from "@/components/cre-os/property/BuyerFitDialog";
 import { ArchivePropertyDialog } from "@/components/cre-os/property/ArchivePropertyDialog";
+import { LifecycleAction } from "@/components/cre-os/property/LifecycleAction";
 import type { PropertyDetail } from "@/lib/cre-os/property-queries";
 
 const fmtMoney = (n: number | null) => {
@@ -96,6 +97,9 @@ export function PropertyHeader({ p }: { p: PropertyDetail }) {
                 · {p.yourRole.replace("_", " ")}
               </span>
             )}
+            <span className="ml-1">
+              <LifecycleAction propertyId={p.id} currentStatus={p.status} />
+            </span>
           </div>
 
           {valuationCaption && (
