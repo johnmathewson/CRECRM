@@ -110,9 +110,9 @@ function drawHero(
 ) {
   if (heroImage) {
     try {
-      // Aspect-ratio-preserving "cover" fit: scale the image so it fills
-      // the 612×216 hero box on the shorter dimension, then center-crop
-      // the overflow by clipping to the box. NEVER stretch.
+      // Aspect-ratio-preserving "cover" fit: scale so the image fills
+      // the 612×216 hero box on the shorter dimension and overflows
+      // the longer one. NEVER stretch.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const props: any = (doc as any).getImageProperties(heroImage.data);
       const imgW = Number(props.width);
@@ -134,23 +134,18 @@ function drawHero(
           offsetX = 0;
           offsetY = -(drawH - HERO_H) / 2;
         }
-        // Clip to the hero box so the overflow doesn't bleed into
-        // the content area below.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const anyDoc = doc as any;
-        anyDoc.saveGraphicsState();
-        anyDoc.rect(0, 0, PAGE_W, HERO_H);
-        anyDoc.clip();
-        anyDoc.discardPath();
         doc.addImage(heroImage.data, heroImage.format, offsetX, offsetY, drawW, drawH);
-        anyDoc.restoreGraphicsState();
+        // Belt-and-suspenders: jsPDF clip() doesn't always interact
+        // cleanly with addImage. We explicitly mask the overflow
+        // below the hero band with a white rectangle so nothing
+        // bleeds into the content area below.
+        setFill(doc, C.white);
+        doc.rect(0, HERO_H, PAGE_W, PAGE_H - HERO_H, "F");
         return;
       }
-      // Fallback if dimensions couldn't be read: at least don't stretch —
-      // draw the image at native aspect from the top-left and accept
-      // whatever it looks like rather than distorting it.
+      // Dimension-read failed: still don't stretch — draw at a sane
+      // landscape aspect and mask the overflow.
       doc.addImage(heroImage.data, heroImage.format, 0, 0, PAGE_W, PAGE_W / 1.78);
-      // Cover the overflow below the hero band with white
       setFill(doc, C.white);
       doc.rect(0, HERO_H, PAGE_W, PAGE_H - HERO_H, "F");
       return;
@@ -292,6 +287,46 @@ function drawStatsStrip(doc: jsPDF, ctx: MarketingPropertyContext, y: number): n
   }
 
   return y + stripH + 22;
+}
+
+// ── Section: Property description paragraph ─────────────────────────────
+
+/**
+ * Short description block between the stats strip and the two-column
+ * body. Pulls the first paragraph of properties.description (the AI
+ * marketing copy). Truncates to ~60 words so it stays a hook, not a
+ * full read. Skipped entirely if no description exists.
+ */
+function drawDescription(doc: jsPDF, ctx: MarketingPropertyContext, y: number): number {
+  const desc = ctx.property.description;
+  if (!desc) return y;
+
+  // Take just the first paragraph
+  const firstPara = desc.split(/\n\s*\n/)[0]?.trim() ?? "";
+  if (!firstPara) return y;
+
+  // Soft cap at ~60 words so the flyer stays scannable.
+  const words = firstPara.split(/\s+/);
+  const capped = words.length > 60 ? words.slice(0, 60).join(" ") + "…" : firstPara;
+
+  // Bronze hairline + small uppercase label, then the body paragraph
+  setFill(doc, C.bronze);
+  doc.rect(MARGIN_X, y, 32, 1.5, "F");
+  setText(doc, C.teal);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8);
+  doc.text("THE OPPORTUNITY", MARGIN_X, y + 14, { charSpace: 1.2 });
+
+  setText(doc, C.ink);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  const lines: string[] = doc.splitTextToSize(capped, CONTENT_W);
+  let cy = y + 30;
+  for (const ln of lines) {
+    doc.text(ln, MARGIN_X, cy);
+    cy += 12;
+  }
+  return cy + 16;
 }
 
 // ── Section: Two-column body (Investment Highlights | Property Facts) ────
@@ -507,6 +542,7 @@ export async function generateFlyer(ctx: MarketingPropertyContext): Promise<Gene
   drawHero(doc, heroImage);
   let cy = drawIdentity(doc, ctx);
   cy = drawStatsStrip(doc, ctx, cy);
+  cy = drawDescription(doc, ctx, cy);
   drawBody(doc, ctx, cy);
   drawFooter(doc);
 
