@@ -662,6 +662,36 @@ export async function POST(req: NextRequest) {
   const token = await getActiveGmailToken(supabase);
   if (!token) return NextResponse.json({ error: "Gmail not connected" }, { status: 412 });
 
+  const sourceDetail = `gmail:${body.gmail_message_id}`;
+
+  // Idempotency check — poll-gmail re-processes the same Gmail message
+  // every minute until it's marked read, so without this we'd create
+  // 5+ duplicate import_jobs per delivery + re-run the (idempotent but
+  // expensive) parse + upsert path 5+ times. If we already have a
+  // completed job for this Gmail message, short-circuit.
+  if (!body.dryRun) {
+    const { data: existing } = await supabase
+      .from("import_jobs")
+      .select("id, status, total_records, processed_records, failed_records, completed_at")
+      .eq("organization_id", ORG_ID)
+      .eq("source", "crexi_lead_report")
+      .eq("source_detail", sourceDetail)
+      .eq("status", "completed")
+      .order("completed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (existing) {
+      return NextResponse.json({
+        ok: true,
+        skipped: true,
+        reason: "already_processed",
+        prior_import_job_id: existing.id,
+        prior_completed_at: existing.completed_at,
+        total_records: existing.total_records,
+      });
+    }
+  }
+
   // Open audit job
   let jobId: string | null = null;
   if (!body.dryRun) {
@@ -670,7 +700,7 @@ export async function POST(req: NextRequest) {
       .insert({
         organization_id: ORG_ID,
         source: "crexi_lead_report",
-        source_detail: `gmail:${body.gmail_message_id}`,
+        source_detail: sourceDetail,
         status: "processing",
         started_at: new Date().toISOString(),
       })
