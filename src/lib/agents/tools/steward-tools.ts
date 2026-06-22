@@ -302,6 +302,54 @@ export const getApproachingKeyDates: Tool = {
   },
 };
 
+// ─── getNewlyListedProperties ───────────────────────────────────────────
+// Properties promoted to "Listed" within the lookback window. Powers
+// Steward's "Newly Listed" callout in tomorrow morning's brief —
+// a property that just went live yesterday is a fresh marketing event
+// to highlight.
+
+export const getNewlyListedProperties: Tool = {
+  definition: {
+    name: "get_newly_listed_properties",
+    description:
+      "Returns properties promoted to 'Listed' status within the last N hours. Includes property name, address, asking price, " +
+      "SF, asset type, when it was listed, and days_since_listing. Useful for the 'Newly Listed Today' section of the brief.",
+    input_schema: {
+      type: "object",
+      properties: {
+        hours_cutoff: {
+          type: "number",
+          description: "Lookback window in hours. Default 36 — generous enough to catch listings from a late-evening Go-Live on the day before the morning brief.",
+        },
+      },
+      required: [],
+    },
+  },
+  handler: async (input: { hours_cutoff?: number }) => {
+    const hours = input.hours_cutoff ?? 36;
+    const cutoffIso = new Date(Date.now() - hours * 3_600_000).toISOString();
+    const sb = client();
+    const { data, error } = await sb
+      .from("properties")
+      .select(
+        "id, slug, name, address, city, state, asset_type, sub_type, asking_price, sqft, cap_rate, listed_at, your_role"
+      )
+      .eq("organization_id", ORG_ID)
+      .eq("status", "listed")
+      .gte("listed_at", cutoffIso)
+      .order("listed_at", { ascending: false });
+    if (error) throw new Error(`get_newly_listed_properties: ${error.message}`);
+    const now = Date.now();
+    const enriched = (data ?? []).map((p: any) => ({
+      ...p,
+      hours_since_listing: p.listed_at
+        ? Math.round((now - new Date(p.listed_at).getTime()) / 3_600_000)
+        : null,
+    }));
+    return { count: enriched.length, hours_cutoff: hours, listings: enriched };
+  },
+};
+
 // ─── getYesterdayBrief ──────────────────────────────────────────────────
 // The previous daily brief, for "what changed" framing. Steward should
 // mention material changes since yesterday's brief without re-running
@@ -369,6 +417,7 @@ export const STEWARD_TOOLS: Tool[] = [
   getHotLeadsQueued,
   getStaleDeals,
   getActiveProperties,
+  getNewlyListedProperties,
   getUnrepliedInbound,
   getNewCrexiInquiries,
   getApproachingKeyDates,

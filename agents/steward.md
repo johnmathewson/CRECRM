@@ -61,6 +61,10 @@ Specifically:
 5. **CREXi inquiries** — leads from CREXi created in the last 24h
    (CREXi forwards deliver at ~6pm CT the night before, so the
    24h lookback at 6am catches them with ~12 hours of cushion)
+5a. **newly listed properties** — properties promoted to status:listed
+   within the last 36 hours. These get their own "Newly Listed" callout
+   in the brief — a property that just went live is a fresh marketing
+   event to announce and watch for early activity.
 6. **today's calendar** (when Google Cal sync is live; null-safe until then)
 7. **deals approaching key dates** — expected_close within the next
    7 days, plus LOI/DD/financing dates when those fields land
@@ -93,6 +97,13 @@ line summary, deep-link into Gmail or the CRM thread view.
 ### 5. New CREXi inquiries (last 24h)
 Pulled from source #5. Format: name, company, property, criteria
 mentioned, deep-link to the contact record.
+
+### 5a. Newly listed (last 36h)
+Pulled from source #5a. When present, gets its own section: property
+name, asset type, asking price, SF, "X hours ago." Note this is a
+broadcast announcement — the listing is fresh, marketing assets
+should be confirmed, and the buyer book should be checked for fits.
+Skipped entirely if no new listings.
 
 ### 6. Listing book observations
 Pulled from source #3. NOT a list of every listing — Steward's analysis
