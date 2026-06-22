@@ -7,6 +7,7 @@ import { StatusBadge } from "@/components/cre-os/StatusBadge";
 import { TaskRow } from "@/components/cre-os/tasks/TaskRow";
 import { MarketingCopyPanel } from "@/components/cre-os/property/MarketingCopyPanel";
 import { OmPanel } from "@/components/cre-os/property/OmPanel";
+import { PropertyPhotosPanel } from "@/components/cre-os/property/PropertyPhotosPanel";
 import type { PropertyDetail, DocumentInventoryItem } from "@/lib/cre-os/property-queries";
 
 const fmtMoney = (n: number | null) => {
@@ -81,10 +82,20 @@ export function OverviewTab({ p }: { p: PropertyDetail }) {
           />
         </Panel>
 
+        {/* Photos — fuel for the flyer, OM, and social tile generators.
+            Drag-drop uploads to listing-images bucket, URLs persist on
+            properties.images jsonb. First image is hero/cover by default. */}
+        <Panel eyebrow="Property photos" num={5} title="Visual assets for marketing">
+          <PropertyPhotosPanel
+            propertyId={p.id}
+            initialImages={Array.isArray(p.images) ? p.images : []}
+          />
+        </Panel>
+
         {/* OM PDF — the deliverable John hands to a buyer post-CA. Pulls
             from the live marketing copy, so the workflow is: tune the
             copy in panel #4 → click Regenerate OM here → share the link. */}
-        <Panel eyebrow="Offering Memorandum" num={5} title="Multi-page deliverable PDF">
+        <Panel eyebrow="Offering Memorandum" num={6} title="Multi-page deliverable PDF">
           <OmPanel
             propertyId={p.id}
             omPdfUrl={p.omPdfUrl}
@@ -97,7 +108,7 @@ export function OverviewTab({ p }: { p: PropertyDetail }) {
             Use it for: "Lead with 8.69% cap, not asking price", "Owner motivated
             for 60-day close", "Patel buyer pool is hot here — assume hospitality
             fluency", etc. Edits save instantly — no rebuild. */}
-        <Panel eyebrow="Marketing notes" num={6} title="What the AI should anchor on">
+        <Panel eyebrow="Marketing notes" num={7} title="What the AI should anchor on">
           <MarketingNotesEditor propertyId={p.id} initial={p.marketingNotes ?? ""} />
         </Panel>
 
