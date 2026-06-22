@@ -184,7 +184,7 @@ function drawCover(doc: jsPDF, ctx: MarketingPropertyContext) {
   setText(doc, C.teal);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(8);
-  doc.text("STEWARDSHIP COMMERCIAL REAL ESTATE", MARGIN_X, 56, { charSpace: 1.2 });
+  doc.text("eXp COMMERCIAL  ·  NORTHWEST INDIANA", MARGIN_X, 56, { charSpace: 1.2 });
 
   // Stacked big-letter property name — split into words, each line big
   setText(doc, C.teal);
@@ -233,13 +233,13 @@ function drawCover(doc: jsPDF, ctx: MarketingPropertyContext) {
 
   setText(doc, C.white);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(16);
-  doc.text("STEWARDSHIP", MARGIN_X, bottomY + 32, { charSpace: 1.8 });
+  doc.setFontSize(20);
+  doc.text("eXp", MARGIN_X, bottomY + 36, { charSpace: 0.5 });
 
   setText(doc, C.bronze);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(8);
-  doc.text("COMMERCIAL REAL ESTATE", MARGIN_X, bottomY + 50, { charSpace: 1.5 });
+  doc.setFontSize(9);
+  doc.text("COMMERCIAL", MARGIN_X, bottomY + 54, { charSpace: 1.5 });
 
   setText(doc, C.cream);
   doc.setFont("helvetica", "normal");
@@ -262,9 +262,9 @@ function drawDisclaimerPage(doc: jsPDF, ctx: MarketingPropertyContext) {
   cy += 22;
 
   const disclaimer =
-    "Stewardship Commercial Real Estate has been engaged by the owner of the property to market it for sale. " +
+    "eXp Commercial has been engaged by the owner of the property to market it for sale. " +
     "Information concerning the property described herein has been obtained from sources other than the Owner, " +
-    "and neither Owner nor Stewardship Commercial Real Estate makes any representations or warranties, express " +
+    "and neither Owner nor eXp Commercial makes any representations or warranties, express " +
     "or implied, as to the accuracy or completeness of such information. Any and all reference to age, square " +
     "footage, income, expenses and any other property specific information are approximate. Prospective purchasers " +
     "should conduct their own independent investigation and rely on those results. The Property may be withdrawn " +
@@ -300,8 +300,8 @@ function drawDisclaimerPage(doc: jsPDF, ctx: MarketingPropertyContext) {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.text("Commercial Real Estate Broker", MARGIN_X + 24, panelY + 84);
-  doc.text("Stewardship Commercial Real Estate", MARGIN_X + 24, panelY + 98);
-  doc.text("john@stewardshipcre.com", MARGIN_X + 24, panelY + 114);
+  doc.text("eXp Commercial", MARGIN_X + 24, panelY + 98);
+  doc.text("john@johnmathewson.co", MARGIN_X + 24, panelY + 114);
 }
 
 // ── PAGE 3: TABLE OF CONTENTS ────────────────────────────────────────────
@@ -930,21 +930,21 @@ function drawBackCover(doc: jsPDF) {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(11);
   doc.text("Commercial Real Estate Broker", MARGIN_X, 192);
-  doc.text("Stewardship Commercial Real Estate", MARGIN_X, 210);
+  doc.text("eXp Commercial", MARGIN_X, 210);
 
   setText(doc, C.bronze);
   doc.setFontSize(10);
-  doc.text("john@stewardshipcre.com", MARGIN_X, 248);
+  doc.text("john@johnmathewson.co", MARGIN_X, 248);
 
   // Bottom brand mark
   setText(doc, C.white);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(18);
-  doc.text("STEWARDSHIP", MARGIN_X, PAGE_H - 96, { charSpace: 2.4 });
+  doc.setFontSize(24);
+  doc.text("eXp", MARGIN_X, PAGE_H - 92, { charSpace: 0.5 });
 
   setText(doc, C.bronze);
-  doc.setFontSize(8);
-  doc.text("COMMERCIAL REAL ESTATE", MARGIN_X, PAGE_H - 78, { charSpace: 2 });
+  doc.setFontSize(9);
+  doc.text("COMMERCIAL", MARGIN_X, PAGE_H - 74, { charSpace: 2 });
 
   setText(doc, C.cream);
   doc.setFontSize(7.5);
@@ -967,37 +967,44 @@ export function generateOm(ctx: MarketingPropertyContext): GenerateOmResult {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const hasSaleComps = Array.isArray((ctx as any).saleComps) && (ctx as any).saleComps.length > 0;
 
-  // Build TOC entries that reflect which sections will actually render.
-  // (Sections are skipped via early-returns inside their draw fn.)
+  // Section-render decisions. The rule: if we don't have enough data
+  // for a section to be USEFUL (not just "fillable"), skip it rather
+  // than pad with placeholders. A skipped section keeps the OM short
+  // and honest.
+  const hasExecSummary = !!p.description;
+  const hasInvestmentHighlights = Array.isArray(p.investment_highlights) && p.investment_highlights.length > 0;
+  const hasRentRoll = false; // No rent-roll loader yet — always skip for now
+  const hasFinancialDetail = !!(p.asking_price || p.noi || p.cap_rate);
+  const hasParcelDetail = !!(p.apn || p.acreage || p.zoning || p.year_built || p.parking_spaces);
+  // Market Overview needs a real submarket / market_name beyond just
+  // city/state to add value. Otherwise it's a generic filler page.
+  const hasMarketContext = !!(p.market_name || p.submarket || p.submarket_cluster);
+
+  // Build TOC entries based on which sections will actually render.
   const tocEntries: TocEntry[] = [];
   let pageCursor = 4; // pages 1=cover, 2=disclaimer, 3=TOC, content begins p4
-  tocEntries.push({ title: "Executive Summary", pageNumber: pageCursor }); pageCursor++;
-  tocEntries.push({ title: "Investment Highlights", pageNumber: pageCursor }); pageCursor++;
-  if (!isVacant) {
-    tocEntries.push({ title: "Rent Roll", pageNumber: pageCursor }); pageCursor++;
-  }
-  tocEntries.push({ title: "Financial Summary", pageNumber: pageCursor }); pageCursor++;
-  if (hasSaleComps) {
-    tocEntries.push({ title: "Comparable Sales", pageNumber: pageCursor }); pageCursor++;
-  }
-  tocEntries.push({ title: "Property Overview", pageNumber: pageCursor }); pageCursor++;
-  tocEntries.push({ title: "Market Overview", pageNumber: pageCursor }); pageCursor++;
+  if (hasExecSummary) { tocEntries.push({ title: "Executive Summary", pageNumber: pageCursor }); pageCursor++; }
+  if (hasInvestmentHighlights) { tocEntries.push({ title: "Investment Highlights", pageNumber: pageCursor }); pageCursor++; }
+  if (hasRentRoll) { tocEntries.push({ title: "Rent Roll", pageNumber: pageCursor }); pageCursor++; }
+  if (hasFinancialDetail) { tocEntries.push({ title: "Financial Summary", pageNumber: pageCursor }); pageCursor++; }
+  if (hasSaleComps) { tocEntries.push({ title: "Comparable Sales", pageNumber: pageCursor }); pageCursor++; }
+  if (hasParcelDetail) { tocEntries.push({ title: "Property Overview", pageNumber: pageCursor }); pageCursor++; }
+  if (hasMarketContext) { tocEntries.push({ title: "Market Overview", pageNumber: pageCursor }); pageCursor++; }
 
-  // Render in section order
+  // Render in section order. Conditional sections are skipped entirely
+  // — no blank pages, no "N/A" placeholders.
   drawCover(doc, ctx);
   drawDisclaimerPage(doc, ctx);
-  drawToc(doc, tocEntries);
-  drawExecutiveSummary(doc, ctx);
-  drawInvestmentHighlights(doc, ctx);
-  if (!isVacant) {
-    // Rent roll body — currently no tenant data source, so skip body
-    // even for income properties until we wire in the rent-roll loader.
-    // Placeholder kept for the section-aware structure.
-  }
-  drawFinancialSummary(doc, ctx);
+  // Only render the TOC if we have 4+ content sections — for short
+  // OMs the TOC is more friction than help.
+  if (tocEntries.length >= 4) drawToc(doc, tocEntries);
+  if (hasExecSummary) drawExecutiveSummary(doc, ctx);
+  if (hasInvestmentHighlights) drawInvestmentHighlights(doc, ctx);
+  // Rent roll body skipped — see hasRentRoll above
+  if (hasFinancialDetail) drawFinancialSummary(doc, ctx);
   if (hasSaleComps) drawComparableSales(doc, ctx);
-  drawPropertyOverview(doc, ctx);
-  drawMarketOverview(doc, ctx);
+  if (hasParcelDetail) drawPropertyOverview(doc, ctx);
+  if (hasMarketContext) drawMarketOverview(doc, ctx);
   drawBackCover(doc);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
