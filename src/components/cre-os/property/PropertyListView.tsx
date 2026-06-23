@@ -8,7 +8,6 @@ import { StatusBadge } from "@/components/cre-os/StatusBadge";
 import type { RailSection } from "@/components/cre-os/InsightsRail";
 import type { InsightItem } from "@/components/cre-os/InsightCard";
 import { PropertyListCard } from "./PropertyListCard";
-import { PropertyFeaturedCard } from "./PropertyFeaturedCard";
 import { CreatePropertyDialog } from "./CreatePropertyDialog";
 import type { PropertyCard } from "@/lib/cre-os/property-queries";
 
@@ -22,8 +21,7 @@ type TriageBucket = "all" | "hot" | "quiet" | "stale" | "no-bov";
  * Layered hierarchy, top to bottom:
  *   1. Portfolio command header — value, NOI, occupancy, AI synthesis line
  *   2. Triage strip — operational filter chips (hot · quiet · stale · no-BOV · all)
- *   3. Today's focus — featured priority cards (assets that matter today)
- *   4. All assets — search/asset/status filters + grid
+ *   3. All assets — uniform grid with stage/status visible per card
  *
  * Right rail: AI-interpreted "what needs attention", not bare stats.
  */
@@ -72,19 +70,11 @@ export function PropertyListView({
     });
   }, [properties, q, assetType, status, bucket]);
 
-  // Featured priority: top-N by score within current filter (capped, only if score>0)
-  const featured = useMemo(
-    () =>
-      filtered
-        .filter((p) => p.priorityScore > 0)
-        .sort((a, b) => b.priorityScore - a.priorityScore)
-        .slice(0, 4),
-    [filtered],
-  );
-
-  // The grid below shows everything except what's already featured (avoid dupes)
-  const featuredIds = new Set(featured.map((f) => f.id));
-  const restOfGrid = filtered.filter((p) => !featuredIds.has(p.id));
+  // All filtered properties render in a single uniform grid. The
+  // previous "Today's Focus" featured strip was removed by user
+  // request — they want every asset visible at the same size so
+  // stage/status can be scanned consistently. priorityScore is
+  // still computed on the server but no longer drives layout.
 
   // Portfolio rollup metrics (always full set, not filtered — the command
   // header summarizes EVERYTHING so the broker sees portfolio reality)
@@ -211,29 +201,14 @@ export function PropertyListView({
           <TriageChip label="All" count={counts.all} active={bucket === "all"} tone="neutral" onClick={() => setBucket("all")} />
         </div>
 
-        {/* ─── 3. Today's focus — featured priority assets ─── */}
-        {featured.length > 0 && (
-          <section>
-            <div className="flex items-baseline justify-between mb-3">
-              <Eyebrow tone="coral" num={1}>Today's focus</Eyebrow>
-              <span className="font-mono text-[10px] text-cream-subtle">
-                {featured.length} priorit{featured.length === 1 ? "y" : "ies"} · sorted by urgency
-              </span>
-            </div>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {featured.map((p) => <PropertyFeaturedCard key={p.id} p={p} />)}
-            </div>
-          </section>
-        )}
-
-        {/* ─── 4. All assets — filters + grid ─── */}
+        {/* ─── 3. All assets — uniform grid ─── */}
         <section>
           <div className="flex items-baseline justify-between mb-3">
-            <Eyebrow tone="muted" num={featured.length > 0 ? 2 : 1}>
+            <Eyebrow tone="muted" num={1}>
               {bucket === "all" ? "All assets" : labelForBucket(bucket)}
             </Eyebrow>
             <span className="font-mono text-[10px] text-cream-subtle">
-              {restOfGrid.length}{featured.length > 0 ? ` · plus ${featured.length} featured above` : ""}
+              {filtered.length} asset{filtered.length === 1 ? "" : "s"}
             </span>
           </div>
 
@@ -252,17 +227,15 @@ export function PropertyListView({
             <FilterSelect label="Status" value={status} onChange={setStatus} options={STATUSES} />
           </div>
 
-          {restOfGrid.length === 0 ? (
+          {filtered.length === 0 ? (
             <Panel>
               <p className="font-body text-[13px] text-cream-subtle py-8 text-center">
-                {filtered.length === 0
-                  ? "No properties match. Clear filters to see everything."
-                  : "Everything in this view is already featured above."}
+                No properties match. Clear filters to see everything.
               </p>
             </Panel>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {restOfGrid.map((p) => <PropertyListCard key={p.id} p={p} />)}
+              {filtered.map((p) => <PropertyListCard key={p.id} p={p} />)}
             </div>
           )}
         </section>

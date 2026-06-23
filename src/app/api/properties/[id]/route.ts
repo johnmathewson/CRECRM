@@ -88,6 +88,27 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   for (const [k, v] of Object.entries(body)) {
     if (PATCHABLE_FIELDS.has(k)) update[k] = v;
   }
+
+  // If status is being patched and pipeline_stage isn't explicitly
+  // passed, auto-derive pipeline_stage so the property card on the
+  // grid view and the kanban column always agree. This is the same
+  // mapping the kanban + lifecycle endpoint use — central it here so
+  // every write path (lifecycle endpoint, Edit dialog PATCH, direct
+  // API) goes through one mapping.
+  if (typeof update.status === "string" && update.pipeline_stage === undefined) {
+    const STATUS_TO_STAGE: Record<string, string> = {
+      prospect:       "Lead",
+      idea:           "Lead",
+      prospecting:    "Prospecting",
+      pitched:        "Pitched",
+      listed:         "Listing",
+      under_contract: "Under Contract",
+      sold:           "Closed",
+      leased:         "Closed",
+    };
+    const derived = STATUS_TO_STAGE[update.status];
+    if (derived) update.pipeline_stage = derived;
+  }
   // Normalize asset_type if present — same mapping as the create endpoint.
   if (typeof update.asset_type === "string") {
     const allowed = new Set(["retail", "office", "industrial", "hospitality", "multifamily", "land", "medical", "mixed_use", "other"]);

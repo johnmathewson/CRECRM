@@ -39,14 +39,19 @@ const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 
 type Stage = "prospecting" | "pitched" | "listed" | "under_contract" | "closed";
 
+// pipeline_stage MUST be one of the kanban column labels, exactly,
+// so the property card on the grid view and the kanban column for
+// the same property always agree on which stage the property is in.
+// Previously prospecting + pitched both wrote pipeline_stage='Lead'
+// which created visual drift between the two views.
 const TRANSITIONS: Record<Stage, {
   status: string;
   pipeline_stage: string;
   stamp_column: string | null;
   label: string;
 }> = {
-  prospecting: { status: "prospecting", pipeline_stage: "Lead", stamp_column: "prospecting_started_at", label: "Prospecting" },
-  pitched: { status: "pitched", pipeline_stage: "Lead", stamp_column: "pitched_at", label: "Pitched" },
+  prospecting: { status: "prospecting", pipeline_stage: "Prospecting", stamp_column: "prospecting_started_at", label: "Prospecting" },
+  pitched: { status: "pitched", pipeline_stage: "Pitched", stamp_column: "pitched_at", label: "Pitched" },
   listed: { status: "listed", pipeline_stage: "Listing", stamp_column: "listed_at", label: "Listed" },
   under_contract: { status: "under_contract", pipeline_stage: "Under Contract", stamp_column: "under_contract_at", label: "Under Contract" },
   closed: { status: "sold", pipeline_stage: "Closed", stamp_column: "closed_at", label: "Closed" },

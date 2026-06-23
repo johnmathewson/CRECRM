@@ -1,6 +1,8 @@
 "use client";
 
+import { useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/cre-os/AppShell";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import type { PipelineColumn, PipelinePropertyCard } from "@/app/cre-os/properties/pipeline/page";
@@ -8,18 +10,118 @@ import type { PipelineColumn, PipelinePropertyCard } from "@/app/cre-os/properti
 /**
  * Property Pipeline kanban — properties grouped by lifecycle stage.
  *
- * Each column = one stage (Lead → Prospecting → Pitched → Listing →
- * Under Contract → Closed). Cards are mini-property summaries; click
- * to jump to the workspace where the Go-Live button + asset panels
- * live.
+ * Drag-and-drop reorders properties across stages. Drop fires
+ * POST /api/properties/[id]/lifecycle with skipReadinessCheck=true
+ * so DnD never gets blocked by the Go-Live readiness gate — that
+ * gate still runs from the dedicated workspace button where the
+ * blocker modal can render. Kanban DnD is for the broker doing
+ * fast lifecycle management.
  *
- * No drag-and-drop in v1. Promotion happens on the property workspace
- * where the readiness check can live and the asset state can be
- * confirmed before flipping. This view is for visibility, not
- * mutation.
+ * Optimistic: the card jumps to the target column immediately and
+ * we revert on API failure. router.refresh() pulls the canonical
+ * groupings back from the server so days-in-stage stamps + counts
+ * stay accurate.
+ *
+ * Column → target status mapping mirrors the lifecycle state machine:
+ *   Lead          → 'prospect'         (regression-friendly)
+ *   Prospecting   → 'prospecting'
+ *   Pitched       → 'pitched'
+ *   Listing       → 'listed'           (skipReadinessCheck bypasses gate)
+ *   Under Contract→ 'under_contract'
+ *   Closed        → 'sold'             (lease properties get this too;
+ *                                       the lifecycle route treats 'closed'
+ *                                       transition uniformly)
  */
-export function PropertyPipelineView({ columns }: { columns: PipelineColumn[] }) {
+
+const COLUMN_TO_STAGE: Record<string, string | null> = {
+  lead: null,                  // 'prospect' isn't a lifecycle endpoint stage
+  prospecting: "prospecting",
+  pitched: "pitched",
+  listing: "listed",
+  under_contract: "under_contract",
+  closed: "closed",
+};
+
+export function PropertyPipelineView({ columns: initialColumns }: { columns: PipelineColumn[] }) {
+  const router = useRouter();
+  const [columns, setColumns] = useState(initialColumns);
+  const [dragging, setDragging] = useState<{ cardId: string; fromColKey: string } | null>(null);
+  const [hoverCol, setHoverCol] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [, startTransition] = useTransition();
+
   const totalActive = columns.reduce((s, c) => s + (c.key === "lead" ? 0 : c.cards.length), 0);
+
+  function onDragStart(cardId: string, fromColKey: string) {
+    setDragging({ cardId, fromColKey });
+    setError(null);
+  }
+
+  function onDragEnd() {
+    setDragging(null);
+    setHoverCol(null);
+  }
+
+  async function onDrop(toColKey: string) {
+    setHoverCol(null);
+    if (!dragging) return;
+    if (toColKey === dragging.fromColKey) {
+      setDragging(null);
+      return;
+    }
+
+    // The Lead column has no clean lifecycle endpoint mapping
+    // (regression from past-Lead → Lead is rare and would require
+    // resetting status='prospect' + clearing timestamps). Block for now.
+    if (toColKey === "lead") {
+      setError("Moving a property back to Lead isn't supported via drag — edit the property directly.");
+      setDragging(null);
+      return;
+    }
+
+    const targetStage = COLUMN_TO_STAGE[toColKey];
+    if (!targetStage) {
+      setError(`Unknown column: ${toColKey}`);
+      setDragging(null);
+      return;
+    }
+
+    const cardId = dragging.cardId;
+    const fromColKey = dragging.fromColKey;
+    setDragging(null);
+
+    // Optimistic move — pop card from source col, push to target.
+    // Snapshot for revert if API fails.
+    const snapshot = columns;
+    setColumns((prev) => {
+      const next = prev.map((c) => ({ ...c, cards: [...c.cards] }));
+      const fromCol = next.find((c) => c.key === fromColKey);
+      const toCol = next.find((c) => c.key === toColKey);
+      if (!fromCol || !toCol) return prev;
+      const idx = fromCol.cards.findIndex((card) => card.id === cardId);
+      if (idx < 0) return prev;
+      const [moved] = fromCol.cards.splice(idx, 1);
+      toCol.cards.unshift({ ...moved, daysInStage: 0 });
+      return next;
+    });
+
+    try {
+      const r = await fetch(`/api/properties/${cardId}/lifecycle`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: targetStage, skipReadinessCheck: true }),
+      });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        throw new Error(j?.error ?? `HTTP ${r.status}`);
+      }
+      // Pull authoritative state from the server so timestamps + counts refresh.
+      startTransition(() => router.refresh());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setColumns(snapshot);
+    }
+  }
 
   return (
     <AppShell>
@@ -31,7 +133,7 @@ export function PropertyPipelineView({ columns }: { columns: PipelineColumn[] })
               Property Pipeline
             </h1>
             <p className="mt-1 font-mono text-[11px] text-cream-subtle">
-              {totalActive} active asset{totalActive === 1 ? "" : "s"} across the lifecycle (excluding Lead column)
+              {totalActive} active asset{totalActive === 1 ? "" : "s"} across the lifecycle (excluding Lead column) · drag cards to move stages
             </p>
           </div>
           <Link
@@ -42,10 +144,25 @@ export function PropertyPipelineView({ columns }: { columns: PipelineColumn[] })
           </Link>
         </header>
 
+        {error && (
+          <div className="rounded border border-red-400/40 bg-red-500/[0.08] px-3 py-2 font-body text-[12px] text-red-300">
+            {error}
+          </div>
+        )}
+
         {/* Horizontal scroll on small screens; multi-column at lg+ */}
         <div className="flex gap-4 overflow-x-auto pb-4 lg:overflow-x-visible lg:grid lg:grid-cols-6">
           {columns.map((col) => (
-            <Column key={col.key} col={col} />
+            <Column
+              key={col.key}
+              col={col}
+              isDragTarget={hoverCol === col.key && dragging !== null && col.key !== dragging.fromColKey}
+              onCardDragStart={onDragStart}
+              onCardDragEnd={onDragEnd}
+              onColDragOver={() => setHoverCol(col.key)}
+              onColDragLeave={() => setHoverCol((cur) => (cur === col.key ? null : cur))}
+              onColDrop={() => onDrop(col.key)}
+            />
           ))}
         </div>
       </div>
@@ -53,7 +170,23 @@ export function PropertyPipelineView({ columns }: { columns: PipelineColumn[] })
   );
 }
 
-function Column({ col }: { col: PipelineColumn }) {
+function Column({
+  col,
+  isDragTarget,
+  onCardDragStart,
+  onCardDragEnd,
+  onColDragOver,
+  onColDragLeave,
+  onColDrop,
+}: {
+  col: PipelineColumn;
+  isDragTarget: boolean;
+  onCardDragStart: (cardId: string, fromColKey: string) => void;
+  onCardDragEnd: () => void;
+  onColDragOver: () => void;
+  onColDragLeave: () => void;
+  onColDrop: () => void;
+}) {
   const toneClass: Record<PipelineColumn["tone"], string> = {
     neutral: "text-cream-subtle border-white/[0.08]",
     amber: "text-amber-300 border-amber-400/30",
@@ -68,7 +201,18 @@ function Column({ col }: { col: PipelineColumn }) {
   };
 
   return (
-    <div className="w-72 lg:w-auto shrink-0 lg:shrink space-y-3">
+    <div
+      className="w-72 lg:w-auto shrink-0 lg:shrink space-y-3"
+      onDragOver={(e) => {
+        e.preventDefault();
+        onColDragOver();
+      }}
+      onDragLeave={onColDragLeave}
+      onDrop={(e) => {
+        e.preventDefault();
+        onColDrop();
+      }}
+    >
       <div className={`pb-2 border-b ${toneClass[col.tone]}`}>
         <div className="flex items-baseline justify-between gap-2">
           <div className="flex items-center gap-2">
@@ -84,20 +228,41 @@ function Column({ col }: { col: PipelineColumn }) {
         </p>
       </div>
 
-      <div className="space-y-2 min-h-[60px]">
+      <div
+        className={`space-y-2 min-h-[60px] rounded transition-colors ${
+          isDragTarget ? "bg-coral-400/[0.04] outline outline-1 outline-coral-400/30" : ""
+        }`}
+      >
         {col.cards.length === 0 ? (
           <div className="rounded border border-white/[0.04] bg-white/[0.01] px-3 py-4 text-center">
-            <p className="font-mono text-[10px] text-cream-subtle italic">empty</p>
+            <p className="font-mono text-[10px] text-cream-subtle italic">
+              {isDragTarget ? "drop here" : "empty"}
+            </p>
           </div>
         ) : (
-          col.cards.map((c) => <Card key={c.id} c={c} />)
+          col.cards.map((c) => (
+            <Card
+              key={c.id}
+              c={c}
+              onDragStart={() => onCardDragStart(c.id, col.key)}
+              onDragEnd={onCardDragEnd}
+            />
+          ))
         )}
       </div>
     </div>
   );
 }
 
-function Card({ c }: { c: PipelinePropertyCard }) {
+function Card({
+  c,
+  onDragStart,
+  onDragEnd,
+}: {
+  c: PipelinePropertyCard;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+}) {
   const fmtMoney = (n: number | null): string => {
     if (!n || !Number.isFinite(n) || n <= 0) return "—";
     if (n >= 1_000_000) return "$" + (n / 1_000_000).toFixed(2) + "M";
@@ -107,7 +272,15 @@ function Card({ c }: { c: PipelinePropertyCard }) {
   return (
     <Link
       href={`/cre-os/properties/${c.slug}`}
-      className="block rounded border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-white/[0.12] p-3 transition-colors group"
+      draggable
+      onDragStart={(e) => {
+        // Required for Firefox to actually start a drag operation
+        e.dataTransfer.setData("text/plain", c.id);
+        e.dataTransfer.effectAllowed = "move";
+        onDragStart();
+      }}
+      onDragEnd={onDragEnd}
+      className="block rounded border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-white/[0.12] p-3 transition-colors group cursor-grab active:cursor-grabbing"
     >
       <div className="font-heading text-[12.5px] text-cream font-semibold truncate group-hover:text-coral-300 transition-colors">
         {c.name}
