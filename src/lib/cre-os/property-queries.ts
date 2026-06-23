@@ -505,7 +505,7 @@ export async function loadPropertyDetail(slug: string): Promise<PropertyDetail |
       parking_spaces, parking_ratio, zoning, total_buildings, number_of_stories,
       crexi_url, crexi_listing_id, loopnet_url, publish_to_website,
       related_property_id,
-      related_property:properties!properties_related_property_id_fkey(id, slug, name, transaction_type, status),
+      related_property:related_property_id(id, slug, name, transaction_type, status),
       owner_name_raw, owner_type, owner_state, owner_phone, owner_contact_name,
       owner_mailing_address, owner_mailing_city, owner_mailing_state, owner_mailing_zip,
       true_owner_name, true_owner_phone, true_owner_contact_name,
