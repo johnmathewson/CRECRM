@@ -172,29 +172,42 @@ function pickBestCandidate<T extends {
   return rows[0];
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function isStrongMatch(p: any): boolean {
+  // A "strong" match is a property we're confident John actually owns
+  // the relationship for — crexi listing wired up OR he's the listing
+  // broker. Without one of those, address matches against the 15k
+  // public-record prospects can grab the wrong row.
+  return !!p && (!!p.crexi_listing_id || p.your_role === "listing_broker");
+}
+
 async function matchProperty(supabase: any, parsed: { propertyName: string | null; propertyAddress: string | null }, filename: string): Promise<{ id: string; name: string } | null> {
-  // Strategy 1: address from Detail sheet (most reliable).
-  // Compare on the normalized street (direction stripped, abbreviations
-  // normalized) so "8474 South Colorado Street" matches "8474 Colorado St".
+  // Collect candidates from BOTH strategies, then pick the strongest
+  // overall. Strategy 1's address match was previously short-circuiting
+  // any candidate it found — which routed the Portage report to a
+  // status=prospect public-record row because Portage Land Sale has
+  // no address set and so couldn't be found by address at all.
+  //
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const collected: any[] = [];
+
+  // Strategy 1: address from Detail sheet, normalized street compare.
   if (parsed.propertyAddress) {
     const streetPart = parsed.propertyAddress.split(",")[0]?.trim();
     if (streetPart) {
       const targetKey = normalizeStreet(streetPart);
 
-      // First try a tight prefix match on the raw value (covers the
-      // happy path with no normalization needed).
+      // Tight prefix match (happy path — no normalization needed).
       const { data: tight } = await supabase
         .from("properties")
         .select("id, name, address, crexi_listing_id, your_role, status")
         .eq("organization_id", ORG_ID)
         .ilike("address", `${streetPart}%`)
         .limit(10);
-      const tightPick = pickBestCandidate(tight ?? []);
-      if (tightPick) return { id: tightPick.id, name: tightPick.name };
+      collected.push(...(tight ?? []));
 
-      // Loose pass — try the bare house number prefix and compare
-      // normalized streets in JS. Handles "South" prefix, "Street"
-      // spelled out vs "St", etc.
+      // Loose pass — bare house-number prefix + normalized compare in
+      // JS. Handles "South" prefix, "Street" vs "St", etc.
       const houseNum = streetPart.match(/^\d+/)?.[0];
       if (houseNum) {
         const { data: loose } = await supabase
@@ -207,21 +220,27 @@ async function matchProperty(supabase: any, parsed: { propertyName: string | nul
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (p: any) => {
             const candKey = normalizeStreet(p.address);
-            // Either side's normalized key contains the other's — handles
-            // the case where one record has a longer/shorter version.
             return candKey.startsWith(targetKey) || targetKey.startsWith(candKey);
           }
         );
-        const loosePick = pickBestCandidate(normalizedMatches);
-        if (loosePick) return { id: loosePick.id, name: loosePick.name };
+        collected.push(...normalizedMatches);
       }
     }
   }
 
-  // Strategy 2: name match from Detail sheet or filename
+  // If Strategy 1 already found a strong candidate (crexi_listing_id
+  // set or your_role=listing_broker), prefer it immediately — name
+  // matching adds noise without upgrading confidence.
+  const strongFromS1 = collected.find(isStrongMatch);
+  if (strongFromS1) return { id: strongFromS1.id, name: strongFromS1.name };
+
+  // Strategy 2: name match from Detail sheet AND filename. Filename
+  // often carries the broker's property name even when the address
+  // matches a different record (e.g. "Lead_Report_Melton_Rd_Portage"
+  // → the broker calls it "Portage Land Sale").
   const candidates = [
     parsed.propertyName,
-    filename.replace(/^Lead Report - /, "").replace(/\.xlsx$/, ""),
+    filename.replace(/^Lead.?Report.?/i, "").replace(/\.xlsx$/i, "").replace(/_/g, " ").trim(),
   ].filter(Boolean) as string[];
 
   for (const candidate of candidates) {
@@ -232,19 +251,35 @@ async function matchProperty(supabase: any, parsed: { propertyName: string | nul
       candidate.replace(/\s+by Wyndham.*$/i, ""),
     ]);
 
+    // Try each variant against name. Also try the LAST word of the
+    // variant (often a city/landmark — e.g. "Portage" from
+    // "Melton Rd Portage").
     for (const v of Array.from(variants)) {
-      const { data } = await supabase
-        .from("properties")
-        .select("id, name, crexi_listing_id, your_role, status")
-        .eq("organization_id", ORG_ID)
-        .ilike("name", `${v}%`)
-        .limit(10);
-      const pick = pickBestCandidate(data ?? []);
-      if (pick) return { id: pick.id, name: pick.name };
+      const words = v.split(/\s+/).filter(Boolean);
+      const tries = new Set<string>([v, ...words.filter((w) => w.length >= 4)]);
+      for (const t of Array.from(tries)) {
+        const { data } = await supabase
+          .from("properties")
+          .select("id, name, crexi_listing_id, your_role, status")
+          .eq("organization_id", ORG_ID)
+          .ilike("name", `%${t}%`)
+          .limit(10);
+        collected.push(...(data ?? []));
+      }
     }
   }
 
-  return null;
+  // Combined pick — pickBestCandidate prefers crexi_listing_id >
+  // listing_broker > non-prospect > first. Drops duplicates so the
+  // same row isn't preferred just because it appears in two strategies.
+  const seen = new Set<string>();
+  const deduped = collected.filter((p) => {
+    if (seen.has(p.id)) return false;
+    seen.add(p.id);
+    return true;
+  });
+  const pick = pickBestCandidate(deduped);
+  return pick ? { id: pick.id, name: pick.name } : null;
 }
 
 // ── Hot-lead detection ───────────────────────────────────────────────────
