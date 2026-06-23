@@ -263,24 +263,48 @@ function Card({
   onDragStart: () => void;
   onDragEnd: () => void;
 }) {
+  const router = useRouter();
   const fmtMoney = (n: number | null): string => {
     if (!n || !Number.isFinite(n) || n <= 0) return "—";
     if (n >= 1_000_000) return "$" + (n / 1_000_000).toFixed(2) + "M";
     if (n >= 1_000) return "$" + Math.round(n / 1_000) + "K";
     return "$" + n.toLocaleString();
   };
+
+  // Suppress click navigation when a drag starts — otherwise the
+  // mouseup at the drop site fires a click and the broker
+  // accidentally lands on the property workspace instead of just
+  // moving the card.
+  let dragStarted = false;
+
   return (
-    <Link
-      href={`/cre-os/properties/${c.slug}`}
+    <div
+      role="link"
+      tabIndex={0}
       draggable
       onDragStart={(e) => {
+        dragStarted = true;
         // Required for Firefox to actually start a drag operation
         e.dataTransfer.setData("text/plain", c.id);
         e.dataTransfer.effectAllowed = "move";
         onDragStart();
       }}
-      onDragEnd={onDragEnd}
-      className="block rounded border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-white/[0.12] p-3 transition-colors group cursor-grab active:cursor-grabbing"
+      onDragEnd={() => {
+        // Reset on next tick so the suppressed click event has fired first
+        setTimeout(() => { dragStarted = false; }, 0);
+        onDragEnd();
+      }}
+      onClick={() => {
+        if (dragStarted) return;
+        router.push(`/cre-os/properties/${c.slug}`);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          router.push(`/cre-os/properties/${c.slug}`);
+        }
+      }}
+      className="block rounded border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-white/[0.12] p-3 transition-colors group cursor-grab active:cursor-grabbing focus:outline-none focus:border-coral-400/40"
     >
       <div className="font-heading text-[12.5px] text-cream font-semibold truncate group-hover:text-coral-300 transition-colors">
         {c.name}
@@ -303,7 +327,7 @@ function Card({
           {c.daysInStage}d in {labelForStatus(c.status)}
         </div>
       )}
-    </Link>
+    </div>
   );
 }
 
