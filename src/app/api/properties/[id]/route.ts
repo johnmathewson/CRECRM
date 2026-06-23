@@ -215,7 +215,33 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   if (!data) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  return NextResponse.json({ ok: true, property: data });
+
+  // Cascade: any open deals on this property are no longer pursuable
+  // once the property's gone. Mark them dead too so the deal pipeline
+  // matches reality. Best-effort — if this fails we still return ok
+  // on the property archive (the deal cleanup can be retried later
+  // from the deal workspace).
+  const { count: deadDealCount, error: dealErr } = await supabase
+    .from("deals")
+    .update(
+      {
+        is_dead: true,
+        dead_reason: `property_archived:${reason}`,
+        updated_at: new Date().toISOString(),
+      },
+      { count: "exact" }
+    )
+    .eq("organization_id", ORG_ID)
+    .eq("property_id", params.id)
+    .eq("is_closed", false)
+    .eq("is_dead", false);
+
+  return NextResponse.json({
+    ok: true,
+    property: data,
+    cascaded_deals: dealErr ? null : (deadDealCount ?? 0),
+    cascade_error: dealErr?.message ?? null,
+  });
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────

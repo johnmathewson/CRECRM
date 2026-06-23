@@ -105,12 +105,15 @@ export async function loadPipelineBoard(side: PipelineSide = "listings"): Promis
   const sb = createServerSupabase();
 
   // Pull all open deals + their property/contact + the most recent active stage entry.
+  // is_dead on the EMBEDDED property is pulled too so we can drop deals
+  // whose property got archived — those shouldn't surface on the
+  // pipeline kanban even if the deal itself wasn't marked dead.
   const { data: deals } = await sb
     .from("deals")
     .select(
       `id, deal_name, deal_type, price, commission_pct, estimated_commission, probability_pct,
        weighted_commission, expected_close, actual_close, is_closed, is_dead, dead_reason,
-       property:properties(id, name, slug, city, state),
+       property:properties(id, name, slug, city, state, is_dead),
        contact:contacts(id, full_name, email),
        deal_stages(id, stage, entered_at, exited_at)`,
     )
@@ -119,6 +122,10 @@ export async function loadPipelineBoard(side: PipelineSide = "listings"): Promis
     .eq("is_dead", false);
 
   const filtered = (deals ?? []).filter((d: any) => {
+    // Skip deals whose property has been archived. Property-less deals
+    // (buyer-rep without a target) are unaffected — they have no
+    // property to filter on.
+    if (d.property && d.property.is_dead === true) return false;
     const isPursuit = d.deal_type === "buyer_rep" || (!d.property && d.contact);
     return side === "pursuits" ? isPursuit : !isPursuit;
   });
