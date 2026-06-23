@@ -66,6 +66,7 @@ export function TenantLOIDialog({
   propertyName,
   propertyDefaults,
   leads,
+  editingLoiId = null,
   onClose,
 }: {
   open: boolean;
@@ -75,6 +76,10 @@ export function TenantLOIDialog({
   /** Active leads on this property — passed from OffersTab via
    *  PropertyDetail. Filter is applied here for the picker. */
   leads: LeadOption[];
+  /** When set, the dialog opens in edit mode: skips the source
+   *  picker, fetches the existing LOI row, prefills every field,
+   *  and submits PATCH instead of POST. Null = new-draft mode. */
+  editingLoiId?: string | null;
   onClose: () => void;
 }) {
   const [step, setStep] = useState<"source" | "form" | "done">("source");
@@ -131,7 +136,9 @@ export function TenantLOIDialog({
   // Hydrate property defaults whenever the dialog opens
   useEffect(() => {
     if (!open) return;
-    setStep("source");
+    // Edit mode skips the source picker — broker picked the LOI to
+    // edit from the list, that IS their source choice.
+    setStep(editingLoiId ? "form" : "source");
     setError(null);
     setSelectedLeadId(null);
     setPdfUrl(null);
@@ -195,7 +202,87 @@ export function TenantLOIDialog({
     const d = new Date();
     d.setMonth(d.getMonth() + 1, 1);
     setCommencementDate(d.toISOString().slice(0, 10));
-  }, [open, propertyDefaults]);
+  }, [open, propertyDefaults, editingLoiId]);
+
+  // Edit mode: load the existing LOI row and overwrite the
+  // property-defaults prefill with the actual values from the draft.
+  // This runs AFTER the property-defaults useEffect so the saved
+  // values win.
+  useEffect(() => {
+    if (!open || !editingLoiId) return;
+    let cancelled = false;
+    fetch(`/api/properties/${propertyId}/draft-loi/${editingLoiId}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => {
+        if (cancelled) return;
+        if (j?.error) throw new Error(j.error);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const loi = j.loi as any;
+        if (!loi) return;
+
+        setSelectedLeadId(loi.lead_id ?? null);
+
+        setTenantEntity(loi.tenant_entity ?? "");
+        setTenantSigningName(loi.tenant_signing_name ?? "");
+        setTenantSigningTitle(loi.tenant_signing_title ?? "");
+        setTenantAddress(loi.tenant_address ?? "");
+        setTenantCity(loi.tenant_city ?? "");
+        setTenantState(loi.tenant_state ?? "IN");
+        setTenantZip(loi.tenant_zip ?? "");
+        setTenantEmail(loi.tenant_email ?? "");
+        setTenantPhone(loi.tenant_phone ?? "");
+        setTenantBrokerName(loi.tenant_broker_name ?? "");
+        setTenantBrokerage(loi.tenant_brokerage ?? "");
+
+        setLandlordEntity(loi.landlord_entity ?? "");
+        setPremisesUnitLabel(loi.premises_unit_label ?? "");
+        if (loi.premises_rsf) setPremisesRsf(String(loi.premises_rsf));
+        if (loi.base_rent_per_sf) setBaseRentPerSf(String(loi.base_rent_per_sf));
+        if (loi.term_years) setTermYears(String(loi.term_years));
+        if (loi.commencement_date) setCommencementDate(String(loi.commencement_date).slice(0, 10));
+        if (loi.annual_escalation_pct) setAnnualEscalationPct(String(loi.annual_escalation_pct));
+        if (loi.renewal_options_count !== null && loi.renewal_options_count !== undefined) {
+          setRenewalOptionsCount(String(loi.renewal_options_count));
+        }
+        if (loi.renewal_term_years) setRenewalTermYears(String(loi.renewal_term_years));
+
+        if (loi.lease_type && LEASE_TYPE_OPTIONS.includes(loi.lease_type)) {
+          setLeaseType(loi.lease_type);
+        }
+        setFreeRentMonths(String(loi.free_rent_months ?? 0));
+        setNnnPerSf(loi.nnn_per_sf ? String(loi.nnn_per_sf) : "");
+
+        // Ramp periods come back from PostgREST as a jsonb array.
+        // Coerce numbers back to strings for the form inputs.
+        if (Array.isArray(loi.ramp_periods)) {
+          setRampPeriods(
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (loi.ramp_periods as any[]).map((r) => ({
+              label: String(r.label ?? ""),
+              monthsStart: String(r.monthsStart ?? r.months_start ?? ""),
+              monthsEnd: String(r.monthsEnd ?? r.months_end ?? ""),
+              baseRentPerSf: String(r.baseRentPerSf ?? r.base_rent_per_sf ?? ""),
+            }))
+          );
+        }
+
+        if (loi.ti_description) setTiDescription(loi.ti_description);
+        if (loi.security_deposit_months !== null && loi.security_deposit_months !== undefined) {
+          setSecurityDepositMonths(String(loi.security_deposit_months));
+        }
+        setPersonalGuarantee(loi.personal_guarantee !== false);
+        if (loi.permitted_use) setPermittedUse(loi.permitted_use);
+        if (loi.contingencies) setContingencies(loi.contingencies);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, editingLoiId, propertyId]);
 
   const selectedLead = useMemo(
     () => activeLeads.find((l) => l.id === selectedLeadId) ?? null,
@@ -229,8 +316,14 @@ export function TenantLOIDialog({
 
     setBusy(true);
     try {
-      const r = await fetch(`/api/properties/${propertyId}/draft-loi`, {
-        method: "POST",
+      // Route to PATCH on the per-LOI endpoint when editing, POST on
+      // the list endpoint when drafting fresh. Same body shape both ways.
+      const url = editingLoiId
+        ? `/api/properties/${propertyId}/draft-loi/${editingLoiId}`
+        : `/api/properties/${propertyId}/draft-loi`;
+      const method = editingLoiId ? "PATCH" : "POST";
+      const r = await fetch(url, {
+        method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           lead_id: selectedLeadId,
@@ -311,8 +404,8 @@ export function TenantLOIDialog({
           </div>
           <h2 className="mt-1 font-heading text-lg font-semibold text-cream">
             {step === "source" && "Draft Tenant LOI — Source"}
-            {step === "form" && "Draft Tenant LOI — Terms"}
-            {step === "done" && "LOI Drafted"}
+            {step === "form" && (editingLoiId ? "Edit Tenant LOI — Terms" : "Draft Tenant LOI — Terms")}
+            {step === "done" && (editingLoiId ? "LOI Updated" : "LOI Drafted")}
           </h2>
         </div>
 
@@ -399,7 +492,9 @@ export function TenantLOIDialog({
           {step === "done" && pdfUrl && (
             <div className="space-y-3">
               <div className="rounded border border-teal-400/40 bg-teal-400/[0.08] px-4 py-3 font-body text-[13px] text-teal-300">
-                LOI rendered and saved. Download, edit in Word if needed, then send to the tenant.
+                {editingLoiId
+                  ? "LOI updated and re-rendered. Download to grab the new PDF."
+                  : "LOI rendered and saved. Download, edit in Word if needed, then send to the tenant."}
               </div>
               <a
                 href={pdfUrl}
@@ -439,7 +534,9 @@ export function TenantLOIDialog({
                 disabled={busy}
                 className="px-4 py-2 rounded border border-coral-400/50 bg-coral-400/[0.18] hover:bg-coral-400/[0.28] font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-coral-200 transition-colors disabled:opacity-40"
               >
-                {busy ? "Drafting…" : "Generate LOI →"}
+                {busy
+                  ? (editingLoiId ? "Updating…" : "Drafting…")
+                  : (editingLoiId ? "Save changes →" : "Generate LOI →")}
               </button>
             )}
             {step === "done" && (

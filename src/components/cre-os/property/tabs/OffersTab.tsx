@@ -1418,6 +1418,9 @@ function TenantLOIsView({ p }: { p: PropertyDetail }) {
   const [lois, setLois] = useState<TenantLOIRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
+  // When set, the dialog opens in edit mode against this LOI id.
+  // Null = new-draft mode (the default).
+  const [editingLoiId, setEditingLoiId] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -1462,7 +1465,10 @@ function TenantLOIsView({ p }: { p: PropertyDetail }) {
           </p>
         </div>
         <button
-          onClick={() => setDialogOpen(true)}
+          onClick={() => {
+            setEditingLoiId(null);
+            setDialogOpen(true);
+          }}
           className="shrink-0 px-4 py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] hover:bg-coral-400/[0.18] font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-coral-300 transition-colors"
         >
           + Draft Tenant LOI
@@ -1508,16 +1514,32 @@ function TenantLOIsView({ p }: { p: PropertyDetail }) {
                     )}
                   </div>
                 </div>
-                {loi.pdf_url && (
-                  <a
-                    href={loi.pdf_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="shrink-0 px-3 py-1.5 rounded border border-white/[0.08] bg-white/[0.02] hover:bg-coral-400/[0.10] hover:border-coral-400/40 font-mono text-[10px] uppercase tracking-eyebrow text-cream-dim hover:text-coral-300 transition-colors"
-                  >
-                    Download PDF →
-                  </a>
-                )}
+                <div className="shrink-0 flex items-center gap-2">
+                  {/* Edit is only available on drafts. Once sent or
+                      executed, edits become semantically wrong — the
+                      counterparty has a different version. */}
+                  {loi.status === "draft" && (
+                    <button
+                      onClick={() => {
+                        setEditingLoiId(loi.id);
+                        setDialogOpen(true);
+                      }}
+                      className="px-3 py-1.5 rounded border border-white/[0.08] bg-white/[0.02] hover:bg-coral-400/[0.10] hover:border-coral-400/40 font-mono text-[10px] uppercase tracking-eyebrow text-cream-dim hover:text-coral-300 transition-colors"
+                    >
+                      Edit
+                    </button>
+                  )}
+                  {loi.pdf_url && (
+                    <a
+                      href={loi.pdf_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-1.5 rounded border border-white/[0.08] bg-white/[0.02] hover:bg-coral-400/[0.10] hover:border-coral-400/40 font-mono text-[10px] uppercase tracking-eyebrow text-cream-dim hover:text-coral-300 transition-colors"
+                    >
+                      Download PDF →
+                    </a>
+                  )}
+                </div>
               </div>
             </Panel>
           ))}
@@ -1530,8 +1552,10 @@ function TenantLOIsView({ p }: { p: PropertyDetail }) {
         propertyName={p.name ?? "Property"}
         propertyDefaults={propertyDefaults}
         leads={p.leads}
+        editingLoiId={editingLoiId}
         onClose={() => {
           setDialogOpen(false);
+          setEditingLoiId(null);
           reload();
         }}
       />
