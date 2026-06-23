@@ -19,6 +19,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { Panel } from "@/components/cre-os/Panel";
 import { StatusBadge } from "@/components/cre-os/StatusBadge";
+import { TenantLOIDialog } from "@/components/cre-os/property/TenantLOIDialog";
 import {
   computeSellerNet,
   type SellerNetInputs,
@@ -127,7 +128,17 @@ function offerToEditor(o: AdminOffer): EditorState {
   };
 }
 
+// For-lease properties surface a completely different motion (tenant
+// LOIs vs sale offers). To avoid a rules-of-hooks violation when the
+// transaction_type flips at runtime, the dispatch happens at this
+// outer boundary and each branch is its own component with its own
+// hook order.
 export function OffersTab({ p }: { p: PropertyDetail }) {
+  if (p.transactionType === "lease") return <TenantLOIsView p={p} />;
+  return <SaleOffersView p={p} />;
+}
+
+function SaleOffersView({ p }: { p: PropertyDetail }) {
   const [offers, setOffers] = useState<AdminOffer[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -1382,6 +1393,153 @@ function Stat({
       >
         {value}
       </span>
+    </div>
+  );
+}
+
+// ── Tenant LOI view (for-lease properties) ────────────────────────────────
+
+interface TenantLOIRow {
+  id: string;
+  tenant_entity: string;
+  tenant_signing_name: string | null;
+  base_rent_per_sf: number | null;
+  term_years: number | null;
+  commencement_date: string | null;
+  lease_type: string | null;
+  status: string;
+  pdf_url: string | null;
+  created_at: string;
+  sent_at: string | null;
+  lead_id: string | null;
+}
+
+function TenantLOIsView({ p }: { p: PropertyDetail }) {
+  const [lois, setLois] = useState<TenantLOIRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [dialogOpen, setDialogOpen] = useState(false);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await fetch(`/api/properties/${p.id}/draft-loi`, { cache: "no-store" });
+      const j = await r.json();
+      setLois((j?.lois ?? []) as TenantLOIRow[]);
+    } catch {
+      setLois([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [p.id]);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  const propertyDefaults = useMemo(() => ({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    available_sf: (p as any).availableSf ?? null,
+    sqft: p.sqft ?? null,
+    lease_rate: p.leaseRate ?? null,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    lease_type: (p as any).leaseType ?? null,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    free_rent_months: (p as any).freeRentMonths ?? null,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ti_allowance_per_sf: (p as any).tiAllowancePerSf ?? null,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    true_owner_name: (p as any).trueOwnerName ?? null,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    owner_name_raw: (p as any).ownerNameRaw ?? null,
+    address: p.address ?? null,
+  }), [p]);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="min-w-0">
+          <Eyebrow tone="coral">Offers · Tenant LOIs</Eyebrow>
+          <h2 className="mt-1 font-heading text-base font-semibold text-cream tracking-tight">
+            Draft Letters of Intent to prospective tenants
+          </h2>
+          <p className="mt-1 font-body text-[12px] text-cream-dim leading-relaxed max-w-2xl">
+            Draft an LOI from a lead in your pipeline or start a blank one for a cold prospect.
+            Property defaults (lease rate, available SF, lease type, TI) prefill — you fill in tenant
+            identity and proposed terms. PDF is generated in your format, edit in Word, then send.
+          </p>
+        </div>
+        <button
+          onClick={() => setDialogOpen(true)}
+          className="shrink-0 px-4 py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] hover:bg-coral-400/[0.18] font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-coral-300 transition-colors"
+        >
+          + Draft Tenant LOI
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="font-body text-[12px] text-cream-dim">Loading LOIs…</div>
+      ) : lois.length === 0 ? (
+        <Panel eyebrow="Empty">
+          <div className="text-center py-8 space-y-2">
+            <div className="font-heading text-[14px] text-cream-dim">No LOIs drafted yet</div>
+            <div className="font-body text-[12px] text-cream-subtle">
+              When you draft one it shows up here with the proposed terms + a download link.
+            </div>
+          </div>
+        </Panel>
+      ) : (
+        <div className="space-y-3">
+          {lois.map((loi) => (
+            <Panel
+              key={loi.id}
+              eyebrow={`${loi.status.toUpperCase()} · ${new Date(loi.created_at).toLocaleDateString()}`}
+            >
+              <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-4 items-start">
+                <div className="min-w-0 space-y-1">
+                  <div className="font-heading text-base font-semibold text-cream">
+                    {loi.tenant_entity}
+                  </div>
+                  {loi.tenant_signing_name && (
+                    <div className="font-body text-[12px] text-cream-dim">
+                      Signed by {loi.tenant_signing_name}
+                    </div>
+                  )}
+                  <div className="font-mono text-[11px] text-cream-subtle mt-1 flex flex-wrap gap-x-4">
+                    {loi.base_rent_per_sf && (
+                      <span>${Number(loi.base_rent_per_sf).toFixed(2)}/SF/yr</span>
+                    )}
+                    {loi.term_years && <span>· {loi.term_years} yr</span>}
+                    {loi.lease_type && <span>· {loi.lease_type}</span>}
+                    {loi.commencement_date && (
+                      <span>· starts {new Date(loi.commencement_date).toLocaleDateString()}</span>
+                    )}
+                  </div>
+                </div>
+                {loi.pdf_url && (
+                  <a
+                    href={loi.pdf_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="shrink-0 px-3 py-1.5 rounded border border-white/[0.08] bg-white/[0.02] hover:bg-coral-400/[0.10] hover:border-coral-400/40 font-mono text-[10px] uppercase tracking-eyebrow text-cream-dim hover:text-coral-300 transition-colors"
+                  >
+                    Download PDF →
+                  </a>
+                )}
+              </div>
+            </Panel>
+          ))}
+        </div>
+      )}
+
+      <TenantLOIDialog
+        open={dialogOpen}
+        propertyId={p.id}
+        propertyName={p.name ?? "Property"}
+        propertyDefaults={propertyDefaults}
+        leads={p.leads}
+        onClose={() => {
+          setDialogOpen(false);
+          reload();
+        }}
+      />
     </div>
   );
 }
