@@ -28,12 +28,20 @@ const fmtMoney = (n: number | null) => {
 export function PropertyListCard({
   p,
   onPeek,
+  archivedView = false,
+  onRestored,
 }: {
   p: PropertyCard;
   /** When provided, a card click opens the peek panel instead of
    *  navigating to the workspace. Right-click / cmd+click still
    *  open the workspace in a new tab via the underlying href. */
   onPeek?: (id: string) => void;
+  /** True on /cre-os/properties?archived=1. Hides the archive menu
+   *  and shows a Restore action instead. */
+  archivedView?: boolean;
+  /** Called after a successful restore so the parent can refresh
+   *  the list (the restored property should leave the archived view). */
+  onRestored?: () => void;
 }) {
   const fullAddress = [p.address, p.city, p.state].filter(Boolean).join(", ");
   const statusTone = pillToneForStatus(p.status);
@@ -42,6 +50,31 @@ export function PropertyListCard({
   const warm = p.priorityScore >= 1 && p.priorityScore < 3;
   const [menuOpen, setMenuOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+
+  async function restore(e: React.MouseEvent) {
+    // The card's <a> would otherwise navigate. Restoring stays on
+    // this archived view so the broker can keep working through it.
+    e.preventDefault();
+    e.stopPropagation();
+    if (restoring) return;
+    setRestoring(true);
+    setRestoreError(null);
+    try {
+      const r = await fetch(`/api/properties/${p.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_dead: false, dead_reason: null }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error ?? `HTTP ${r.status}`);
+      onRestored?.();
+    } catch (err) {
+      setRestoreError(err instanceof Error ? err.message : String(err));
+      setRestoring(false);
+    }
+  }
   const [hidden, setHidden] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -124,48 +157,67 @@ export function PropertyListCard({
         </div>
       </div>
 
-      {/* Kebab menu — corner overlay. Click stops the card-level link
-          nav (stopPropagation + preventDefault). Single archive action
-          for now; easy to extend with Edit / Pin / Duplicate later. */}
-      <div className="absolute top-2 right-2 z-10" ref={menuRef}>
-        <button
-          type="button"
-          aria-label="More actions"
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setMenuOpen((v) => !v);
-          }}
-          className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity p-1.5 rounded border border-white/[0.08] bg-steward-base/80 hover:bg-steward-mid text-cream-subtle hover:text-cream"
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5">
-            <circle cx="12" cy="5" r="1" />
-            <circle cx="12" cy="12" r="1" />
-            <circle cx="12" cy="19" r="1" />
-          </svg>
-        </button>
-        {menuOpen && (
-          <div
-            role="menu"
-            className="absolute right-0 top-full mt-1 w-44 rounded border border-white/[0.10] bg-steward-base shadow-panel-soft overflow-hidden"
+      {/* Corner overlay. On the active view: kebab → Archive. On the
+          archived view: a direct Restore button (no menu — the only
+          relevant action on an archive is bringing it back). */}
+      {archivedView ? (
+        <div className="absolute top-2 right-2 z-10">
+          <button
+            type="button"
+            onClick={restore}
+            disabled={restoring}
+            title="Restore to active inventory"
+            className="px-2.5 py-1 rounded border border-teal-400/40 bg-teal-400/[0.10] hover:bg-teal-400/[0.22] font-heading text-[10px] uppercase tracking-eyebrow font-semibold text-teal-300 transition-colors disabled:opacity-40"
           >
-            <button
-              role="menuitem"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setMenuOpen(false);
-                setArchiveOpen(true);
-              }}
-              className="block w-full text-left px-3.5 py-2.5 font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-coral-400 hover:bg-coral-500/[0.10] transition-colors"
+            {restoring ? "Restoring…" : "↺ Restore"}
+          </button>
+          {restoreError && (
+            <div className="absolute right-0 top-full mt-1 w-56 px-2.5 py-1.5 rounded border border-red-400/40 bg-red-500/[0.08] font-body text-[11px] text-red-300">
+              {restoreError}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="absolute top-2 right-2 z-10" ref={menuRef}>
+          <button
+            type="button"
+            aria-label="More actions"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setMenuOpen((v) => !v);
+            }}
+            className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity p-1.5 rounded border border-white/[0.08] bg-steward-base/80 hover:bg-steward-mid text-cream-subtle hover:text-cream"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5">
+              <circle cx="12" cy="5" r="1" />
+              <circle cx="12" cy="12" r="1" />
+              <circle cx="12" cy="19" r="1" />
+            </svg>
+          </button>
+          {menuOpen && (
+            <div
+              role="menu"
+              className="absolute right-0 top-full mt-1 w-44 rounded border border-white/[0.10] bg-steward-base shadow-panel-soft overflow-hidden"
             >
-              Archive property
-            </button>
-          </div>
-        )}
-      </div>
+              <button
+                role="menuitem"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setMenuOpen(false);
+                  setArchiveOpen(true);
+                }}
+                className="block w-full text-left px-3.5 py-2.5 font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-coral-400 hover:bg-coral-500/[0.10] transition-colors"
+              >
+                Archive property
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Intelligence band — what's happening NOW */}
       {(p.priorityScore > 0 || p.daysSinceTouch !== null) && (

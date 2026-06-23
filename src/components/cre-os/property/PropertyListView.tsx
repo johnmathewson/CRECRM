@@ -308,7 +308,13 @@ export function PropertyListView({
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {filtered.map((p) => (
-                <PropertyListCard key={p.id} p={p} onPeek={openPeek} />
+                <PropertyListCard
+                  key={p.id}
+                  p={p}
+                  onPeek={openPeek}
+                  archivedView={archivedView}
+                  onRestored={() => router.refresh()}
+                />
               ))}
             </div>
           )}
