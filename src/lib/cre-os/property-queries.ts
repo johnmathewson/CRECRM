@@ -26,6 +26,11 @@ export interface PropertyListFilters {
   assetType?: string;
   status?: string;
   yourRole?: string;
+  /** When true, return ONLY archived (is_dead=true) properties. Default
+   *  excludes archived from the list entirely — the "active" view is
+   *  the common case. Set true for the dedicated /properties/archived
+   *  view. */
+  archived?: boolean;
 }
 
 export interface PropertyCard {
@@ -367,6 +372,16 @@ export async function loadPropertyList(filters: PropertyListFilters = {}): Promi
     q = q.eq("status", filters.status);
   } else {
     q = q.neq("status", "prospect");
+  }
+
+  // Archived (is_dead=true) properties drop out of the active list
+  // by default. The dedicated archived view passes archived=true to
+  // see ONLY archived. The bug we fixed: the active list never had
+  // this filter, so soft-archives kept appearing in "all assets."
+  if (filters.archived) {
+    q = q.eq("is_dead", true);
+  } else {
+    q = q.or("is_dead.is.null,is_dead.eq.false");
   }
   if (filters.yourRole) q = q.eq("your_role", filters.yourRole);
   if (filters.q && filters.q.trim()) {

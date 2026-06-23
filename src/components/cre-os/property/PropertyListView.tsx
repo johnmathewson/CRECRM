@@ -27,7 +27,15 @@ type TriageBucket = "all" | "hot" | "quiet" | "stale" | "no-bov";
  *
  * Right rail: AI-interpreted "what needs attention", not bare stats.
  */
-export function PropertyListView({ properties }: { properties: PropertyCard[] }) {
+export function PropertyListView({
+  properties,
+  archivedView = false,
+}: {
+  properties: PropertyCard[];
+  /** True when this is the dedicated /properties?archived=1 view —
+   *  changes header copy + the link in the action row. */
+  archivedView?: boolean;
+}) {
   const [q, setQ] = useState("");
   const [assetType, setAssetType] = useState("all");
   const [status, setStatus] = useState("all");
@@ -137,26 +145,59 @@ export function PropertyListView({ properties }: { properties: PropertyCard[] })
         {/* ─── 1. Portfolio command header ─── */}
         <header className="flex items-start justify-between gap-6">
           <div className="min-w-0 flex-1">
-            <Eyebrow tone="coral">Properties · Asset intelligence</Eyebrow>
-            <h1 className="mt-1 font-display font-medium text-3xl text-cream tracking-tight">Portfolio command surface</h1>
-            {synthesisLine && (
+            <Eyebrow tone={archivedView ? "muted" : "coral"}>
+              {archivedView ? "Properties · Archive" : "Properties · Asset intelligence"}
+            </Eyebrow>
+            <h1 className="mt-1 font-display font-medium text-3xl text-cream tracking-tight">
+              {archivedView ? "Archived inventory" : "Portfolio command surface"}
+            </h1>
+            {archivedView ? (
               <p className="mt-2 font-heading text-[14px] text-cream-dim leading-relaxed max-w-3xl">
-                {synthesisLine}
+                Properties you&apos;ve archived. Use these to close deals on past listings or restore a property to your
+                active inventory. Active properties are at{" "}
+                <a href="/cre-os/properties" className="text-coral-300 underline underline-offset-2 hover:text-coral-200">
+                  Properties →
+                </a>
               </p>
+            ) : (
+              synthesisLine && (
+                <p className="mt-2 font-heading text-[14px] text-cream-dim leading-relaxed max-w-3xl">
+                  {synthesisLine}
+                </p>
+              )
             )}
             <div className="mt-5 grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <CommandStat label="Assets" value={properties.length.toString()} caption="On the books" />
+              <CommandStat label={archivedView ? "Archived" : "Assets"} value={properties.length.toString()} caption={archivedView ? "Soft-deleted" : "On the books"} />
               <CommandStat label="Aggregate value" value={fmtMoney(totalValue)} caption="Asking price sum" />
               <CommandStat label="In-place NOI" value={fmtMoney(totalNoi)} caption="Across portfolio" />
               <CommandStat label="Weighted cap" value={weightedCap !== null ? (weightedCap * 100).toFixed(2) + "%" : "—"} caption="$-weighted average" />
             </div>
           </div>
-          <button
-            onClick={() => setCreateOpen(true)}
-            className="shrink-0 px-4 py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] hover:bg-coral-400/[0.18] font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-coral-300 transition-colors"
-          >
-            + Add property
-          </button>
+          <div className="shrink-0 flex flex-col items-end gap-2">
+            {archivedView ? (
+              <a
+                href="/cre-os/properties"
+                className="px-4 py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] hover:bg-coral-400/[0.18] font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-coral-300 transition-colors"
+              >
+                ← Active properties
+              </a>
+            ) : (
+              <button
+                onClick={() => setCreateOpen(true)}
+                className="px-4 py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] hover:bg-coral-400/[0.18] font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-coral-300 transition-colors"
+              >
+                + Add property
+              </button>
+            )}
+            {!archivedView && (
+              <a
+                href="/cre-os/properties?archived=1"
+                className="font-mono text-[10.5px] text-cream-subtle hover:text-cream underline underline-offset-2"
+              >
+                View archived →
+              </a>
+            )}
+          </div>
         </header>
 
         {/* ─── 2. Triage strip — operational filter chips ─── */}
