@@ -158,6 +158,24 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   update.updated_at = new Date().toISOString();
 
   const supabase = svc();
+
+  // If asking_price or lease_rate is being patched, snapshot the OLD
+  // value so we can cascade to deals whose price still matches the old
+  // asking. Deals that have diverged (e.g. negotiated down) won't be
+  // touched — preserves intentional broker overrides.
+  const pricePatched =
+    update.asking_price !== undefined || update.lease_rate !== undefined;
+  let oldPrices: { asking_price: number | null; lease_rate: number | null } | null = null;
+  if (pricePatched) {
+    const { data: snap } = await supabase
+      .from("properties")
+      .select("asking_price, lease_rate")
+      .eq("id", params.id)
+      .eq("organization_id", ORG_ID)
+      .maybeSingle();
+    oldPrices = snap ?? null;
+  }
+
   const { data, error } = await supabase
     .from("properties")
     .update(update)
@@ -169,7 +187,47 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-  return NextResponse.json({ property: data });
+
+  // Cascade the price change to open deals that were still tracking
+  // the old asking_price / lease_rate. Sale deals follow asking_price,
+  // lease deals follow lease_rate. A deal with a broker-set price that
+  // differs from the old asking is preserved as-is (negotiation history).
+  let cascadedDeals = 0;
+  if (pricePatched && oldPrices) {
+    // Helper: run one targeted cascade. We do these sequentially
+    // (at most two per request) — simpler than juggling builder
+    // types in Promise.all.
+    const cascadePrice = async (
+      dealType: "sale" | "lease",
+      oldPrice: number | null,
+      newPrice: number,
+    ): Promise<number> => {
+      const base = supabase
+        .from("deals")
+        .update({ price: newPrice, updated_at: new Date().toISOString() })
+        .eq("organization_id", ORG_ID)
+        .eq("property_id", params.id)
+        .eq("deal_type", dealType)
+        .eq("is_closed", false)
+        .eq("is_dead", false);
+      // Match the old asking (preserves broker overrides) OR fill nulls.
+      const filtered =
+        oldPrice !== null
+          ? base.or(`price.eq.${oldPrice},price.is.null`)
+          : base.is("price", null);
+      const { data: rows } = await filtered.select("id");
+      return rows?.length ?? 0;
+    };
+
+    if (update.asking_price !== undefined) {
+      cascadedDeals += await cascadePrice("sale", oldPrices.asking_price, Number(update.asking_price));
+    }
+    if (update.lease_rate !== undefined) {
+      cascadedDeals += await cascadePrice("lease", oldPrices.lease_rate, Number(update.lease_rate));
+    }
+  }
+
+  return NextResponse.json({ property: data, cascaded_deals: cascadedDeals });
 }
 
 /**
