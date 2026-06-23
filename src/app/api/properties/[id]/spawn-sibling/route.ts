@@ -19,9 +19,6 @@
  *   - asking_price / lease_rate (different deal economics per side)
  *   - lease_type / available_sf / divisible_to_sf / lease_term_months /
  *     ti_allowance / free_rent_months / permitted_uses (lease-only)
- *   - Marketing copy: headline, description, highlights,
- *     investment_highlights (sale and lease copy talk to different
- *     audiences — each needs its own draft)
  *   - External listing IDs: crexi_url / crexi_listing_id /
  *     loopnet_url / loopnet_listing_id (each side has its own listing)
  *   - Lifecycle timestamps: status starts at 'prospecting' for the
@@ -94,6 +91,13 @@ const COPY_COLUMNS = [
   "true_owner_address", "true_owner_city", "true_owner_state", "true_owner_zip",
   // Photos + marketing notes
   "images", "marketing_notes",
+  // Marketing copy — carries over as a STARTING DRAFT so the broker
+  // isn't writing from scratch on every clone. Sale-vs-lease copy is
+  // genuinely different in tone, but starting from the source's text
+  // and editing >> staring at a blank box. Re-running the description
+  // generator on the clone will use lease-mode prompts and produce
+  // tenant-shaped copy from these as inputs.
+  "headline", "description", "highlights", "investment_highlights",
   // Market context
   "market_name", "submarket", "submarket_cluster",
 ];
