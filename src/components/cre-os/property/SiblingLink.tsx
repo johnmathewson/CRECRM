@@ -61,7 +61,7 @@ export function SiblingLink({
   // Disabled when transactionType is missing (can't decide the
   // sibling's mode without knowing the source's).
   const canSpawn = transactionType === "sale" || transactionType === "lease";
-  const targetMode = transactionType === "sale" ? "Lease" : transactionType === "lease" ? "Sale" : null;
+  const targetMode = transactionType === "sale" ? "for-lease" : transactionType === "lease" ? "for-sale" : null;
 
   async function spawn() {
     setBusy(true);
@@ -98,12 +98,13 @@ export function SiblingLink({
         onClick={spawn}
         disabled={busy}
         className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border border-white/[0.08] bg-white/[0.02] hover:bg-coral-400/[0.10] hover:border-coral-400/40 hover:text-coral-300 font-mono text-[10px] text-cream-subtle uppercase tracking-eyebrow whitespace-nowrap transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        title={`Create a sibling listing offered for ${targetMode?.toLowerCase()}`}
+        title={`Clone this listing into a ${targetMode} version — building facts and photos copy over, you just add the rate / available SF / lease type`}
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3 h-3">
-          <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+          <rect x="9" y="9" width="11" height="11" rx="1.5" strokeLinejoin="round" />
+          <path d="M5 15V5a1 1 0 0 1 1-1h10" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
-        {busy ? "Creating…" : `Spawn ${targetMode} sibling`}
+        {busy ? "Cloning…" : `Clone as ${targetMode}`}
       </button>
       {error ? (
         <span className="font-mono text-[10px] text-coral-300">{error}</span>
