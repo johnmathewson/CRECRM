@@ -16,9 +16,25 @@ const fmtMoney = (n: number | null) => {
  *   • Mono caption: city · type · price
  *   • Footer: probability, days-in-stage, signal chips (stale, hot leads)
  *
- * Coral left-bar appears when stale. Tappable to /cre-os/pipeline/[id].
+ * Coral left-bar appears when stale.
+ *
+ * Draggable. Click opens whatever the parent wires up (peek panel by
+ * default). Previously this card was an <a href> to /cre-os/pipeline/[id]
+ * which forced a page nav AND blocked HTML5 drag (browser native anchor
+ * drag overrides our handlers). Switched to <div> + onClick / draggable
+ * so DnD actually works and the parent controls click behavior.
  */
-export function DealCard({ d }: { d: DealCardData }) {
+export function DealCard({
+  d,
+  onCardClick,
+  onCardDragStart,
+  onCardDragEnd,
+}: {
+  d: DealCardData;
+  onCardClick?: (deal: DealCardData) => void;
+  onCardDragStart?: (dealId: string) => void;
+  onCardDragEnd?: () => void;
+}) {
   const title = d.dealName ?? d.property?.name ?? d.contact?.fullName ?? "(unnamed deal)";
   const subline = [
     d.property?.city ?? d.contact?.email ?? null,
@@ -28,10 +44,34 @@ export function DealCard({ d }: { d: DealCardData }) {
     .filter(Boolean)
     .join(" · ");
 
+  // Suppress click navigation when a drag started — otherwise the
+  // mouseup at the drop site fires a click and opens the peek for
+  // the card you just dropped.
+  let dragStarted = false;
+
   return (
-    <a
-      href={`/cre-os/pipeline/${d.id}`}
-      className={`block group bg-steward-surface/40 border border-white/[0.05] hover:border-coral-400/30 hover:bg-steward-surface/60 rounded-md p-3 relative transition-all ${
+    <div
+      role="button"
+      tabIndex={0}
+      draggable
+      onDragStart={(e) => {
+        dragStarted = true;
+        e.dataTransfer.setData("text/plain", d.id);
+        e.dataTransfer.effectAllowed = "move";
+        onCardDragStart?.(d.id);
+      }}
+      onDragEnd={() => {
+        setTimeout(() => { dragStarted = false; }, 0);
+        onCardDragEnd?.();
+      }}
+      onClick={() => { if (!dragStarted) onCardClick?.(d); }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onCardClick?.(d);
+        }
+      }}
+      className={`block group bg-steward-surface/40 border border-white/[0.05] hover:border-coral-400/30 hover:bg-steward-surface/60 rounded-md p-3 relative transition-all cursor-grab active:cursor-grabbing focus:outline-none focus:border-coral-400/40 ${
         d.stale ? "border-l-2 border-l-coral-400" : ""
       }`}
     >
@@ -56,6 +96,6 @@ export function DealCard({ d }: { d: DealCardData }) {
           {d.openTasks > 0 && <StatusBadge size="xs" tone="amber">{d.openTasks}</StatusBadge>}
         </div>
       </div>
-    </a>
+    </div>
   );
 }

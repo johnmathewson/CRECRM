@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/cre-os/AppShell";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { Panel } from "@/components/cre-os/Panel";
@@ -8,7 +9,9 @@ import { KpiTile } from "@/components/cre-os/KpiTile";
 import type { RailSection } from "@/components/cre-os/InsightsRail";
 import { KanbanBoard } from "./KanbanBoard";
 import { CreateDealDialog } from "./CreateDealDialog";
-import type { PipelineBoard } from "@/lib/cre-os/pipeline-queries";
+import { PropertyPeekPanel } from "@/components/cre-os/property/PropertyPeekPanel";
+import type { PipelineBoard, DealCardData, StageColumn } from "@/lib/cre-os/pipeline-queries";
+import type { StageKey } from "@/lib/cre-os/stage-config";
 import type { PortalCandidate, PortalContactCandidate } from "@/lib/cre-os/portal-queries";
 
 const fmtMoney = (n: number) => {
@@ -33,9 +36,97 @@ export function PipelineView({
   pursuits: PipelineBoard;
   candidates: { properties: PortalCandidate[]; contacts: PortalContactCandidate[] };
 }) {
+  const router = useRouter();
+  const [, startTransition] = useTransition();
   const [side, setSide] = useState<"listings" | "pursuits">("listings");
   const [createOpen, setCreateOpen] = useState(false);
-  const board = side === "listings" ? listings : pursuits;
+
+  // Local DnD overrides: { [dealId]: newStage }. Layered onto the
+  // server-fed board so cards jump instantly on drop. Cleared when
+  // the server refresh arrives (rendered board has the canonical
+  // stage). Reverted on API failure.
+  const [stageOverrides, setStageOverrides] = useState<Record<string, StageKey>>({});
+  const [moveError, setMoveError] = useState<string | null>(null);
+  // Peek panel — opens the property workspace as a slide-over so the
+  // pipeline ladder stays visible behind it. Stored as state (not URL)
+  // because the deal pipeline doesn't need deep-linkable peek; clicking
+  // away is the common way to close.
+  const [peekPropertyId, setPeekPropertyId] = useState<string | null>(null);
+
+  // Apply stage overrides to whichever board is active. Recomputes
+  // column counts + totals so the header stats match the visual move.
+  const baseBoard = side === "listings" ? listings : pursuits;
+  const board: PipelineBoard = useMemo(() => {
+    if (Object.keys(stageOverrides).length === 0) return baseBoard;
+    // Build a flat list of cards with current effective stage.
+    const all: DealCardData[] = baseBoard.columns.flatMap((c) =>
+      c.cards.map((card) => {
+        const overridden = stageOverrides[card.id];
+        return overridden ? { ...card, stage: overridden } : card;
+      })
+    );
+    // Re-bucket by effective stage. Preserve column ORDER from baseBoard.
+    const columns: StageColumn[] = baseBoard.columns.map((c) => {
+      const cards = all.filter((card) => card.stage === c.stage);
+      const totalValue = cards.reduce((s, x) => s + (x.price ?? 0), 0);
+      const weightedValue = cards.reduce(
+        (s, x) => s + (x.price ?? 0) * ((x.probabilityPct ?? 0) / 100),
+        0
+      );
+      return {
+        stage: c.stage,
+        cards,
+        count: cards.length,
+        totalValue,
+        weightedValue,
+      };
+    });
+    return { ...baseBoard, columns };
+  }, [baseBoard, stageOverrides]);
+
+  const handleCardMove = useCallback(
+    async (dealId: string, targetStage: StageKey, fromStage: StageKey) => {
+      setMoveError(null);
+      // Optimistic
+      setStageOverrides((prev) => ({ ...prev, [dealId]: targetStage }));
+
+      try {
+        const r = await fetch(`/api/deals/${dealId}/advance`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ stage: targetStage, sync_property: true }),
+        });
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({}));
+          throw new Error(j?.error ?? `HTTP ${r.status}`);
+        }
+        // Server refresh pulls the canonical board state — clears
+        // overrides via the new render.
+        startTransition(() => router.refresh());
+      } catch (err) {
+        setMoveError(err instanceof Error ? err.message : String(err));
+        // Revert
+        setStageOverrides((prev) => {
+          const next = { ...prev };
+          delete next[dealId];
+          return next;
+        });
+        // Keep fromStage referenced so the lint doesn't complain
+        void fromStage;
+      }
+    },
+    [router]
+  );
+
+  const handleCardClick = useCallback((deal: DealCardData) => {
+    // Open the PROPERTY workspace as a peek panel. If the deal has
+    // no property attached (rare for listing-side; happens with
+    // buyer-rep without a target), do nothing — the deal-only path
+    // still works from the deal-specific URL if the broker needs it.
+    if (deal.property?.id) {
+      setPeekPropertyId(deal.property.id);
+    }
+  }, []);
 
   // Derived stage health flags for the rail
   const staleCount = board.columns.flatMap((c) => c.cards).filter((c) => c.stale).length;
@@ -178,10 +269,15 @@ export function PipelineView({
           title={side === "listings" ? "Listings ladder" : "Pursuits ladder"}
           actions={
             <span className="font-mono text-[10px] text-cream-subtle">
-              Scroll horizontally — full ladder visible
+              Drag cards between stages · click for property
             </span>
           }
         >
+          {moveError && (
+            <div className="mb-3 rounded border border-red-400/40 bg-red-500/[0.08] px-3 py-2 font-body text-[12px] text-red-300">
+              Stage move failed: {moveError}
+            </div>
+          )}
           {board.totals.activeDeals === 0 ? (
             <div className="text-center py-12">
               <p className="font-body text-[13px] text-cream-subtle">
@@ -189,7 +285,11 @@ export function PipelineView({
               </p>
             </div>
           ) : (
-            <KanbanBoard board={board} />
+            <KanbanBoard
+              board={board}
+              onCardMove={handleCardMove}
+              onCardClick={handleCardClick}
+            />
           )}
         </Panel>
       </div>
@@ -199,6 +299,14 @@ export function PipelineView({
         properties={candidates.properties.map((p) => ({ id: p.id, name: p.name, city: p.city, state: p.state }))}
         contacts={candidates.contacts.map((c) => ({ id: c.id, fullName: c.name, email: c.email }))}
         defaultDealType={side === "pursuits" ? "buyer_rep" : "sale"}
+      />
+      {/* Property peek panel — slides in over the kanban so the
+          stage ladder stays visible behind it. Clicking a deal
+          card opens this; clicking the "Open full workspace" link
+          inside it leaves the pipeline view entirely. */}
+      <PropertyPeekPanel
+        propertyId={peekPropertyId}
+        onClose={() => setPeekPropertyId(null)}
       />
     </AppShell>
   );
