@@ -193,17 +193,18 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 /**
- * Extract the numeric CREXi listing ID from a CREXi property URL.
- * Returns null when the input isn't a recognizable CREXi URL — including
- * empty/null/undefined, so callers can also pass through clearing
- * operations without special-casing.
+ * Extract the numeric CREXi listing ID from a CREXi URL. Returns null
+ * when the input isn't a recognizable CREXi URL — including empty/null/
+ * undefined, so callers can also pass through clearing operations
+ * without special-casing.
  *
- * Matched shapes:
- *   https://www.crexi.com/properties/1234567/anything
- *   https://crexi.com/properties/1234567
- *   crexi.com/properties/1234567/slug?utm=…
- *   /properties/1234567 (relative)
- *   1234567 (bare ID — accepted as-is so the broker can paste just the number)
+ * Matched shapes (both broker-dashboard and public-listing forms):
+ *   https://www.crexi.com/property/815297/dashboard        (broker view)
+ *   https://www.crexi.com/properties/2475450/anything       (public listing)
+ *   https://crexi.com/property/815297
+ *   crexi.com/properties/2475450/slug?utm=…
+ *   /property/815297 or /properties/2475450  (relative)
+ *   815297 (bare ID — accepted as-is so the broker can paste just the number)
  */
 function extractCrexiListingId(url: unknown): string | null {
   if (typeof url !== "string") return null;
@@ -211,8 +212,10 @@ function extractCrexiListingId(url: unknown): string | null {
   if (!trimmed) return null;
   // Bare ID (broker pasted just the number).
   if (/^\d{4,}$/.test(trimmed)) return trimmed;
-  // /properties/<digits>
-  const m = trimmed.match(/\/properties\/(\d{4,})/i);
+  // /property/<digits> OR /properties/<digits>. CREXi uses singular
+  // "property" in the broker dashboard URL and plural "properties"
+  // in the public listing URL — both point at the same listing.
+  const m = trimmed.match(/\/propert(?:y|ies)\/(\d{4,})/i);
   if (m) return m[1];
   return null;
 }
