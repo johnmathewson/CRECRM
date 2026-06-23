@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/cre-os/AppShell";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { Panel } from "@/components/cre-os/Panel";
@@ -8,6 +9,8 @@ import { StatusBadge } from "@/components/cre-os/StatusBadge";
 import type { RailSection } from "@/components/cre-os/InsightsRail";
 import type { InsightItem } from "@/components/cre-os/InsightCard";
 import { PropertyListCard } from "./PropertyListCard";
+import { PropertyPipelineKanban } from "./PropertyPipelineKanban";
+import { PropertyPeekPanel } from "./PropertyPeekPanel";
 import { CreatePropertyDialog } from "./CreatePropertyDialog";
 import type { PropertyCard } from "@/lib/cre-os/property-queries";
 
@@ -34,6 +37,35 @@ export function PropertyListView({
    *  changes header copy + the link in the action row. */
   archivedView?: boolean;
 }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const viewParam = searchParams?.get("view");
+  const view: "grid" | "pipeline" = viewParam === "pipeline" ? "pipeline" : "grid";
+  const peekedId = searchParams?.get("p") ?? null;
+
+  // Helper: update URL search params without losing existing ones
+  const updateParams = useCallback(
+    (patch: Record<string, string | null>) => {
+      const params = new URLSearchParams(searchParams?.toString() ?? "");
+      for (const [k, v] of Object.entries(patch)) {
+        if (v === null) params.delete(k);
+        else params.set(k, v);
+      }
+      const qs = params.toString();
+      router.replace(qs ? `?${qs}` : "?");
+    },
+    [router, searchParams],
+  );
+
+  const openPeek = useCallback(
+    (cardId: string) => updateParams({ p: cardId }),
+    [updateParams],
+  );
+  const closePeek = useCallback(
+    () => updateParams({ p: null }),
+    [updateParams],
+  );
+
   const [q, setQ] = useState("");
   const [assetType, setAssetType] = useState("all");
   const [status, setStatus] = useState("all");
@@ -201,18 +233,51 @@ export function PropertyListView({
           <TriageChip label="All" count={counts.all} active={bucket === "all"} tone="neutral" onClick={() => setBucket("all")} />
         </div>
 
-        {/* ─── 3. All assets — uniform grid ─── */}
+        {/* ─── 3. All assets — view toggle + grid OR pipeline ─── */}
         <section>
-          <div className="flex items-baseline justify-between mb-3">
-            <Eyebrow tone="muted" num={1}>
-              {bucket === "all" ? "All assets" : labelForBucket(bucket)}
-            </Eyebrow>
+          <div className="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
+            <div className="flex items-baseline gap-3">
+              <Eyebrow tone="muted" num={1}>
+                {bucket === "all" ? "All assets" : labelForBucket(bucket)}
+              </Eyebrow>
+              {/* View toggle — URL-driven so deep links land on the same view */}
+              <div
+                role="tablist"
+                aria-label="View"
+                className="inline-flex items-center rounded border border-white/[0.08] bg-white/[0.02] p-0.5"
+              >
+                <button
+                  role="tab"
+                  aria-selected={view === "grid"}
+                  onClick={() => updateParams({ view: null })}
+                  className={`px-2.5 py-1 rounded font-mono text-[10px] uppercase tracking-eyebrow transition-colors ${
+                    view === "grid"
+                      ? "bg-coral-400/[0.15] text-coral-300"
+                      : "text-cream-subtle hover:text-cream"
+                  }`}
+                >
+                  Grid
+                </button>
+                <button
+                  role="tab"
+                  aria-selected={view === "pipeline"}
+                  onClick={() => updateParams({ view: "pipeline" })}
+                  className={`px-2.5 py-1 rounded font-mono text-[10px] uppercase tracking-eyebrow transition-colors ${
+                    view === "pipeline"
+                      ? "bg-coral-400/[0.15] text-coral-300"
+                      : "text-cream-subtle hover:text-cream"
+                  }`}
+                >
+                  Pipeline
+                </button>
+              </div>
+            </div>
             <span className="font-mono text-[10px] text-cream-subtle">
               {filtered.length} asset{filtered.length === 1 ? "" : "s"}
             </span>
           </div>
 
-          {/* Filters */}
+          {/* Filters — apply to both views */}
           <div className="mb-4 flex flex-wrap items-end gap-3">
             <div className="flex-1 min-w-[260px]">
               <input
@@ -224,7 +289,9 @@ export function PropertyListView({
               />
             </div>
             <FilterSelect label="Asset" value={assetType} onChange={setAssetType} options={ASSET_TYPES} />
-            <FilterSelect label="Status" value={status} onChange={setStatus} options={STATUSES} />
+            {view === "grid" && (
+              <FilterSelect label="Status" value={status} onChange={setStatus} options={STATUSES} />
+            )}
           </div>
 
           {filtered.length === 0 ? (
@@ -233,14 +300,22 @@ export function PropertyListView({
                 No properties match. Clear filters to see everything.
               </p>
             </Panel>
+          ) : view === "pipeline" ? (
+            <PropertyPipelineKanban
+              properties={filtered}
+              onCardClick={(card) => openPeek(card.id)}
+            />
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {filtered.map((p) => <PropertyListCard key={p.id} p={p} />)}
+              {filtered.map((p) => (
+                <PropertyListCard key={p.id} p={p} onPeek={openPeek} />
+              ))}
             </div>
           )}
         </section>
       </div>
       <CreatePropertyDialog open={createOpen} onClose={() => setCreateOpen(false)} />
+      <PropertyPeekPanel propertyId={peekedId} onClose={closePeek} />
     </AppShell>
   );
 }

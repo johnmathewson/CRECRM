@@ -25,7 +25,16 @@ const fmtMoney = (n: number | null) => {
  * Visual urgency cue: coral left-bar when priorityScore > 0; muted left-bar
  * when calm. Lets the broker scan the grid for "what matters today".
  */
-export function PropertyListCard({ p }: { p: PropertyCard }) {
+export function PropertyListCard({
+  p,
+  onPeek,
+}: {
+  p: PropertyCard;
+  /** When provided, a card click opens the peek panel instead of
+   *  navigating to the workspace. Right-click / cmd+click still
+   *  open the workspace in a new tab via the underlying href. */
+  onPeek?: (id: string) => void;
+}) {
   const fullAddress = [p.address, p.city, p.state].filter(Boolean).join(", ");
   const statusTone = pillToneForStatus(p.status);
   const stageTone = pillToneForStage(p.pipelineStage);
@@ -68,6 +77,15 @@ export function PropertyListCard({ p }: { p: PropertyCard }) {
   return (
     <a
       href={`/cre-os/properties/${p.slug}`}
+      onClick={(e) => {
+        // Plain left-click → peek panel. Modifier-clicks (cmd/ctrl/
+        // middle) and right-click fall through to the href so the
+        // broker can still open in a new tab when they want.
+        if (!onPeek) return;
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+        e.preventDefault();
+        onPeek(p.id);
+      }}
       className={`block group relative bg-steward-mid/50 hover:bg-steward-mid/80 rounded-md transition-all ${cardBorder} hover:border-coral-400/30`}
     >
       <div className="p-5">
