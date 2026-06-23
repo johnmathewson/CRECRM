@@ -83,10 +83,20 @@ export function KanbanBoard({
                   </span>
                   {col.weightedValue > 0 && col.weightedValue !== col.totalValue && (
                     <span className="font-mono text-[10px] text-cream-subtle">
-                      · {fmtMoney(col.weightedValue)} weighted
+                      · {fmtMoney(col.weightedValue)} wtd
                     </span>
                   )}
                 </div>
+                {col.totalCommission > 0 && (
+                  <div className="mt-1 font-mono text-[10px] text-coral-300/80">
+                    {fmtMoney(col.totalCommission)} comm
+                    {col.weightedCommission > 0 && col.weightedCommission !== col.totalCommission && (
+                      <span className="text-cream-subtle">
+                        {" "}· {fmtMoney(col.weightedCommission)} wtd
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Cards */}

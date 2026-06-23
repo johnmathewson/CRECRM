@@ -96,6 +96,14 @@ export function DealCard({
           {d.openTasks > 0 && <StatusBadge size="xs" tone="amber">{d.openTasks}</StatusBadge>}
         </div>
       </div>
+      {d.estimatedCommission !== null && d.estimatedCommission > 0 && (
+        <div className="mt-1 font-mono text-[10px] text-coral-300/80">
+          {fmtMoney(d.estimatedCommission)} comm
+          {d.commissionPct !== null && (
+            <span className="ml-1 text-cream-subtle">@ {d.commissionPct}%</span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

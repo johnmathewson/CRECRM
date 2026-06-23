@@ -91,6 +91,36 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Auto-derive commission fields so the pipeline rollups stay correct
+  // without depending on the broker to do the math. Both columns are
+  // pct expressed 0-100 (e.g. 5 = 5%, NOT 0.05).
+  //   - estimated_commission = price × (commission_pct / 100) when both
+  //     are set on a SALE deal AND the broker didn't pass an override.
+  //     Lease deals skip this — lease commission usually comes from
+  //     total lease value (term × annual rent × pct), not the price
+  //     column (which on lease deals stores rate $/SF/yr).
+  //   - weighted_commission = estimated × (probability / 100).
+  if (
+    dealType === "sale" &&
+    insertPayload.estimated_commission === undefined &&
+    insertPayload.price != null &&
+    insertPayload.commission_pct != null
+  ) {
+    insertPayload.estimated_commission = Math.round(
+      Number(insertPayload.price) * (Number(insertPayload.commission_pct) / 100)
+    );
+  }
+  if (
+    insertPayload.estimated_commission != null &&
+    insertPayload.probability_pct != null
+  ) {
+    insertPayload.weighted_commission = Math.round(
+      Number(insertPayload.estimated_commission) *
+        (Number(insertPayload.probability_pct) / 100) *
+        100
+    ) / 100;
+  }
+
   const { data: deal, error: dealErr } = await sb
     .from("deals")
     .insert(insertPayload)

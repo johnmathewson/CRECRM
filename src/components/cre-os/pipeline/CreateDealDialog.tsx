@@ -49,6 +49,13 @@ export function CreateDealDialog({
   const [propertyQuery, setPropertyQuery] = useState("");
   const [contactQuery, setContactQuery] = useState("");
   const [price, setPrice] = useState("");
+  // Commission inputs — broker-side. For sale the natural default
+  // is price × commission_pct; for lease the dollar amount typically
+  // comes from total lease consideration (term × annual rent × pct)
+  // which the broker computes externally. So we let them set either
+  // % OR a dollar amount and store both, no auto-overwrite.
+  const [commissionPct, setCommissionPct] = useState("");
+  const [estimatedCommission, setEstimatedCommission] = useState("");
   const [probability, setProbability] = useState<number>(25);
   const [expectedClose, setExpectedClose] = useState("");
   const [initialStage, setInitialStage] = useState<string>("Lead");
@@ -100,6 +107,14 @@ export function CreateDealDialog({
       if (price) {
         const n = Number(price.replace(/[$,]/g, ""));
         if (!Number.isNaN(n)) payload.price = n;
+      }
+      if (commissionPct) {
+        const n = Number(commissionPct.replace(/[%]/g, ""));
+        if (!Number.isNaN(n)) payload.commission_pct = n;
+      }
+      if (estimatedCommission) {
+        const n = Number(estimatedCommission.replace(/[$,]/g, ""));
+        if (!Number.isNaN(n)) payload.estimated_commission = n;
       }
       const res = await fetch("/api/deals", {
         method: "POST",
@@ -214,6 +229,52 @@ export function CreateDealDialog({
             </Field>
             <Field label="Probability %">
               <input type="number" min={0} max={100} value={probability} onChange={(e) => setProbability(Number(e.target.value))} className={fieldCls} />
+            </Field>
+          </div>
+
+          {/* Commission — broker's take-home. For sale the natural
+              calc is price × pct. For lease the dollar amount is
+              usually computed off total lease consideration, so we
+              accept either or both rather than auto-overwrite one
+              from the other. */}
+          <div className="grid grid-cols-2 gap-3">
+            <Field
+              label="Commission %"
+              hint={dealType === "sale" ? "Typical sale: 3-6%" : dealType === "lease" ? "Of total lease value" : ""}
+            >
+              <input
+                type="text"
+                inputMode="decimal"
+                value={commissionPct}
+                onChange={(e) => {
+                  setCommissionPct(e.target.value);
+                  // Auto-suggest est. commission on SALE deals when price is set
+                  // and the broker hasn't manually overridden it. Lease commission
+                  // calculation is too varied to auto-derive, so we leave it alone.
+                  if (dealType === "sale" && price && !estimatedCommission) {
+                    const p = Number(price.replace(/[$,]/g, ""));
+                    const pct = Number(e.target.value.replace(/[%]/g, ""));
+                    if (!Number.isNaN(p) && !Number.isNaN(pct)) {
+                      setEstimatedCommission(String(Math.round((p * pct) / 100)));
+                    }
+                  }
+                }}
+                placeholder={dealType === "sale" ? "5" : "6"}
+                className={fieldCls}
+              />
+            </Field>
+            <Field
+              label="Est. commission ($)"
+              hint={dealType === "sale" ? "Auto-fills from price × %" : "You enter — varies by lease structure"}
+            >
+              <input
+                type="text"
+                inputMode="decimal"
+                value={estimatedCommission}
+                onChange={(e) => setEstimatedCommission(e.target.value)}
+                placeholder="$120,000"
+                className={fieldCls}
+              />
             </Field>
           </div>
 

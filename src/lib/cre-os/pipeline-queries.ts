@@ -39,6 +39,11 @@ export interface DealCardData {
   rawStage: string | null;
   price: number | null;
   probabilityPct: number | null;
+  /** Commission as % of price (or of total lease value for lease deals). */
+  commissionPct: number | null;
+  /** Broker's estimated commission ($). For sale = price × pct; for
+   *  lease, broker-entered because it's based on total lease value. */
+  estimatedCommission: number | null;
   weightedCommission: number | null;
   expectedClose: string | null;
   enteredAt: string | null;        // when this deal entered current stage
@@ -57,6 +62,10 @@ export interface StageColumn {
   count: number;
   totalValue: number;
   weightedValue: number;
+  /** Sum of estimated_commission for deals in this column. */
+  totalCommission: number;
+  /** Sum of weighted_commission (estimated × probability) for this column. */
+  weightedCommission: number;
 }
 
 export interface PipelineBoard {
@@ -68,6 +77,10 @@ export interface PipelineBoard {
     weightedValue: number;
     avgProbability: number | null;
     expectedThisQuarter: number;
+    /** Sum of estimated_commission across all open deals on the board. */
+    pipelineCommission: number;
+    /** Sum of weighted_commission (estimated × probability) across the board. */
+    weightedCommission: number;
   };
 }
 
@@ -152,6 +165,8 @@ export async function loadPipelineBoard(side: PipelineSide = "listings"): Promis
       rawStage: activeStageRow?.stage ?? null,
       price: numOrNull(d.price),
       probabilityPct: numOrNull(d.probability_pct),
+      commissionPct: numOrNull(d.commission_pct),
+      estimatedCommission: numOrNull(d.estimated_commission),
       weightedCommission: numOrNull(d.weighted_commission),
       expectedClose: d.expected_close,
       enteredAt,
@@ -181,13 +196,31 @@ export async function loadPipelineBoard(side: PipelineSide = "listings"): Promis
       (s, c) => s + (c.price ?? 0) * ((c.probabilityPct ?? getStageConfig(stage).defaultProbability) / 100),
       0,
     );
-    return { stage, cards: stageCards, count: stageCards.length, totalValue, weightedValue };
+    const totalCommission = stageCards.reduce((s, c) => s + (c.estimatedCommission ?? 0), 0);
+    const weightedCommissionCol = stageCards.reduce(
+      (s, c) => s + (c.estimatedCommission ?? 0) * ((c.probabilityPct ?? getStageConfig(stage).defaultProbability) / 100),
+      0,
+    );
+    return {
+      stage,
+      cards: stageCards,
+      count: stageCards.length,
+      totalValue,
+      weightedValue,
+      totalCommission,
+      weightedCommission: weightedCommissionCol,
+    };
   });
 
   const activeDeals = cards.length;
   const pipelineValue = cards.reduce((s, c) => s + (c.price ?? 0), 0);
   const weightedValue = cards.reduce(
     (s, c) => s + (c.price ?? 0) * ((c.probabilityPct ?? getStageConfig(c.stage).defaultProbability) / 100),
+    0,
+  );
+  const pipelineCommission = cards.reduce((s, c) => s + (c.estimatedCommission ?? 0), 0);
+  const weightedCommissionTotal = cards.reduce(
+    (s, c) => s + (c.estimatedCommission ?? 0) * ((c.probabilityPct ?? getStageConfig(c.stage).defaultProbability) / 100),
     0,
   );
   const probSum = cards.reduce((s, c) => s + (c.probabilityPct ?? 0), 0);
@@ -202,7 +235,15 @@ export async function loadPipelineBoard(side: PipelineSide = "listings"): Promis
   return {
     side,
     columns,
-    totals: { activeDeals, pipelineValue, weightedValue, avgProbability, expectedThisQuarter },
+    totals: {
+      activeDeals,
+      pipelineValue,
+      weightedValue,
+      avgProbability,
+      expectedThisQuarter,
+      pipelineCommission,
+      weightedCommission: weightedCommissionTotal,
+    },
   };
 }
 

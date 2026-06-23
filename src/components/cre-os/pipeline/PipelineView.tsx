@@ -73,12 +73,19 @@ export function PipelineView({
         (s, x) => s + (x.price ?? 0) * ((x.probabilityPct ?? 0) / 100),
         0
       );
+      const totalCommission = cards.reduce((s, x) => s + (x.estimatedCommission ?? 0), 0);
+      const weightedCommission = cards.reduce(
+        (s, x) => s + (x.estimatedCommission ?? 0) * ((x.probabilityPct ?? 0) / 100),
+        0
+      );
       return {
         stage: c.stage,
         cards,
         count: cards.length,
         totalValue,
         weightedValue,
+        totalCommission,
+        weightedCommission,
       };
     });
     return { ...baseBoard, columns };
@@ -146,6 +153,19 @@ export function PipelineView({
             value={board.totals.avgProbability !== null ? Math.round(board.totals.avgProbability) + "%" : "—"}
           />
           <RailStat label="Closing within 90 days" value={fmtMoney(board.totals.expectedThisQuarter)} />
+          {/* Commission rollups — brokerage's actual take-home forecast,
+              not just pipeline value. Sum of estimated_commission per
+              deal, weighted version uses each deal's probability. */}
+          <div className="border-t border-white/[0.04] mt-2 pt-2">
+            <RailStat
+              label="Est. commission"
+              value={fmtMoney(board.totals.pipelineCommission)}
+            />
+            <RailStat
+              label="Weighted commission"
+              value={fmtMoney(board.totals.weightedCommission)}
+            />
+          </div>
         </div>
       ),
     },
@@ -239,7 +259,7 @@ export function PipelineView({
           </div>
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
           <KpiTile
             label="Active deals"
             value={board.totals.activeDeals.toString()}
@@ -248,17 +268,12 @@ export function PipelineView({
           <KpiTile
             label="Pipeline value"
             value={fmtMoney(board.totals.pipelineValue)}
-            caption="Sum of asking / offer"
+            caption={`Weighted ${fmtMoney(board.totals.weightedValue)}`}
           />
           <KpiTile
-            label="Weighted forecast"
-            value={fmtMoney(board.totals.weightedValue)}
-            caption="× probability"
-          />
-          <KpiTile
-            label="Closing 90d"
-            value={fmtMoney(board.totals.expectedThisQuarter)}
-            caption="Expected close ≤ 90 days"
+            label="Est. commission"
+            value={fmtMoney(board.totals.pipelineCommission)}
+            caption={`Weighted ${fmtMoney(board.totals.weightedCommission)}`}
           />
         </div>
 
