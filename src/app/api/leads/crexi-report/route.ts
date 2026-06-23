@@ -251,9 +251,19 @@ async function matchProperty(supabase: any, parsed: { propertyName: string | nul
       candidate.replace(/\s+by Wyndham.*$/i, ""),
     ]);
 
-    // Try each variant against name. Also try the LAST word of the
-    // variant (often a city/landmark — e.g. "Portage" from
+    // Try each variant against name. Also try individual words from
+    // the variant (often a city/landmark — e.g. "Portage" from
     // "Melton Rd Portage").
+    //
+    // CRITICAL: filter to "strong" properties at the SQL level —
+    // crexi_listing_id set OR your_role=listing_broker OR status not
+    // prospect. Without this, a search for "%Portage%" returns 10
+    // public-record prospects out of ~60, and "Portage Land Sale"
+    // doesn't make the cut. The matcher should never return a
+    // prospect from a name match — addresses are the only signal
+    // strong enough to risk that.
+    const strongFilter = "crexi_listing_id.not.is.null,your_role.eq.listing_broker,status.neq.prospect";
+
     for (const v of Array.from(variants)) {
       const words = v.split(/\s+/).filter(Boolean);
       const tries = new Set<string>([v, ...words.filter((w) => w.length >= 4)]);
@@ -263,7 +273,8 @@ async function matchProperty(supabase: any, parsed: { propertyName: string | nul
           .select("id, name, crexi_listing_id, your_role, status")
           .eq("organization_id", ORG_ID)
           .ilike("name", `%${t}%`)
-          .limit(10);
+          .or(strongFilter)
+          .limit(20);
         collected.push(...(data ?? []));
       }
     }
