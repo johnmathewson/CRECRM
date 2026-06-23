@@ -77,6 +77,7 @@ interface FullPropertyRow {
   divisible_to_sf: number | null;
   lease_term_months: number | null;
   ti_allowance_per_sf: number | null;
+  operating_expenses_per_sf: number | null;
   free_rent_months: number | null;
   permitted_uses: string | null;
 }
@@ -155,6 +156,7 @@ export function EditPropertyDialog({ open, property, onClose }: Props) {
   const [divisibleToSf, setDivisibleToSf] = useState("");
   const [leaseTermMonths, setLeaseTermMonths] = useState("");
   const [tiAllowancePerSf, setTiAllowancePerSf] = useState("");
+  const [operatingExpensesPerSf, setOperatingExpensesPerSf] = useState("");
   const [freeRentMonths, setFreeRentMonths] = useState("");
   const [permittedUses, setPermittedUses] = useState("");
   const [busy, setBusy] = useState(false);
@@ -214,6 +216,7 @@ export function EditPropertyDialog({ open, property, onClose }: Props) {
         setDivisibleToSf(p.divisible_to_sf ? String(p.divisible_to_sf) : "");
         setLeaseTermMonths(p.lease_term_months ? String(p.lease_term_months) : "");
         setTiAllowancePerSf(p.ti_allowance_per_sf ? String(p.ti_allowance_per_sf) : "");
+        setOperatingExpensesPerSf(p.operating_expenses_per_sf ? String(p.operating_expenses_per_sf) : "");
         setFreeRentMonths(p.free_rent_months ? String(p.free_rent_months) : "");
         setPermittedUses(p.permitted_uses ?? "");
       })
@@ -278,6 +281,7 @@ export function EditPropertyDialog({ open, property, onClose }: Props) {
         divisible_to_sf: intOrNull(divisibleToSf),
         lease_term_months: intOrNull(leaseTermMonths),
         ti_allowance_per_sf: num(tiAllowancePerSf),
+        operating_expenses_per_sf: num(operatingExpensesPerSf),
         free_rent_months: intOrNull(freeRentMonths),
         permitted_uses: orNull(permittedUses),
       };
@@ -542,6 +546,18 @@ export function EditPropertyDialog({ open, property, onClose }: Props) {
                     placeholder="25"
                     className={inputCls}
                   />
+                </Field>
+                <Field label="Operating expenses $/SF/yr">
+                  <input
+                    inputMode="decimal"
+                    value={operatingExpensesPerSf}
+                    onChange={(e) => setOperatingExpensesPerSf(e.target.value)}
+                    placeholder="4.00"
+                    className={inputCls}
+                  />
+                  <div className="font-mono text-[9px] text-cream-subtle mt-1">
+                    NNN / CAM / Tax estimate. Prefills the NNN line on every Tenant LOI you draft against this property.
+                  </div>
                 </Field>
               </div>
               <div className="mt-3">

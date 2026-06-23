@@ -192,6 +192,16 @@ export interface PropertyDetail {
   noi: number | null;
   capRate: number | null;
   occupancyPct: number | null;
+
+  // For-lease structure — needed by the Tenant LOI dialog to
+  // prefill defaults. EditPropertyDialog reads /api/properties/[id]
+  // directly (.select("*")) so it doesn't depend on these fields
+  // being in PropertyDetail.
+  leaseType: string | null;
+  availableSf: number | null;
+  freeRentMonths: number | null;
+  tiAllowancePerSf: number | null;
+  operatingExpensesPerSf: number | null;
   pricePerSf: number | null;
 
   // Physical attributes — the kind of detail brokers list on a flyer
@@ -499,6 +509,8 @@ export async function loadPropertyDetail(slug: string): Promise<PropertyDetail |
       asset_type, sub_type, status, pipeline_stage, your_role, transaction_type,
       asking_price, lease_rate, sqft, units, acreage, year_built, noi, cap_rate,
       occupancy_pct, price_per_sf,
+      lease_type, available_sf, free_rent_months,
+      ti_allowance_per_sf, operating_expenses_per_sf,
       headline, description, notes, marketing_notes, highlights, investment_highlights, images,
       om_pdf_url, om_generated_at, flyer_pdf_url, flyer_generated_at,
       document_inventory, data_source, created_at,
@@ -567,6 +579,14 @@ export async function loadPropertyDetail(slug: string): Promise<PropertyDetail |
     capRate: numOrNull(p.cap_rate),
     occupancyPct: numOrNull(p.occupancy_pct),
     pricePerSf: numOrNull(p.price_per_sf),
+    // For-lease structure — used by Tenant LOI dialog for prefill
+    // (owner fields trueOwnerName/ownerNameRaw are mapped further
+    // down in the Owner identity block, so don't duplicate them here)
+    leaseType: p.lease_type ?? null,
+    availableSf: p.available_sf ?? null,
+    freeRentMonths: p.free_rent_months ?? null,
+    tiAllowancePerSf: numOrNull(p.ti_allowance_per_sf),
+    operatingExpensesPerSf: numOrNull(p.operating_expenses_per_sf),
 
     // Physical attributes
     parkingSpaces: p.parking_spaces ?? null,

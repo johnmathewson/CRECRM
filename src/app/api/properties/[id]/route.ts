@@ -28,6 +28,9 @@ const PATCHABLE_FIELDS = new Set([
   // transaction_type='lease'. See migration add_lease_specific_property_columns.
   "lease_type", "available_sf", "divisible_to_sf", "lease_term_months",
   "ti_allowance_per_sf", "free_rent_months", "suite_breakdown", "permitted_uses",
+  // Landlord's NNN/CAM/Tax estimate ($/SF/yr) — prefills the NNN
+  // line on every Tenant LOI drafted against this property.
+  "operating_expenses_per_sf",
   // Location anchoring — for properties without a clean street
   // address. Set via PropertyLocationPicker (click-to-pin map).
   "latitude", "longitude", "apn", "county",

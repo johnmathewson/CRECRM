@@ -1435,21 +1435,16 @@ function TenantLOIsView({ p }: { p: PropertyDetail }) {
   useEffect(() => { reload(); }, [reload]);
 
   const propertyDefaults = useMemo(() => ({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    available_sf: (p as any).availableSf ?? null,
-    sqft: p.sqft ?? null,
-    lease_rate: p.leaseRate ?? null,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    lease_type: (p as any).leaseType ?? null,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    free_rent_months: (p as any).freeRentMonths ?? null,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ti_allowance_per_sf: (p as any).tiAllowancePerSf ?? null,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    true_owner_name: (p as any).trueOwnerName ?? null,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    owner_name_raw: (p as any).ownerNameRaw ?? null,
-    address: p.address ?? null,
+    available_sf: p.availableSf,
+    sqft: p.sqft,
+    lease_rate: p.leaseRate,
+    lease_type: p.leaseType,
+    free_rent_months: p.freeRentMonths,
+    ti_allowance_per_sf: p.tiAllowancePerSf,
+    operating_expenses_per_sf: p.operatingExpensesPerSf,
+    true_owner_name: p.trueOwnerName,
+    owner_name_raw: p.ownerNameRaw,
+    address: p.address,
   }), [p]);
 
   return (

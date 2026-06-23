@@ -45,6 +45,7 @@ interface PropertyDefaults {
   lease_type: string | null;
   free_rent_months: number | null;
   ti_allowance_per_sf: number | null;
+  operating_expenses_per_sf: number | null;
   true_owner_name: string | null;
   owner_name_raw: string | null;
   address: string | null;
@@ -165,6 +166,16 @@ export function TenantLOIDialog({
       propertyDefaults.free_rent_months
         ? String(propertyDefaults.free_rent_months)
         : "0"
+    );
+
+    // Prefill NNN from the property's operating-expense estimate.
+    // Without this the broker has to remember to enter it on every
+    // LOI, and an empty value silently strips the NNN columns from
+    // §7 of the rendered PDF — the bug John just flagged.
+    setNnnPerSf(
+      propertyDefaults.operating_expenses_per_sf
+        ? String(propertyDefaults.operating_expenses_per_sf)
+        : ""
     );
 
     if (

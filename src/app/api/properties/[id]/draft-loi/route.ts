@@ -237,10 +237,15 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           })
           .filter((r): r is RampPeriod => r !== null)
       : [],
+    // NNN $/SF/yr — body value wins; if empty fall back to the
+    // property's stored operating-expense estimate so an LOI never
+    // silently ships without the NNN line when one is on file.
     nnnPerSf:
       body.nnn_per_sf !== undefined && body.nnn_per_sf !== null && body.nnn_per_sf !== ""
         ? Number(body.nnn_per_sf)
-        : null,
+        : p.operating_expenses_per_sf
+          ? Number(p.operating_expenses_per_sf)
+          : null,
     leaseType: normalizeLeaseType(body.lease_type || p.lease_type),
     freeRentMonths: Number(body.free_rent_months ?? p.free_rent_months ?? 0),
     tiDescription: buildTIDescription(p, body.ti_description),
