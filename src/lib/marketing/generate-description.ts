@@ -118,6 +118,23 @@ function buildUserMessage(ctx: MarketingPropertyContext): string {
       market_name: p.market_name,
       submarket: p.submarket,
       county: p.county,
+      // Lease-specific facts — populated only on for-lease properties.
+      // Surfaced to the model so the lease-mode addendum has the data
+      // it needs to write tenant-facing copy.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      lease_type: (p as any).lease_type,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      available_sf: (p as any).available_sf,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      divisible_to_sf: (p as any).divisible_to_sf,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      lease_term_months: (p as any).lease_term_months,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ti_allowance_per_sf: (p as any).ti_allowance_per_sf,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      free_rent_months: (p as any).free_rent_months,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      permitted_uses: (p as any).permitted_uses,
     },
     null,
     2
@@ -159,12 +176,97 @@ function buildUserMessage(ctx: MarketingPropertyContext): string {
   return lines.join("\n");
 }
 
+/**
+ * Lease-mode addendum stacked on top of the base system prompt when
+ * the property is for lease. The base prompt is sale-oriented
+ * (investor / owner-user / cap rate framing); leasing copy speaks
+ * to TENANTS, not buyers. Different audience, different language,
+ * different forbidden words.
+ *
+ * Append-only — the base prompt's "never sound like marketing fluff"
+ * rules and the JSON schema still apply.
+ */
+const LEASE_MODE_ADDENDUM = `
+
+═════════════════════════════════════════════════════════════════════
+LEASE-MODE OVERRIDES (transaction_type = "lease")
+═════════════════════════════════════════════════════════════════════
+
+This property is offered for LEASE, not sale. Your audience is
+TENANTS (or their brokers) — businesses looking for space — not
+investors. Adjust framing accordingly.
+
+NEVER USE IN LEASE COPY (the sale-side prompt above forbids many of
+these already; the additional ones below are lease-specific):
+- "Owner-user", "investor", "investment opportunity", "cap rate",
+  "yield", "exit", "resale", "buyer pool", "stabilized value",
+  "value-add through acquisition" — these are all buyer language
+- Sale-deal mechanics: "asking price", "offer price", "1031 exchange",
+  "fee simple", "subject to inspection"
+
+USE IN LEASE COPY:
+- TENANT-oriented framing: "space for", "operator", "tenant",
+  "lease term", "buildout", "TI allowance", "move-in"
+- USE CASES: what businesses fit the space (restaurant, retail,
+  office, medical, light industrial)
+- BUILDOUT FLEXIBILITY: divisibility, vanilla shell vs second-gen,
+  TI allowance, white-box condition
+- LOCATION FOR TENANT: traffic counts, anchor co-tenants, daytime
+  population, drive-time access — not "investment-grade location"
+- TERM AND ECONOMICS: lease type (NNN / gross / modified), term,
+  rate per SF — only when the data exists. Do NOT speculate.
+- PERMITTED USES: what the lease allows (when permitted_uses is set)
+
+SCHEMA OVERRIDES for lease mode:
+
+- "headline": building-led, tenant-oriented. Examples:
+  "12,000 SF Anchor Space — Liberty Square, Merrillville"
+  "1,200-4,800 SF Retail Suites — High-Traffic Broadway Corridor"
+  "Single-Tenant Industrial Flex — 30,000 SF Available — Merrillville"
+  Do NOT lead with rate. Do NOT include "$X/SF" in the headline.
+
+- "description": Para 1: space + location + the headline use case.
+  Para 2: buildout flexibility / divisibility / use cases / TI.
+  Para 3 (optional): traffic / co-tenant / area context.
+  Last sentence: soft tour CTA.
+
+- "investment_highlights": these are LEASE / TENANT highlights, not
+  investor highlights. THESIS-level bullets for a tenant: why this
+  space fits a real operation. Examples:
+    "Divisible from 4,800 SF down to 1,200 SF — fits range of operators"
+    "Anchor co-tenant traffic — proven destination retail draws"
+    "Drive-up frontage on Broadway — strong visibility for retail"
+    "TI allowance available for vanilla buildout — reduces tenant cash-in"
+    "Second-generation restaurant condition — saves $40-60/SF on buildout"
+  FORBIDDEN (same as sale mode plus): "cap rate", "yield",
+  "investor", "owner-user", "exit", anything sale-mechanics.
+
+- "highlights": PHYSICAL / configuration bullets — what the space IS.
+  Examples: "Vanilla shell white-boxed", "Drive-thru capable",
+  "Three-phase 400-amp service", "12-ft clear height", "Open floor
+  plan with two ADA restrooms".
+
+- "observations": Same — internal flags about gaps the broker should
+  fill before going wide. E.g. "TI allowance not specified — tenants
+  ask this on first contact", "Lease term not specified — most retail
+  tenants want a 5+5+5".
+
+The output schema is the same JSON. Same rules about no markdown
+fences and no preamble. Only the framing changes.
+`;
+
 export async function generateDescription(ctx: MarketingPropertyContext): Promise<GeneratedDescription> {
   const userMessage = buildUserMessage(ctx);
 
+  // Append the lease-mode addendum when the property is for lease.
+  // Keeps the base prompt clean for sale-mode (the common case) and
+  // makes the lease overrides obvious to maintainers.
+  const isLease = ctx.property.transaction_type === "lease";
+  const systemPrompt = isLease ? SYSTEM_PROMPT + LEASE_MODE_ADDENDUM : SYSTEM_PROMPT;
+
   const response = await callAnthropic({
     model: MODELS.SONNET,
-    system: SYSTEM_PROMPT,
+    system: systemPrompt,
     messages: [{ role: "user", content: userMessage }],
     maxTokens: 2048,
     temperature: 0.5,

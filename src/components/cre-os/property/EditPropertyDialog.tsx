@@ -71,7 +71,26 @@ interface FullPropertyRow {
   longitude: number | null;
   apn: string | null;
   county: string | null;
+  // Lease structure (surfaces only when transaction_type='lease')
+  lease_type: string | null;
+  available_sf: number | null;
+  divisible_to_sf: number | null;
+  lease_term_months: number | null;
+  ti_allowance_per_sf: number | null;
+  free_rent_months: number | null;
+  permitted_uses: string | null;
 }
+
+// Allowed lease structures — matches the CHECK constraint on
+// properties.lease_type. Keep in sync with the migration.
+const LEASE_TYPES = [
+  "NNN",
+  "modified_gross",
+  "industrial_gross",
+  "full_service",
+  "gross",
+  "absolute_net",
+];
 
 const ASSET_TYPES = [
   "retail", "office", "industrial", "hospitality",
@@ -129,6 +148,15 @@ export function EditPropertyDialog({ open, property, onClose }: Props) {
   const [longitude, setLongitude] = useState<number | null>(null);
   const [apn, setApn] = useState<string | null>(null);
   const [county, setCounty] = useState("");
+  // Lease structure — only relevant when transactionType==='lease'.
+  // Kept as strings for form-state ergonomics; coerced to number on save.
+  const [leaseType, setLeaseType] = useState("");
+  const [availableSf, setAvailableSf] = useState("");
+  const [divisibleToSf, setDivisibleToSf] = useState("");
+  const [leaseTermMonths, setLeaseTermMonths] = useState("");
+  const [tiAllowancePerSf, setTiAllowancePerSf] = useState("");
+  const [freeRentMonths, setFreeRentMonths] = useState("");
+  const [permittedUses, setPermittedUses] = useState("");
   const [busy, setBusy] = useState(false);
   const [hydrating, setHydrating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -181,6 +209,13 @@ export function EditPropertyDialog({ open, property, onClose }: Props) {
         setLongitude(p.longitude ?? null);
         setApn(p.apn ?? null);
         setCounty(p.county ?? "");
+        setLeaseType(p.lease_type ?? "");
+        setAvailableSf(p.available_sf ? String(p.available_sf) : "");
+        setDivisibleToSf(p.divisible_to_sf ? String(p.divisible_to_sf) : "");
+        setLeaseTermMonths(p.lease_term_months ? String(p.lease_term_months) : "");
+        setTiAllowancePerSf(p.ti_allowance_per_sf ? String(p.ti_allowance_per_sf) : "");
+        setFreeRentMonths(p.free_rent_months ? String(p.free_rent_months) : "");
+        setPermittedUses(p.permitted_uses ?? "");
       })
       .catch((err) => setError(err?.message || String(err)))
       .finally(() => setHydrating(false));
@@ -235,6 +270,16 @@ export function EditPropertyDialog({ open, property, onClose }: Props) {
         longitude: longitude,
         apn: apn,
         county: orNull(county),
+        // Lease structure — included regardless of transactionType so
+        // a sale-to-lease conversion preserves the data the broker
+        // already entered. They just stop rendering until lease again.
+        lease_type: orNull(leaseType),
+        available_sf: intOrNull(availableSf),
+        divisible_to_sf: intOrNull(divisibleToSf),
+        lease_term_months: intOrNull(leaseTermMonths),
+        ti_allowance_per_sf: num(tiAllowancePerSf),
+        free_rent_months: intOrNull(freeRentMonths),
+        permitted_uses: orNull(permittedUses),
       };
 
       const res = await fetch(`/api/properties/${property.id}`, {
@@ -371,25 +416,31 @@ export function EditPropertyDialog({ open, property, onClose }: Props) {
 
           <Section label="Pricing & size">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <Field label={transactionType === "lease" ? "Asking price (also)" : "Asking price"}>
-                <input
-                  inputMode="decimal"
-                  value={askingPrice}
-                  onChange={(e) => setAskingPrice(e.target.value)}
-                  placeholder="2400000"
-                  className={inputCls}
-                />
-              </Field>
-              <Field label="Lease rate $/SF/yr">
-                <input
-                  inputMode="decimal"
-                  value={leaseRate}
-                  onChange={(e) => setLeaseRate(e.target.value)}
-                  placeholder="24.50"
-                  className={inputCls}
-                />
-              </Field>
-              <Field label="Square feet">
+              {/* Asking price stays visible for both modes — some
+                  lease properties also have an asking price for the
+                  fee — but it's the secondary field on lease. */}
+              {transactionType === "sale" ? (
+                <Field label="Asking price">
+                  <input
+                    inputMode="decimal"
+                    value={askingPrice}
+                    onChange={(e) => setAskingPrice(e.target.value)}
+                    placeholder="2400000"
+                    className={inputCls}
+                  />
+                </Field>
+              ) : (
+                <Field label="Lease rate $/SF/yr">
+                  <input
+                    inputMode="decimal"
+                    value={leaseRate}
+                    onChange={(e) => setLeaseRate(e.target.value)}
+                    placeholder="24.50"
+                    className={inputCls}
+                  />
+                </Field>
+              )}
+              <Field label="Total SF">
                 <input
                   inputMode="numeric"
                   value={sqft}
@@ -398,17 +449,114 @@ export function EditPropertyDialog({ open, property, onClose }: Props) {
                   className={inputCls}
                 />
               </Field>
-              <Field label="Acreage">
-                <input
-                  inputMode="decimal"
-                  value={acreage}
-                  onChange={(e) => setAcreage(e.target.value)}
-                  placeholder="2.4"
-                  className={inputCls}
-                />
-              </Field>
+              {transactionType === "lease" ? (
+                <Field label="Available SF">
+                  <input
+                    inputMode="numeric"
+                    value={availableSf}
+                    onChange={(e) => setAvailableSf(e.target.value)}
+                    placeholder="4200"
+                    className={inputCls}
+                  />
+                </Field>
+              ) : (
+                <Field label="Acreage">
+                  <input
+                    inputMode="decimal"
+                    value={acreage}
+                    onChange={(e) => setAcreage(e.target.value)}
+                    placeholder="2.4"
+                    className={inputCls}
+                  />
+                </Field>
+              )}
+              {transactionType === "lease" ? (
+                <Field label="Asking sale price (optional)">
+                  <input
+                    inputMode="decimal"
+                    value={askingPrice}
+                    onChange={(e) => setAskingPrice(e.target.value)}
+                    placeholder="—"
+                    className={inputCls}
+                  />
+                </Field>
+              ) : (
+                <Field label="Lease rate (also)">
+                  <input
+                    inputMode="decimal"
+                    value={leaseRate}
+                    onChange={(e) => setLeaseRate(e.target.value)}
+                    placeholder="—"
+                    className={inputCls}
+                  />
+                </Field>
+              )}
             </div>
           </Section>
+
+          {/* Leasing structure — only renders for lease properties.
+              All fields are nullable; broker fills what they have. */}
+          {transactionType === "lease" && (
+            <Section label="Leasing structure" hint="Visible because transaction type is lease. Fields persist across mode switches.">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <Field label="Lease type">
+                  <select value={leaseType} onChange={(e) => setLeaseType(e.target.value)} className={inputCls}>
+                    <option value="">—</option>
+                    {LEASE_TYPES.map((t) => (
+                      <option key={t} value={t}>{t.replace("_", " ")}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Divisible to (SF)">
+                  <input
+                    inputMode="numeric"
+                    value={divisibleToSf}
+                    onChange={(e) => setDivisibleToSf(e.target.value)}
+                    placeholder="1500"
+                    className={inputCls}
+                  />
+                </Field>
+                <Field label="Term (months)">
+                  <input
+                    inputMode="numeric"
+                    value={leaseTermMonths}
+                    onChange={(e) => setLeaseTermMonths(e.target.value)}
+                    placeholder="60"
+                    className={inputCls}
+                  />
+                </Field>
+                <Field label="Free rent (months)">
+                  <input
+                    inputMode="numeric"
+                    value={freeRentMonths}
+                    onChange={(e) => setFreeRentMonths(e.target.value)}
+                    placeholder="3"
+                    className={inputCls}
+                  />
+                </Field>
+                <Field label="TI allowance $/SF">
+                  <input
+                    inputMode="decimal"
+                    value={tiAllowancePerSf}
+                    onChange={(e) => setTiAllowancePerSf(e.target.value)}
+                    placeholder="25"
+                    className={inputCls}
+                  />
+                </Field>
+              </div>
+              <div className="mt-3">
+                <Field label="Permitted uses" hint="Often the first thing retail tenants ask. Freeform — what the lease allows.">
+                  <textarea
+                    value={permittedUses}
+                    onChange={(e) => setPermittedUses(e.target.value)}
+                    rows={2}
+                    placeholder="e.g. restaurant, retail, personal services, professional office — no automotive, no smoke shops."
+                    className={`${inputCls} resize-y`}
+                  />
+                </Field>
+              </div>
+            </Section>
+          )}
 
           <Section label="Financials" hint="Cap rate and occupancy entered as percents (7.5, 92). Stored as decimals (0.075, 0.92).">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

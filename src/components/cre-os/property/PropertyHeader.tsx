@@ -98,7 +98,11 @@ export function PropertyHeader({ p }: { p: PropertyDetail }) {
               </span>
             )}
             <span className="ml-1">
-              <LifecycleAction propertyId={p.id} currentStatus={p.status} />
+              <LifecycleAction
+                propertyId={p.id}
+                currentStatus={p.status}
+                transactionType={p.transactionType}
+              />
             </span>
           </div>
 

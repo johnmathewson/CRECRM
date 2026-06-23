@@ -31,7 +31,8 @@ interface NextTransition {
   primaryBg: string;
 }
 
-function nextTransition(status: string | null): NextTransition | null {
+function nextTransition(status: string | null, transactionType: string | null): NextTransition | null {
+  const isLease = transactionType === "lease";
   switch (status) {
     case "prospect":
     case "idea":
@@ -61,17 +62,21 @@ function nextTransition(status: string | null): NextTransition | null {
     case "listed":
       return {
         to: "under_contract",
-        buttonLabel: "Mark Under Contract",
-        modalTitle: "Move to Under Contract",
-        modalBody: "Records that an offer has been accepted. Stamps the UC date and moves the property to the Under Contract pipeline column.",
+        buttonLabel: isLease ? "Mark LOI Signed" : "Mark Under Contract",
+        modalTitle: isLease ? "Move to LOI Signed" : "Move to Under Contract",
+        modalBody: isLease
+          ? "Records that an LOI has been signed by the tenant. Stamps the LOI date and moves the property into lease-drafting."
+          : "Records that an offer has been accepted. Stamps the UC date and moves the property to the Under Contract pipeline column.",
         primaryBg: "border-teal-400/50 bg-teal-400/[0.12] hover:bg-teal-400/[0.22] text-teal-300",
       };
     case "under_contract":
       return {
         to: "closed",
-        buttonLabel: "Close Deal",
-        modalTitle: "Close this deal",
-        modalBody: "Marks the property as sold/closed. Stamps the close date. The property moves to the Closed pipeline column.",
+        buttonLabel: isLease ? "Mark Lease Signed" : "Close Deal",
+        modalTitle: isLease ? "Mark lease signed" : "Close this deal",
+        modalBody: isLease
+          ? "Marks the lease as fully executed. Stamps the close date. The property moves to the Closed pipeline column."
+          : "Marks the property as sold/closed. Stamps the close date. The property moves to the Closed pipeline column.",
         primaryBg: "border-teal-400/50 bg-teal-400/[0.12] hover:bg-teal-400/[0.22] text-teal-300",
       };
     default:
@@ -89,9 +94,13 @@ interface ReadinessGap {
 export function LifecycleAction({
   propertyId,
   currentStatus,
+  transactionType = null,
 }: {
   propertyId: string;
   currentStatus: string | null;
+  /** "sale" | "lease" — drives lease-specific transition labels
+   *  ("Mark LOI Signed" instead of "Mark Under Contract" for leases). */
+  transactionType?: string | null;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -100,7 +109,7 @@ export function LifecycleAction({
   const [gaps, setGaps] = useState<ReadinessGap[] | null>(null);
   const [, startTransition] = useTransition();
 
-  const trans = nextTransition(currentStatus);
+  const trans = nextTransition(currentStatus, transactionType);
   if (!trans) return null; // closed / unknown state — no further forward action
 
   const isGoLive = trans.to === "listed";

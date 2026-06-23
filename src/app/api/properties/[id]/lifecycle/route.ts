@@ -62,17 +62,45 @@ interface ReadinessGap {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function checkListingReadiness(p: any): ReadinessGap[] {
   const gaps: ReadinessGap[] = [];
-  if (!p.asking_price || Number(p.asking_price) <= 0) {
-    gaps.push({ key: "asking_price", label: "Asking price", severity: "block", message: "Set the asking price before listing — buyers can't engage without it." });
+  const isLease = p.transaction_type === "lease";
+
+  // Money fields — different per mode. Sale needs asking_price, lease
+  // needs lease_rate. Either way the listing can't go live without
+  // an economic anchor.
+  if (isLease) {
+    if (!p.lease_rate || Number(p.lease_rate) <= 0) {
+      gaps.push({ key: "lease_rate", label: "Lease rate", severity: "block", message: "Set the lease rate ($/SF/yr) before listing — tenants can't engage without it." });
+    }
+    if (!p.available_sf || Number(p.available_sf) <= 0) {
+      gaps.push({ key: "available_sf", label: "Available SF", severity: "block", message: "Set the available SF — tenants need to know how much space is on the table." });
+    }
+    if (!p.lease_type) {
+      gaps.push({ key: "lease_type", label: "Lease type", severity: "warn", message: "Lease type (NNN / gross / modified) is one of the first things a tenant or their broker asks." });
+    }
+  } else {
+    if (!p.asking_price || Number(p.asking_price) <= 0) {
+      gaps.push({ key: "asking_price", label: "Asking price", severity: "block", message: "Set the asking price before listing — buyers can't engage without it." });
+    }
   }
+
+  // Marketing copy + assets — same for both modes.
   if (!p.headline || String(p.headline).trim().length < 6) {
     gaps.push({ key: "headline", label: "Headline", severity: "block", message: "Add a headline so the listing has a marketable hook." });
   }
   if (!p.description || String(p.description).trim().length < 80) {
     gaps.push({ key: "description", label: "Description", severity: "block", message: "Generate or write a description before going live." });
   }
+  // The "investment_highlights" column holds tenant-side highlights on
+  // lease properties (same column, different label per mode).
   if (!Array.isArray(p.investment_highlights) || p.investment_highlights.length < 3) {
-    gaps.push({ key: "investment_highlights", label: "Investment highlights", severity: "warn", message: "At least 3 investment highlights help the flyer carry weight." });
+    gaps.push({
+      key: "investment_highlights",
+      label: isLease ? "Lease highlights" : "Investment highlights",
+      severity: "warn",
+      message: isLease
+        ? "At least 3 lease highlights help the flyer carry weight with tenant decisions."
+        : "At least 3 investment highlights help the flyer carry weight.",
+    });
   }
   if (!Array.isArray(p.highlights) || p.highlights.length < 3) {
     gaps.push({ key: "highlights", label: "Property highlights", severity: "warn", message: "Property highlights help round out the marketing assets." });
@@ -115,7 +143,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     .select(
       "id, name, status, pipeline_stage, asset_type, asking_price, headline, description, " +
         "highlights, investment_highlights, images, listed_at, prospecting_started_at, " +
-        "pitched_at, under_contract_at, closed_at, publish_to_website"
+        "pitched_at, under_contract_at, closed_at, publish_to_website, " +
+        // For-lease specific fields used by the readiness check.
+        "transaction_type, lease_rate, available_sf, lease_type"
     )
     .eq("id", params.id)
     .eq("organization_id", ORG_ID)

@@ -481,35 +481,69 @@ function drawInvestmentHighlights(doc: jsPDF, ctx: MarketingPropertyContext) {
   doc.addPage();
   paintWhitePage(doc);
   const p = ctx.property;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const px = p as any;
+  const isLease = px.transaction_type === "lease";
 
   setFill(doc, C.bronze);
   doc.rect(MARGIN_X, MARGIN_TOP - 16, 48, 1.5, "F");
-  drawSectionTitle(doc, "Investment Highlights", MARGIN_X, MARGIN_TOP + 6);
+  drawSectionTitle(doc, isLease ? "Lease Highlights" : "Investment Highlights", MARGIN_X, MARGIN_TOP + 6);
 
   let cy = MARGIN_TOP + 56;
 
-  // Big number callout strip: asking price + cap rate
+  // Big number callout strip — different anchors per mode.
+  // Sale: asking price + cap rate. Lease: lease rate + available SF.
   const calloutY = cy;
-  setText(doc, C.teal);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(34);
-  doc.text(fmtMoney(p.asking_price ? Number(p.asking_price) : null), MARGIN_X, calloutY);
 
-  if (p.cap_rate) {
-    setText(doc, C.bronze);
+  if (isLease) {
+    const rateValue = p.lease_rate ? "$" + Number(p.lease_rate).toFixed(2) + "/SF" : "—";
+    setText(doc, C.teal);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(28);
-    doc.text(fmtPct(Number(p.cap_rate), 2), MARGIN_X + 220, calloutY);
+    doc.setFontSize(34);
+    doc.text(rateValue, MARGIN_X, calloutY);
+
+    if (px.available_sf) {
+      setText(doc, C.bronze);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(28);
+      doc.text(fmtSF(px.available_sf) + " SF", MARGIN_X + 220, calloutY);
+      setText(doc, C.inkSoft);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7.5);
+      doc.text("AVAILABLE", MARGIN_X + 220, calloutY + 14, { charSpace: 1 });
+    }
+
     setText(doc, C.inkSoft);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(7.5);
-    doc.text("IN-PLACE CAP RATE", MARGIN_X + 220, calloutY + 14, { charSpace: 1 });
-  }
+    doc.text(
+      px.lease_type ? `LEASE RATE · ${String(px.lease_type).toUpperCase().replace(/_/g, " ")}` : "LEASE RATE",
+      MARGIN_X,
+      calloutY + 14,
+      { charSpace: 1 }
+    );
+  } else {
+    setText(doc, C.teal);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(34);
+    doc.text(fmtMoney(p.asking_price ? Number(p.asking_price) : null), MARGIN_X, calloutY);
 
-  setText(doc, C.inkSoft);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(7.5);
-  doc.text("ASKING PRICE", MARGIN_X, calloutY + 14, { charSpace: 1 });
+    if (p.cap_rate) {
+      setText(doc, C.bronze);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(28);
+      doc.text(fmtPct(Number(p.cap_rate), 2), MARGIN_X + 220, calloutY);
+      setText(doc, C.inkSoft);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7.5);
+      doc.text("IN-PLACE CAP RATE", MARGIN_X + 220, calloutY + 14, { charSpace: 1 });
+    }
+
+    setText(doc, C.inkSoft);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.5);
+    doc.text("ASKING PRICE", MARGIN_X, calloutY + 14, { charSpace: 1 });
+  }
 
   cy = calloutY + 44;
   setFill(doc, C.bronze);

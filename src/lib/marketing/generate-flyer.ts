@@ -234,33 +234,62 @@ function drawIdentity(doc: jsPDF, ctx: MarketingPropertyContext): number {
 
 function drawStatsStrip(doc: jsPDF, ctx: MarketingPropertyContext, y: number): number {
   const p = ctx.property;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const px = p as any;
+  const isLease = px.transaction_type === "lease";
   const isVacant = !p.noi || (p.occupancy_pct !== null && Number(p.occupancy_pct) === 0);
 
-  // Build the three slots intelligently based on what we have.
-  // Slot 1: ALWAYS asking price (the headline number)
-  // Slot 2: For income — cap rate. For vacant — acreage. For lease — rent/SF
-  // Slot 3: ALWAYS square footage (or land size)
+  // Build the three slots intelligently. For LEASE properties the
+  // slots tell a tenant story: lease rate, available SF, lease type.
+  // For SALE properties the slots tell an investor story: offering
+  // price, cap rate (or lot size), building size.
   type Slot = { label: string; value: string };
   const slots: Slot[] = [];
 
-  if (p.asking_price) {
-    slots.push({ label: "OFFERING PRICE", value: fmtMoney(Number(p.asking_price)) });
-  } else if (p.lease_rate) {
-    slots.push({ label: "LEASE RATE", value: "$" + Number(p.lease_rate).toFixed(2) + "/SF" });
-  }
-
-  if (!isVacant && p.cap_rate) {
-    slots.push({ label: "IN-PLACE CAP RATE", value: fmtPct(Number(p.cap_rate)) });
-  } else if (p.acreage) {
-    slots.push({ label: "LOT SIZE", value: Number(p.acreage).toFixed(2) + " AC" });
-  } else if (ctx.computed.pricePerSf) {
-    slots.push({ label: "PRICE PER SF", value: "$" + ctx.computed.pricePerSf.toFixed(2) });
-  }
-
-  if (p.sqft) {
-    slots.push({ label: "BUILDING SIZE", value: fmtSF(p.sqft) + " SF" });
-  } else if (p.acreage && slots[1]?.label !== "LOT SIZE") {
-    slots.push({ label: "LAND SIZE", value: Number(p.acreage).toFixed(2) + " AC" });
+  if (isLease) {
+    // LEASE-MODE: rate → available SF → lease type (or total SF)
+    if (p.lease_rate) {
+      slots.push({ label: "LEASE RATE", value: "$" + Number(p.lease_rate).toFixed(2) + "/SF" });
+    }
+    if (px.available_sf) {
+      const availableSf = Number(px.available_sf);
+      const divisible = px.divisible_to_sf ? Number(px.divisible_to_sf) : null;
+      slots.push({
+        label: "AVAILABLE",
+        value: divisible && divisible < availableSf
+          ? `${fmtSF(divisible)}–${fmtSF(availableSf)} SF`
+          : `${fmtSF(availableSf)} SF`,
+      });
+    } else if (p.sqft) {
+      slots.push({ label: "AVAILABLE", value: fmtSF(p.sqft) + " SF" });
+    }
+    if (px.lease_type) {
+      slots.push({ label: "LEASE TYPE", value: String(px.lease_type).toUpperCase().replace(/_/g, " ") });
+    } else if (px.lease_term_months) {
+      slots.push({ label: "TERM", value: `${px.lease_term_months} MO` });
+    } else if (p.sqft && (!px.available_sf || Number(px.available_sf) === Number(p.sqft))) {
+      // No room for lease type / term → fall back to total building size
+      slots.push({ label: "BUILDING SIZE", value: fmtSF(p.sqft) + " SF" });
+    }
+  } else {
+    // SALE-MODE: original logic — offering price → cap rate / lot → building size
+    if (p.asking_price) {
+      slots.push({ label: "OFFERING PRICE", value: fmtMoney(Number(p.asking_price)) });
+    } else if (p.lease_rate) {
+      slots.push({ label: "LEASE RATE", value: "$" + Number(p.lease_rate).toFixed(2) + "/SF" });
+    }
+    if (!isVacant && p.cap_rate) {
+      slots.push({ label: "IN-PLACE CAP RATE", value: fmtPct(Number(p.cap_rate)) });
+    } else if (p.acreage) {
+      slots.push({ label: "LOT SIZE", value: Number(p.acreage).toFixed(2) + " AC" });
+    } else if (ctx.computed.pricePerSf) {
+      slots.push({ label: "PRICE PER SF", value: "$" + ctx.computed.pricePerSf.toFixed(2) });
+    }
+    if (p.sqft) {
+      slots.push({ label: "BUILDING SIZE", value: fmtSF(p.sqft) + " SF" });
+    } else if (p.acreage && slots[1]?.label !== "LOT SIZE") {
+      slots.push({ label: "LAND SIZE", value: Number(p.acreage).toFixed(2) + " AC" });
+    }
   }
 
   if (slots.length === 0) return y;

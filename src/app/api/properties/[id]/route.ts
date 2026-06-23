@@ -24,6 +24,10 @@ const PATCHABLE_FIELDS = new Set([
   "asset_type", "transaction_type", "status", "your_role",
   "asking_price", "lease_rate", "sqft", "acreage", "year_built",
   "parking_spaces", "parking_ratio", "zoning",
+  // For-lease structure — surfaces via the Edit dialog when
+  // transaction_type='lease'. See migration add_lease_specific_property_columns.
+  "lease_type", "available_sf", "divisible_to_sf", "lease_term_months",
+  "ti_allowance_per_sf", "free_rent_months", "suite_breakdown", "permitted_uses",
   // Location anchoring — for properties without a clean street
   // address. Set via PropertyLocationPicker (click-to-pin map).
   "latitude", "longitude", "apn", "county",
