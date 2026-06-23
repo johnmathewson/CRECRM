@@ -113,24 +113,107 @@ async function fetchAttachmentBuffers(accessToken: string, messageId: string): P
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+/**
+ * Normalize a US street address for comparison. Strips direction
+ * prefixes (N/S/E/W and their long forms) and normalizes common
+ * street-type abbreviations so "8474 South Colorado Street" and
+ * "8474 Colorado St" produce the same fuzzy-match key.
+ */
+function normalizeStreet(s: string | null | undefined): string {
+  if (!s) return "";
+  return s
+    .toLowerCase()
+    .trim()
+    // Strip the direction word right after the house number
+    .replace(/^(\d+)\s+(n|s|e|w|north|south|east|west|ne|nw|se|sw)\s+/i, "$1 ")
+    // Normalize street-type words
+    .replace(/\bstreet\b/g, "st")
+    .replace(/\bavenue\b/g, "ave")
+    .replace(/\bboulevard\b/g, "blvd")
+    .replace(/\bdrive\b/g, "dr")
+    .replace(/\bcourt\b/g, "ct")
+    .replace(/\blane\b/g, "ln")
+    .replace(/\bplace\b/g, "pl")
+    .replace(/\broad\b/g, "rd")
+    .replace(/\bhighway\b/g, "hwy")
+    .replace(/\bparkway\b/g, "pkwy")
+    .replace(/[.,]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * From a candidate list, pick the property that John is most likely
+ * to want the leads attached to. Preference order:
+ *   1. Property with a non-null crexi_listing_id (we wired this up)
+ *   2. Property where your_role = 'listing_broker' (John's listings)
+ *   3. Property whose status is not 'prospect' (any non-cold record)
+ *   4. Whatever was first
+ *
+ * This is the fix for the prior "prefer the warm one" comment that
+ * was followed by `data.find(() => true)` — which returned the
+ * first row regardless. The 19 Portage leads landed on a
+ * status=prospect record because of that bug.
+ */
+function pickBestCandidate<T extends {
+  id: string;
+  name: string;
+  crexi_listing_id?: string | null;
+  your_role?: string | null;
+  status?: string | null;
+}>(rows: T[]): T | null {
+  if (!rows || rows.length === 0) return null;
+  const withCrexi = rows.find((r) => r.crexi_listing_id);
+  if (withCrexi) return withCrexi;
+  const listingBroker = rows.find((r) => r.your_role === "listing_broker");
+  if (listingBroker) return listingBroker;
+  const nonProspect = rows.find((r) => r.status && r.status !== "prospect");
+  if (nonProspect) return nonProspect;
+  return rows[0];
+}
+
 async function matchProperty(supabase: any, parsed: { propertyName: string | null; propertyAddress: string | null }, filename: string): Promise<{ id: string; name: string } | null> {
-  // Strategy 1: address from Detail sheet (most reliable)
-  // The address comes through as "7880-7896 Broadway, Merrillville, Lake, IN 46410"
-  // Try to match against properties.address with prefix matching.
+  // Strategy 1: address from Detail sheet (most reliable).
+  // Compare on the normalized street (direction stripped, abbreviations
+  // normalized) so "8474 South Colorado Street" matches "8474 Colorado St".
   if (parsed.propertyAddress) {
     const streetPart = parsed.propertyAddress.split(",")[0]?.trim();
     if (streetPart) {
-      // Try exact-ish street match first
-      const { data } = await supabase
+      const targetKey = normalizeStreet(streetPart);
+
+      // First try a tight prefix match on the raw value (covers the
+      // happy path with no normalization needed).
+      const { data: tight } = await supabase
         .from("properties")
-        .select("id, name, address")
+        .select("id, name, address, crexi_listing_id, your_role, status")
         .eq("organization_id", ORG_ID)
         .ilike("address", `${streetPart}%`)
-        .limit(5);
-      if (data && data.length > 0) {
-        // Prefer the warm one (not status='prospect')
-        const warm = data.find((p: { id: string; name: string; address: string }) => true);
-        return { id: warm.id as string, name: warm.name as string };
+        .limit(10);
+      const tightPick = pickBestCandidate(tight ?? []);
+      if (tightPick) return { id: tightPick.id, name: tightPick.name };
+
+      // Loose pass — try the bare house number prefix and compare
+      // normalized streets in JS. Handles "South" prefix, "Street"
+      // spelled out vs "St", etc.
+      const houseNum = streetPart.match(/^\d+/)?.[0];
+      if (houseNum) {
+        const { data: loose } = await supabase
+          .from("properties")
+          .select("id, name, address, crexi_listing_id, your_role, status")
+          .eq("organization_id", ORG_ID)
+          .ilike("address", `${houseNum}%`)
+          .limit(20);
+        const normalizedMatches = (loose ?? []).filter(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (p: any) => {
+            const candKey = normalizeStreet(p.address);
+            // Either side's normalized key contains the other's — handles
+            // the case where one record has a longer/shorter version.
+            return candKey.startsWith(targetKey) || targetKey.startsWith(candKey);
+          }
+        );
+        const loosePick = pickBestCandidate(normalizedMatches);
+        if (loosePick) return { id: loosePick.id, name: loosePick.name };
       }
     }
   }
@@ -142,7 +225,6 @@ async function matchProperty(supabase: any, parsed: { propertyName: string | nul
   ].filter(Boolean) as string[];
 
   for (const candidate of candidates) {
-    // Strip common suffix words ("Retail Center", "Hotel") for fuzzier match
     const variants = new Set<string>([
       candidate,
       candidate.replace(/\s+(Retail Center|Office Building|Industrial Park|Shopping Center)$/i, ""),
@@ -153,13 +235,12 @@ async function matchProperty(supabase: any, parsed: { propertyName: string | nul
     for (const v of Array.from(variants)) {
       const { data } = await supabase
         .from("properties")
-        .select("id, name")
+        .select("id, name, crexi_listing_id, your_role, status")
         .eq("organization_id", ORG_ID)
         .ilike("name", `${v}%`)
-        .limit(5);
-      if (data && data.length > 0) {
-        return { id: data[0].id as string, name: data[0].name as string };
-      }
+        .limit(10);
+      const pick = pickBestCandidate(data ?? []);
+      if (pick) return { id: pick.id, name: pick.name };
     }
   }
 
