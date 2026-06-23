@@ -56,7 +56,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { generateLOI, type LOIInput } from "@/lib/marketing/generate-loi";
+import { generateLOI, type LOIInput, type RampPeriod } from "@/lib/marketing/generate-loi";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -210,6 +210,37 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     renewalNoticeDays: Number(body.renewal_notice_days ?? 90),
     baseRentPerSf,
     annualEscalationPct: Number(body.annual_escalation_pct ?? 2.5),
+    rampPeriods: Array.isArray(body.ramp_periods)
+      ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (body.ramp_periods as any[])
+          .map((r): RampPeriod | null => {
+            const monthsStart = Number(r?.monthsStart ?? r?.months_start);
+            const monthsEnd = Number(r?.monthsEnd ?? r?.months_end);
+            const baseRentPerSf = Number(r?.baseRentPerSf ?? r?.base_rent_per_sf);
+            if (
+              !Number.isFinite(monthsStart) ||
+              !Number.isFinite(monthsEnd) ||
+              !Number.isFinite(baseRentPerSf) ||
+              monthsStart < 1 ||
+              monthsEnd < monthsStart ||
+              monthsEnd > 12 ||
+              baseRentPerSf <= 0
+            ) {
+              return null;
+            }
+            return {
+              label: String(r?.label ?? `Months ${monthsStart}-${monthsEnd}`),
+              monthsStart,
+              monthsEnd,
+              baseRentPerSf,
+            };
+          })
+          .filter((r): r is RampPeriod => r !== null)
+      : [],
+    nnnPerSf:
+      body.nnn_per_sf !== undefined && body.nnn_per_sf !== null && body.nnn_per_sf !== ""
+        ? Number(body.nnn_per_sf)
+        : null,
     leaseType: normalizeLeaseType(body.lease_type || p.lease_type),
     freeRentMonths: Number(body.free_rent_months ?? p.free_rent_months ?? 0),
     tiDescription: buildTIDescription(p, body.ti_description),
@@ -285,6 +316,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       renewal_notice_days: loiInput.renewalNoticeDays,
       lease_type: loiInput.leaseType,
       free_rent_months: loiInput.freeRentMonths,
+      ramp_periods: loiInput.rampPeriods ?? [],
+      nnn_per_sf: loiInput.nnnPerSf ?? null,
       ti_description: loiInput.tiDescription,
       security_deposit_months: loiInput.securityDepositMonths,
       personal_guarantee: loiInput.personalGuarantee,

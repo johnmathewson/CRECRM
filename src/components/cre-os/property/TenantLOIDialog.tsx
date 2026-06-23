@@ -106,11 +106,17 @@ export function TenantLOIDialog({
   const [baseRentPerSf, setBaseRentPerSf] = useState("");
   const [termYears, setTermYears] = useState("5");
   const [commencementDate, setCommencementDate] = useState("");
-  const [annualEscalationPct, setAnnualEscalationPct] = useState("2.5");
+  const [annualEscalationPct, setAnnualEscalationPct] = useState("3.5");
   const [renewalOptionsCount, setRenewalOptionsCount] = useState("2");
   const [renewalTermYears, setRenewalTermYears] = useState("3");
   const [leaseType, setLeaseType] = useState("NNN");
   const [freeRentMonths, setFreeRentMonths] = useState("0");
+  const [nnnPerSf, setNnnPerSf] = useState("");
+  // Ramp/discount periods for Year 1. Stored as strings so the inputs
+  // are ergonomic; coerced on submit. Most LOIs have 0–2 ramps.
+  const [rampPeriods, setRampPeriods] = useState<
+    { label: string; monthsStart: string; monthsEnd: string; baseRentPerSf: string }[]
+  >([]);
   const [tiDescription, setTiDescription] = useState("");
   const [securityDepositMonths, setSecurityDepositMonths] = useState("1");
   const [personalGuarantee, setPersonalGuarantee] = useState(true);
@@ -239,6 +245,24 @@ export function TenantLOIDialog({
           renewal_term_years: Number(renewalTermYears),
           lease_type: leaseType,
           free_rent_months: Number(freeRentMonths),
+          nnn_per_sf: nnnPerSf.trim() === "" ? null : Number(nnnPerSf),
+          ramp_periods: rampPeriods
+            .map((r) => ({
+              label: r.label.trim() || `Months ${r.monthsStart}-${r.monthsEnd}`,
+              monthsStart: Number(r.monthsStart),
+              monthsEnd: Number(r.monthsEnd),
+              baseRentPerSf: Number(r.baseRentPerSf),
+            }))
+            .filter(
+              (r) =>
+                Number.isFinite(r.monthsStart) &&
+                Number.isFinite(r.monthsEnd) &&
+                Number.isFinite(r.baseRentPerSf) &&
+                r.baseRentPerSf > 0 &&
+                r.monthsStart >= 1 &&
+                r.monthsEnd >= r.monthsStart &&
+                r.monthsEnd <= 12
+            ),
           ti_description: tiDescription,
           security_deposit_months: Number(securityDepositMonths),
           personal_guarantee: personalGuarantee,
@@ -344,6 +368,10 @@ export function TenantLOIDialog({
               setLeaseType={setLeaseType}
               freeRentMonths={freeRentMonths}
               setFreeRentMonths={setFreeRentMonths}
+              nnnPerSf={nnnPerSf}
+              setNnnPerSf={setNnnPerSf}
+              rampPeriods={rampPeriods}
+              setRampPeriods={setRampPeriods}
               tiDescription={tiDescription}
               setTiDescription={setTiDescription}
               securityDepositMonths={securityDepositMonths}
@@ -525,6 +553,12 @@ interface TermsFormProps {
   setLeaseType: (v: string) => void;
   freeRentMonths: string;
   setFreeRentMonths: (v: string) => void;
+  nnnPerSf: string;
+  setNnnPerSf: (v: string) => void;
+  rampPeriods: { label: string; monthsStart: string; monthsEnd: string; baseRentPerSf: string }[];
+  setRampPeriods: (
+    v: { label: string; monthsStart: string; monthsEnd: string; baseRentPerSf: string }[]
+  ) => void;
   tiDescription: string;
   setTiDescription: (v: string) => void;
   securityDepositMonths: string;
@@ -637,6 +671,108 @@ function TermsForm(p: TermsFormProps) {
         </div>
       </Section>
 
+      <Section label="Ramp / discount periods (Year 1)">
+        <div className="font-body text-[11.5px] text-cream-dim mb-1">
+          Add stepped/discount sub-periods within Year 1 — e.g. Months 1-6 at $9.50/SF, Months 7-12 at full
+          rate. Leave empty if Year 1 runs at the full base rent the whole way.
+        </div>
+        {p.rampPeriods.length === 0 ? (
+          <div className="font-body text-[12px] text-cream-subtle italic mb-2">
+            No ramp periods — Year 1 will be flat at the base rate.
+          </div>
+        ) : (
+          <div className="space-y-2 mb-2">
+            {p.rampPeriods.map((ramp, idx) => (
+              <div
+                key={idx}
+                className="grid grid-cols-[1fr_70px_70px_90px_auto] gap-2 items-end p-2 rounded border border-white/[0.06] bg-white/[0.02]"
+              >
+                <Field label="Label">
+                  <input
+                    value={ramp.label}
+                    onChange={(e) => {
+                      const next = [...p.rampPeriods];
+                      next[idx] = { ...next[idx], label: e.target.value };
+                      p.setRampPeriods(next);
+                    }}
+                    placeholder={`Months ${ramp.monthsStart || "1"}-${ramp.monthsEnd || "6"}`}
+                    className={inputCls}
+                  />
+                </Field>
+                <Field label="Mo start">
+                  <input
+                    inputMode="numeric"
+                    value={ramp.monthsStart}
+                    onChange={(e) => {
+                      const next = [...p.rampPeriods];
+                      next[idx] = { ...next[idx], monthsStart: e.target.value };
+                      p.setRampPeriods(next);
+                    }}
+                    className={inputCls}
+                  />
+                </Field>
+                <Field label="Mo end">
+                  <input
+                    inputMode="numeric"
+                    value={ramp.monthsEnd}
+                    onChange={(e) => {
+                      const next = [...p.rampPeriods];
+                      next[idx] = { ...next[idx], monthsEnd: e.target.value };
+                      p.setRampPeriods(next);
+                    }}
+                    className={inputCls}
+                  />
+                </Field>
+                <Field label="Base $/SF">
+                  <input
+                    inputMode="decimal"
+                    value={ramp.baseRentPerSf}
+                    onChange={(e) => {
+                      const next = [...p.rampPeriods];
+                      next[idx] = { ...next[idx], baseRentPerSf: e.target.value };
+                      p.setRampPeriods(next);
+                    }}
+                    className={inputCls}
+                  />
+                </Field>
+                <button
+                  type="button"
+                  onClick={() => {
+                    p.setRampPeriods(p.rampPeriods.filter((_, i) => i !== idx));
+                  }}
+                  className="px-2 py-1 rounded border border-white/[0.08] bg-white/[0.02] hover:bg-red-500/[0.10] hover:border-red-400/40 hover:text-red-300 font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle transition-colors self-end"
+                  title="Remove this period"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => {
+            const lastEnd = p.rampPeriods.length
+              ? Number(p.rampPeriods[p.rampPeriods.length - 1].monthsEnd) || 0
+              : 0;
+            const start = lastEnd + 1;
+            const end = Math.min(start + 5, 12);
+            p.setRampPeriods([
+              ...p.rampPeriods,
+              {
+                label: `Months ${start}-${end}`,
+                monthsStart: String(start),
+                monthsEnd: String(end),
+                baseRentPerSf: "",
+              },
+            ]);
+          }}
+          className="px-3 py-1.5 rounded border border-white/[0.08] bg-white/[0.02] hover:bg-coral-400/[0.10] hover:border-coral-400/40 font-mono text-[10px] uppercase tracking-eyebrow text-cream-dim hover:text-coral-300 transition-colors"
+        >
+          + Add ramp period
+        </button>
+      </Section>
+
       <Section label="Lease structure">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Lease type" hint="§8 — NNN/Gross/etc.">
@@ -644,7 +780,10 @@ function TermsForm(p: TermsFormProps) {
               {LEASE_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </Field>
-          <Field label="Free rent (months)" hint="§9">
+          <Field label="NNN $/SF/yr (optional)" hint="§7+§8 — pass-through estimate">
+            <input inputMode="decimal" value={p.nnnPerSf} onChange={(e) => p.setNnnPerSf(e.target.value)} placeholder="e.g. 4.00" className={inputCls} />
+          </Field>
+          <Field label="Free rent (months at $0)" hint="§9 — different from ramp discount">
             <input inputMode="numeric" value={p.freeRentMonths} onChange={(e) => p.setFreeRentMonths(e.target.value)} className={inputCls} />
           </Field>
           <Field label="Security deposit (months)" hint="§11 — of Year 1 Base Rent">

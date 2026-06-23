@@ -43,6 +43,17 @@
 import jsPDF from "jspdf";
 
 // ── Inputs ─────────────────────────────────────────────────────────────────
+
+/** Stepped/discounted rent during Year 1. After the last ramp ends,
+ *  Year 1 fills in at baseRentPerSf, then Year 2+ escalates off the
+ *  full base — NOT off the ramp rate. */
+export interface RampPeriod {
+  label: string;            // "Months 1-6"
+  monthsStart: number;      // 1
+  monthsEnd: number;        // 6
+  baseRentPerSf: number;    // 9.50
+}
+
 export interface LOIInput {
   // Property / premises
   propertyName: string;             // "Liberty Square Shopping Center"
@@ -80,8 +91,13 @@ export interface LOIInput {
   renewalOptionsCount: number;      // §6 — e.g. 2
   renewalTermYears: number;         // §6 — e.g. 3
   renewalNoticeDays: number;        // §6 — e.g. 90
-  baseRentPerSf: number;            // §7 Year 1
-  annualEscalationPct: number;      // §7 — e.g. 2.5 (percent, not decimal)
+  baseRentPerSf: number;            // §7 Year 1 "full" rate
+  annualEscalationPct: number;      // §7 — e.g. 3.5 (percent, not decimal)
+  /** Optional stepped/discount periods for Year 1. */
+  rampPeriods?: RampPeriod[];
+  /** Optional NNN/CAM/Tax pass-through ($/SF/yr). When present, §7
+   *  renders an NNN column + all-in monthly. Flat across the term. */
+  nnnPerSf?: number | null;
   leaseType: "NNN" | "Modified Gross" | "Gross" | "Industrial Gross" | "Full Service" | "Absolute Net";
   freeRentMonths: number;           // §9
   tiDescription: string;            // §10 — freeform
@@ -112,32 +128,98 @@ const spellNum = (n: number): string =>
   SPELLED[n] ? `${SPELLED[n]} (${n})` : `${n}`;
 
 // ── Rent schedule ──────────────────────────────────────────────────────────
-interface RentYearRow {
-  year: number;
-  perSf: number;
-  annual: number;
-  monthly: number;
+
+/** A single row in the §7 rent schedule. Covers an arbitrary
+ *  consecutive month-range (ramp rows are sub-year; year rows
+ *  span 12 months). */
+interface RentScheduleRow {
+  label: string;          // "Months 1-6" / "Year 1 (Months 7-12)" / "Year 2"
+  baseMonthly: number;    // base rent for one month at this rate
+  basePerSf: number;      // base $/SF/yr
+  nnnMonthly: number;     // NNN/CAM/Tax monthly (0 if no NNN line)
+  nnnPerSf: number;       // NNN $/SF/yr (0 if no NNN line)
+  allInMonthly: number;   // baseMonthly + nnnMonthly
 }
 
-function buildRentSchedule(
-  baseRentPerSf: number,
-  escalationPct: number,
-  termYears: number,
-  rsf: number,
-): RentYearRow[] {
-  const rows: RentYearRow[] = [];
-  let perSf = baseRentPerSf;
-  const escalationFactor = 1 + escalationPct / 100;
-  for (let y = 1; y <= termYears; y += 1) {
-    // Round per-SF to 2 decimals so compounding works on the rounded
-    // value (matches the template's behavior — Year 3 escalates off
-    // the rounded Year 2 rate, not the exact compound).
+/** Round per-SF to 2 decimals each year so compounding works on the
+ *  rounded value — matches how broker templates do the math. */
+function compoundYearly(start: number, escalationPct: number, years: number): number[] {
+  const out: number[] = [];
+  let perSf = start;
+  const factor = 1 + escalationPct / 100;
+  for (let y = 0; y < years; y += 1) {
     const rounded = Math.round(perSf * 100) / 100;
-    const annual = Math.round(rounded * rsf);
-    const monthly = Math.round((annual / 12) * 100) / 100;
-    rows.push({ year: y, perSf: rounded, annual, monthly });
-    perSf = rounded * escalationFactor;
+    out.push(rounded);
+    perSf = rounded * factor;
   }
+  return out;
+}
+
+function buildRentSchedule(input: LOIInput): RentScheduleRow[] {
+  const { baseRentPerSf, annualEscalationPct, termYears, premisesRSF } = input;
+  const rsf = premisesRSF;
+  const nnnPerSf = input.nnnPerSf && input.nnnPerSf > 0 ? input.nnnPerSf : 0;
+  const nnnMonthly =
+    nnnPerSf > 0 ? Math.round(((nnnPerSf * rsf) / 12) * 100) / 100 : 0;
+
+  const rows: RentScheduleRow[] = [];
+
+  // Per-SF rate for each year (Year 1 is baseRentPerSf, Year 2+ compounds)
+  const yearRates = compoundYearly(baseRentPerSf, annualEscalationPct, termYears);
+
+  // ── Ramp periods (sub-Year-1 stepped/discount rows) ─────────────────────
+  const ramps = (input.rampPeriods ?? [])
+    .slice()
+    .filter((r) => r.monthsStart >= 1 && r.monthsEnd >= r.monthsStart && r.monthsEnd <= 12)
+    .sort((a, b) => a.monthsStart - b.monthsStart);
+
+  let lastCoveredMonth = 0;
+  for (const ramp of ramps) {
+    const baseMonthly = Math.round(((ramp.baseRentPerSf * rsf) / 12) * 100) / 100;
+    rows.push({
+      label: ramp.label || `Months ${ramp.monthsStart}-${ramp.monthsEnd}`,
+      baseMonthly,
+      basePerSf: ramp.baseRentPerSf,
+      nnnMonthly,
+      nnnPerSf,
+      allInMonthly: Math.round((baseMonthly + nnnMonthly) * 100) / 100,
+    });
+    lastCoveredMonth = Math.max(lastCoveredMonth, ramp.monthsEnd);
+  }
+
+  // Year-1 fill: if ramps don't cover months 1–12, the remainder runs
+  // at the full Year 1 rate.
+  if (lastCoveredMonth < 12) {
+    const fillStart = lastCoveredMonth + 1;
+    const fullPerSf = yearRates[0];
+    const fullMonthly = Math.round(((fullPerSf * rsf) / 12) * 100) / 100;
+    rows.push({
+      label:
+        ramps.length === 0
+          ? "Year 1"
+          : `Months ${fillStart}-12`,
+      baseMonthly: fullMonthly,
+      basePerSf: fullPerSf,
+      nnnMonthly,
+      nnnPerSf,
+      allInMonthly: Math.round((fullMonthly + nnnMonthly) * 100) / 100,
+    });
+  }
+
+  // ── Year 2 through Year N ───────────────────────────────────────────────
+  for (let y = 2; y <= termYears; y += 1) {
+    const perSf = yearRates[y - 1];
+    const monthly = Math.round(((perSf * rsf) / 12) * 100) / 100;
+    rows.push({
+      label: `Year ${y}`,
+      baseMonthly: monthly,
+      basePerSf: perSf,
+      nnnMonthly,
+      nnnPerSf,
+      allInMonthly: Math.round((monthly + nnnMonthly) * 100) / 100,
+    });
+  }
+
   return rows;
 }
 
@@ -159,13 +241,15 @@ export function generateLOI(input: LOIInput): jsPDF {
   // are accurate.
   let y = MARGIN_TOP;
 
-  const rentSchedule = buildRentSchedule(
-    input.baseRentPerSf,
-    input.annualEscalationPct,
-    input.termYears,
-    input.premisesRSF,
+  const rentSchedule = buildRentSchedule(input);
+  // Security deposit is calibrated to the FULL Year 1 base rent — not
+  // a discounted ramp. So we find the row that represents Year 1 at
+  // full rate (basePerSf === input.baseRentPerSf) and use its monthly.
+  const year1FullRow = rentSchedule.find(
+    (r) => Math.abs(r.basePerSf - input.baseRentPerSf) < 0.005
   );
-  const year1Monthly = rentSchedule[0]?.monthly ?? 0;
+  const year1Monthly = year1FullRow?.baseMonthly ?? rentSchedule[0]?.baseMonthly ?? 0;
+  const hasNNNColumn = (input.nnnPerSf ?? 0) > 0;
 
   function ensureSpace(needed: number): void {
     if (y + needed > PAGE_H - MARGIN_BOTTOM) {
@@ -302,23 +386,96 @@ export function generateLOI(input: LOIInput): jsPDF {
     section(6, "Renewal Options", "None.");
   }
 
-  // §7 Base Rent — render as a table-style block
-  ensureSpace(40 + rentSchedule.length * 14);
+  // §7 Base Rent — multi-column table. Columns differ based on whether
+  // NNN is broken out: when NNN is set we show Base + NNN + All-In;
+  // otherwise just the base columns.
+  const tableHeaderH = 16;
+  const tableRowH = 13;
+  ensureSpace(40 + tableHeaderH + rentSchedule.length * tableRowH);
   setBold();
   doc.text("7. Base Rent", MARGIN_X, y);
   y += 14;
+
+  // Column layout (x offsets within content area). Tuned for letter-
+  // portrait at 72pt margins. The "with NNN" variant is denser but
+  // still readable; if you change the page margins, retune these.
+  type Col = { x: number; w: number; align: "left" | "right"; label: string };
+  const colsWithNNN: Col[] = [
+    { x: MARGIN_X,        w: 110, align: "left",  label: "Period" },
+    { x: MARGIN_X + 110,  w:  68, align: "right", label: "Base $/SF" },
+    { x: MARGIN_X + 178,  w:  80, align: "right", label: "Base Monthly" },
+    { x: MARGIN_X + 258,  w:  62, align: "right", label: "NNN $/SF" },
+    { x: MARGIN_X + 320,  w:  72, align: "right", label: "NNN Monthly" },
+    { x: MARGIN_X + 392,  w:  76, align: "right", label: "All-In Monthly" },
+  ];
+  const colsNoNNN: Col[] = [
+    { x: MARGIN_X,        w: 150, align: "left",  label: "Period" },
+    { x: MARGIN_X + 150,  w:  90, align: "right", label: "Base $/SF" },
+    { x: MARGIN_X + 240,  w: 110, align: "right", label: "Annual" },
+    { x: MARGIN_X + 350,  w: 118, align: "right", label: "Monthly" },
+  ];
+  const cols = hasNNNColumn ? colsWithNNN : colsNoNNN;
+
+  // Header row
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.setTextColor(80, 80, 80);
+  for (const c of cols) {
+    const xText = c.align === "right" ? c.x + c.w : c.x;
+    doc.text(c.label.toUpperCase(), xText, y, { align: c.align, charSpace: 0.6 });
+  }
+  y += 4;
+  doc.setDrawColor(180, 180, 180);
+  doc.setLineWidth(0.5);
+  doc.line(MARGIN_X, y, MARGIN_X + CONTENT_W, y);
+  y += 10;
+
+  // Data rows
   setBody();
+  doc.setFontSize(10);
   for (const row of rentSchedule) {
-    const line = `Year ${row.year}: ${fmtPerSf(row.perSf)} per RSF — ${fmtMoney0(row.annual)} annual / ${fmtMoney2(row.monthly)} monthly`;
-    doc.text(line, MARGIN_X, y);
-    y += 13;
+    if (hasNNNColumn) {
+      const annualBase = Math.round(row.basePerSf * input.premisesRSF);
+      const cells = [
+        row.label,
+        fmtPerSf(row.basePerSf),
+        fmtMoney2(row.baseMonthly),
+        fmtPerSf(row.nnnPerSf),
+        fmtMoney2(row.nnnMonthly),
+        fmtMoney2(row.allInMonthly),
+      ];
+      // Suppress unused — kept so a future "Annual" column could plug in
+      void annualBase;
+      cells.forEach((val, idx) => {
+        const c = cols[idx];
+        const xText = c.align === "right" ? c.x + c.w : c.x;
+        doc.text(val, xText, y, { align: c.align });
+      });
+    } else {
+      const annual = Math.round(row.basePerSf * input.premisesRSF);
+      const cells = [
+        row.label,
+        fmtPerSf(row.basePerSf),
+        fmtMoney0(annual),
+        fmtMoney2(row.baseMonthly),
+      ];
+      cells.forEach((val, idx) => {
+        const c = cols[idx];
+        const xText = c.align === "right" ? c.x + c.w : c.x;
+        doc.text(val, xText, y, { align: c.align });
+      });
+    }
+    y += tableRowH;
   }
   y += 10;
 
   // §8 Lease Type & Operating Expenses
   let leaseTypeText = "";
   if (input.leaseType === "NNN") {
-    leaseTypeText = `Triple Net (NNN). In addition to Base Rent, Tenant shall pay its pro-rata share of Common Area Maintenance, Real Estate Taxes, and Insurance (collectively, "Operating Expenses").`;
+    const nnnEstimate = (input.nnnPerSf ?? 0) > 0
+      ? ` Landlord's current estimate of Operating Expenses is approximately ${fmtPerSf(input.nnnPerSf!)} per RSF per year, reflected as the NNN line in the rent schedule above; actual amounts will be reconciled annually.`
+      : "";
+    leaseTypeText = `Triple Net (NNN). In addition to Base Rent, Tenant shall pay its pro-rata share of Common Area Maintenance, Real Estate Taxes, and Insurance (collectively, "Operating Expenses").${nnnEstimate}`;
   } else if (input.leaseType === "Modified Gross") {
     leaseTypeText = `Modified Gross. Base Rent is inclusive of Landlord's portion of Real Estate Taxes, Insurance, and exterior Common Area Maintenance. Tenant is responsible for utilities, janitorial services, interior maintenance, and any increases in Operating Expenses above the base year.`;
   } else if (input.leaseType === "Gross") {
