@@ -40,11 +40,41 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
+
+// ── Slug helpers ───────────────────────────────────────────────────────────
+// Mirror the slug logic used by POST /api/properties. The sibling needs
+// its own unique slug (typically the source's slug + "-lease" or
+// "-sale") because the workspace route is /cre-os/properties/[slug] —
+// no slug means a hard 404 when clicking into the clone.
+function slugify(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+async function ensureUniqueSlug(sb: SupabaseClient, base: string): Promise<string> {
+  if (!base) base = `property-${Date.now().toString(36)}`;
+  let candidate = base;
+  let n = 1;
+  while (n <= 50) {
+    const { data } = await sb
+      .from("properties")
+      .select("id")
+      .eq("slug", candidate)
+      .maybeSingle();
+    if (!data) return candidate;
+    n += 1;
+    candidate = `${base}-${n}`;
+  }
+  return `${base}-${Date.now().toString(36)}`;
+}
 
 // Columns copied verbatim from the source. All "building identity" +
 // "physical facts" columns — anything that describes the building
@@ -153,6 +183,17 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   sibling.name = src.name
     ? `${src.name} (${targetType === "sale" ? "For Sale" : "For Lease"})`
     : `(For ${targetType === "sale" ? "Sale" : "Lease"})`;
+
+  // Generate a unique slug — the workspace route is /properties/[slug],
+  // so a null slug means a hard 404 when the broker clicks into the
+  // clone. Prefer source_slug + suffix (keeps the relationship visible
+  // in the URL), fall back to building from the address.
+  const slugBase = src.slug
+    ? `${src.slug}-${targetType === "sale" ? "sale" : "lease"}`
+    : slugify(
+        `${src.address ?? ""} ${src.city ?? ""} ${targetType === "sale" ? "sale" : "lease"}`.trim()
+      );
+  sibling.slug = await ensureUniqueSlug(sb, slugBase);
 
   // Insert the sibling.
   const { data: created, error: insertErr } = await sb
