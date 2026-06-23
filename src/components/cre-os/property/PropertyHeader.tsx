@@ -10,6 +10,7 @@ import { CreateTaskDialog } from "@/components/cre-os/tasks/CreateTaskDialog";
 import { BuyerFitDialog } from "@/components/cre-os/property/BuyerFitDialog";
 import { ArchivePropertyDialog } from "@/components/cre-os/property/ArchivePropertyDialog";
 import { LifecycleAction } from "@/components/cre-os/property/LifecycleAction";
+import { SiblingLink } from "@/components/cre-os/property/SiblingLink";
 import type { PropertyDetail } from "@/lib/cre-os/property-queries";
 
 const fmtMoney = (n: number | null) => {
@@ -102,6 +103,13 @@ export function PropertyHeader({ p }: { p: PropertyDetail }) {
                 propertyId={p.id}
                 currentStatus={p.status}
                 transactionType={p.transactionType}
+              />
+            </span>
+            <span className="ml-1">
+              <SiblingLink
+                propertyId={p.id}
+                transactionType={p.transactionType}
+                related={p.relatedProperty}
               />
             </span>
           </div>

@@ -236,6 +236,19 @@ export interface PropertyDetail {
   loopnetUrl: string | null;
   publishToWebsite: boolean | null;
 
+  // Sibling listing — the same physical building offered under a
+  // different transaction_type (sale↔lease). Null when this property
+  // has no sibling. Each sibling has its own CREXi listing, lead
+  // pipeline, marketing copy, and lifecycle.
+  relatedPropertyId: string | null;
+  relatedProperty: {
+    id: string;
+    slug: string;
+    name: string;
+    transactionType: string | null;
+    status: string | null;
+  } | null;
+
   // Owner identity (from CoStar — True Owner is LLC unmask)
   ownerNameRaw: string | null;
   ownerType: string | null;
@@ -476,6 +489,8 @@ export async function loadPropertyDetail(slug: string): Promise<PropertyDetail |
       document_inventory, data_source, created_at,
       parking_spaces, parking_ratio, zoning, total_buildings, number_of_stories,
       crexi_url, crexi_listing_id, loopnet_url, publish_to_website,
+      related_property_id,
+      related_property:properties!properties_related_property_id_fkey(id, slug, name, transaction_type, status),
       owner_name_raw, owner_type, owner_state, owner_phone, owner_contact_name,
       owner_mailing_address, owner_mailing_city, owner_mailing_state, owner_mailing_zip,
       true_owner_name, true_owner_phone, true_owner_contact_name,
@@ -566,6 +581,29 @@ export async function loadPropertyDetail(slug: string): Promise<PropertyDetail |
     crexiListingId: p.crexi_listing_id ?? null,
     loopnetUrl: p.loopnet_url ?? null,
     publishToWebsite: p.publish_to_website ?? null,
+
+    // Sibling listing — Supabase returns the embedded join as either an
+    // object or null depending on whether the FK matches. Cast at the
+    // seam since the table isn't in the generated types yet.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    relatedPropertyId: (p as any).related_property_id ?? null,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    relatedProperty: (() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rp = (p as any).related_property;
+      if (!rp) return null;
+      // Supabase may return as array (when FK could be 1-to-many) or
+      // object — normalize.
+      const row = Array.isArray(rp) ? rp[0] : rp;
+      if (!row || !row.id) return null;
+      return {
+        id: row.id as string,
+        slug: row.slug as string,
+        name: row.name as string,
+        transactionType: row.transaction_type ?? null,
+        status: row.status ?? null,
+      };
+    })(),
 
     // Owner identity
     ownerNameRaw: p.owner_name_raw ?? null,
