@@ -1,7 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+
+interface PeekDeal {
+  id: string;
+  deal_name: string | null;
+  deal_type: string | null;
+  price: number | null;
+  commission_pct: number | null;
+  estimated_commission: number | null;
+  weighted_commission: number | null;
+  probability_pct: number | null;
+  expected_close: string | null;
+  stage: string | null;
+}
 
 /**
  * PropertyPeekPanel — right-side slide-over showing a compact
@@ -59,18 +72,29 @@ export function PropertyPeekPanel({
 }) {
   const open = propertyId !== null;
   const [data, setData] = useState<PeekData | null>(null);
+  const [deals, setDeals] = useState<PeekDeal[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const reloadDeals = useCallback(async (pid: string) => {
+    const r = await fetch(`/api/properties/${pid}/deals`, { cache: "no-store" });
+    const j = await r.json();
+    if (Array.isArray(j?.deals)) setDeals(j.deals as PeekDeal[]);
+  }, []);
 
   // Fetch property data when panel opens
   useEffect(() => {
     if (!propertyId) {
       setData(null);
+      setDeals([]);
       return;
     }
     let cancelled = false;
     setLoading(true);
     setError(null);
+    // Property + deals in parallel — both feed the panel render and
+    // there's no dependency between them.
+    void reloadDeals(propertyId).catch(() => {});
     fetch(`/api/properties/${propertyId}`, { cache: "no-store" })
       .then((r) => r.json())
       .then((j) => {
@@ -277,6 +301,24 @@ export function PropertyPeekPanel({
                     )}
                   </div>
                 )}
+
+                {/* Active deals — editable. Lets the broker fix a
+                    stale deal price or set commission without leaving
+                    the kanban → peek workflow. */}
+                {deals.length > 0 && (
+                  <div className="space-y-3 pt-2 border-t border-white/[0.06]">
+                    <div className="font-mono text-[10px] uppercase tracking-eyebrow text-coral-400">
+                      Active deal{deals.length === 1 ? "" : "s"} · {deals.length}
+                    </div>
+                    {deals.map((d) => (
+                      <DealEditCard
+                        key={d.id}
+                        deal={d}
+                        onSaved={() => propertyId && reloadDeals(propertyId)}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -333,4 +375,177 @@ function fmtMoney(n: number | null | undefined): string {
 
 function prettyLeaseType(t: string): string {
   return t.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()).replace(/Nnn/i, "NNN");
+}
+
+// ── Inline deal-edit card ─────────────────────────────────────────────────
+
+/**
+ * DealEditCard — one row per open deal on the peeked property.
+ *
+ * Editable fields: price, commission %, est. commission. Save fires
+ * PATCH /api/deals/[id] which auto-derives weighted_commission server-
+ * side so the kanban rollups stay correct. Lease deals show the price
+ * field as a rate ($/SF/yr) hint.
+ *
+ * Compact UX: inputs always visible (no edit-mode toggle), explicit
+ * Save button so the broker can review before committing. Disables
+ * inputs while saving so doubled clicks don't double-fire.
+ */
+function DealEditCard({
+  deal,
+  onSaved,
+}: {
+  deal: PeekDeal;
+  onSaved: () => void;
+}) {
+  const isLease = deal.deal_type === "lease";
+  const [price, setPrice] = useState<string>(deal.price !== null ? String(deal.price) : "");
+  const [commissionPct, setCommissionPct] = useState<string>(
+    deal.commission_pct !== null ? String(deal.commission_pct) : ""
+  );
+  const [estCommission, setEstCommission] = useState<string>(
+    deal.estimated_commission !== null ? String(deal.estimated_commission) : ""
+  );
+  const [saving, setSaving] = useState(false);
+  const [saveErr, setSaveErr] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  // Dirty flag — Save button stays disabled when nothing changed
+  const dirty =
+    price !== (deal.price !== null ? String(deal.price) : "") ||
+    commissionPct !== (deal.commission_pct !== null ? String(deal.commission_pct) : "") ||
+    estCommission !== (deal.estimated_commission !== null ? String(deal.estimated_commission) : "");
+
+  // Sale-mode: auto-suggest est. commission from price × pct when broker
+  // hasn't overridden it. Same UX pattern as CreateDealDialog.
+  function onCommissionPctChange(v: string) {
+    setCommissionPct(v);
+    if (!isLease && price && estCommission === "") {
+      const p = Number(price.replace(/[$,]/g, ""));
+      const pct = Number(v.replace(/[%]/g, ""));
+      if (!Number.isNaN(p) && !Number.isNaN(pct)) {
+        setEstCommission(String(Math.round((p * pct) / 100)));
+      }
+    }
+  }
+
+  async function save() {
+    setSaving(true);
+    setSaveErr(null);
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const payload: Record<string, any> = {};
+      const priceN = price === "" ? null : Number(price.replace(/[$,]/g, ""));
+      const pctN = commissionPct === "" ? null : Number(commissionPct.replace(/[%]/g, ""));
+      const estN = estCommission === "" ? null : Number(estCommission.replace(/[$,]/g, ""));
+      if (priceN !== deal.price) payload.price = priceN;
+      if (pctN !== deal.commission_pct) payload.commission_pct = pctN;
+      if (estN !== deal.estimated_commission) payload.estimated_commission = estN;
+      const r = await fetch(`/api/deals/${deal.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error ?? `HTTP ${r.status}`);
+      setSavedAt(Date.now());
+      onSaved();
+    } catch (err) {
+      setSaveErr(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const inputCls =
+    "w-full px-2 py-1.5 rounded border border-white/[0.08] bg-white/[0.02] font-mono text-[11.5px] text-cream focus:outline-none focus:border-coral-400/50 disabled:opacity-50";
+
+  return (
+    <div className="rounded border border-white/[0.06] bg-white/[0.02] p-3 space-y-2.5">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="font-heading text-[12.5px] text-cream font-semibold truncate">
+            {deal.deal_name ?? "(unnamed deal)"}
+          </div>
+          <div className="font-mono text-[10px] text-cream-subtle">
+            {[deal.stage, deal.deal_type?.replace("_", " "), deal.probability_pct ? `${Math.round(deal.probability_pct)}%` : null]
+              .filter(Boolean)
+              .join(" · ")}
+          </div>
+        </div>
+        {deal.weighted_commission !== null && deal.weighted_commission > 0 && (
+          <div className="shrink-0 text-right">
+            <div className="font-mono text-[9px] uppercase tracking-eyebrow text-cream-subtle">Wtd comm</div>
+            <div className="font-mono text-[11.5px] text-coral-300">
+              {fmtMoney(deal.weighted_commission)}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        <label className="block">
+          <div className="font-mono text-[9.5px] uppercase tracking-eyebrow text-cream-subtle mb-0.5">
+            {isLease ? "Rate $/SF" : "Price"}
+          </div>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={price}
+            disabled={saving}
+            onChange={(e) => setPrice(e.target.value)}
+            placeholder={isLease ? "24.50" : "2400000"}
+            className={inputCls}
+          />
+        </label>
+        <label className="block">
+          <div className="font-mono text-[9.5px] uppercase tracking-eyebrow text-cream-subtle mb-0.5">
+            Comm %
+          </div>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={commissionPct}
+            disabled={saving}
+            onChange={(e) => onCommissionPctChange(e.target.value)}
+            placeholder="5"
+            className={inputCls}
+          />
+        </label>
+        <label className="block">
+          <div className="font-mono text-[9.5px] uppercase tracking-eyebrow text-cream-subtle mb-0.5">
+            Est. comm $
+          </div>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={estCommission}
+            disabled={saving}
+            onChange={(e) => setEstCommission(e.target.value)}
+            placeholder="120000"
+            className={inputCls}
+          />
+        </label>
+      </div>
+
+      {saveErr && (
+        <div className="rounded border border-red-400/40 bg-red-500/[0.08] px-2 py-1 font-body text-[11px] text-red-300">
+          {saveErr}
+        </div>
+      )}
+
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-mono text-[10px] text-cream-subtle">
+          {savedAt && !dirty ? "Saved" : null}
+        </span>
+        <button
+          onClick={save}
+          disabled={!dirty || saving}
+          className="px-3 py-1 rounded border border-coral-400/50 bg-coral-400/[0.12] hover:bg-coral-400/[0.22] font-heading text-[10px] uppercase tracking-eyebrow font-semibold text-coral-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </div>
+  );
 }
