@@ -32,6 +32,7 @@ export const dynamic = "force-dynamic";
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 
 const VALID_OUTCOMES = new Set([
+  // Call outcomes
   "reached",
   "left_voicemail",
   "no_answer",
@@ -39,10 +40,16 @@ const VALID_OUTCOMES = new Set([
   "callback_requested",
   "converted",
   "dead",
+  // Text outcomes
+  "sent",
+  "reply_received",
 ]);
+
+const VALID_CHANNELS = new Set(["call", "text"]);
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   let body: {
+    channel?: string;
     outcome?: string;
     duration_seconds?: number;
     notes?: string;
@@ -52,6 +59,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const channel = body.channel ?? "call";
+  if (!VALID_CHANNELS.has(channel)) {
+    return NextResponse.json(
+      { error: `channel must be one of: ${Array.from(VALID_CHANNELS).join(", ")}` },
+      { status: 400 }
+    );
   }
 
   if (!body.outcome || !VALID_OUTCOMES.has(body.outcome)) {
@@ -80,7 +95,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const calledAt = body.called_at ?? new Date().toISOString();
   const notes = body.notes?.trim() || null;
 
-  // Insert the call_logs row
+  // Insert the call_logs row (channel discriminates call vs text)
   const { data: log, error: insertErr } = await sb
     .from("call_logs")
     .insert({
@@ -88,8 +103,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       lead_id: lead.id,
       contact_id: lead.contact_id,
       called_at: calledAt,
-      duration_seconds: body.duration_seconds ?? null,
+      // Duration only meaningful for calls — text logs ignore it
+      duration_seconds: channel === "call" ? body.duration_seconds ?? null : null,
       outcome: body.outcome,
+      channel,
       notes,
     })
     .select("id")
@@ -99,15 +116,18 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: insertErr.message }, { status: 500 });
   }
 
-  // Append the call to lead.notes so it's visible on the existing
+  // Append the touch to lead.notes so it's visible on the existing
   // LeadDetail view even before the Call List UI ships everywhere.
   // Format: "[Called 2026-07-06 · reached · 4m30s] Left message about pricing"
-  if (notes || body.outcome !== "no_answer") {
-    const dur = body.duration_seconds
+  //     or: "[Texted 2026-07-06 · sent] Sent follow-up on rate"
+  const verb = channel === "text" ? "Texted" : "Called";
+  const shouldAppend = channel === "text" ? true : (!!notes || body.outcome !== "no_answer");
+  if (shouldAppend) {
+    const dur = channel === "call" && body.duration_seconds
       ? ` · ${Math.floor(body.duration_seconds / 60)}m${body.duration_seconds % 60}s`
       : "";
     const stamp = new Date(calledAt).toISOString().slice(0, 10);
-    const line = `[Called ${stamp} · ${body.outcome}${dur}]${notes ? ` ${notes}` : ""}`;
+    const line = `[${verb} ${stamp} · ${body.outcome}${dur}]${notes ? ` ${notes}` : ""}`;
     const merged = lead.notes ? `${lead.notes}\n${line}` : line;
     await sb
       .from("leads")
@@ -115,15 +135,16 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       .eq("id", lead.id);
   }
 
-  // Audit trail — best-effort, don't fail the call log on this
+  // Audit trail — best-effort, don't fail the touch log on this
   try {
     await sb.from("lead_events").insert({
       organization_id: ORG_ID,
       lead_id: lead.id,
-      event_type: "call_logged",
+      event_type: channel === "text" ? "text_logged" : "call_logged",
       actor: "user",
-      summary: `Call logged: ${body.outcome}${notes ? ` — ${notes.slice(0, 80)}` : ""}`,
+      summary: `${verb} logged: ${body.outcome}${notes ? ` — ${notes.slice(0, 80)}` : ""}`,
       metadata: {
+        channel,
         outcome: body.outcome,
         duration_seconds: body.duration_seconds ?? null,
         call_log_id: log.id,
@@ -145,7 +166,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 
   const { data, error } = await sb
     .from("call_logs")
-    .select("id, called_at, duration_seconds, outcome, notes")
+    .select("id, called_at, duration_seconds, outcome, notes, channel")
     .eq("organization_id", ORG_ID)
     .eq("lead_id", params.id)
     .order("called_at", { ascending: false });

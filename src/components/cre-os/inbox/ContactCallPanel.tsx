@@ -62,9 +62,10 @@ interface CallLog {
   duration_seconds: number | null;
   outcome: string;
   notes: string | null;
+  channel: string | null;
 }
 
-const OUTCOMES = [
+const CALL_OUTCOMES = [
   { value: "reached", label: "Reached — spoke with them" },
   { value: "left_voicemail", label: "Left voicemail" },
   { value: "no_answer", label: "No answer / didn't leave message" },
@@ -72,6 +73,11 @@ const OUTCOMES = [
   { value: "converted", label: "Converted — meeting / deal advanced" },
   { value: "wrong_number", label: "Wrong number" },
   { value: "dead", label: "Dead — not interested" },
+];
+
+const TEXT_OUTCOMES = [
+  { value: "sent", label: "Sent" },
+  { value: "reply_received", label: "Reply received" },
 ];
 
 export function ContactCallPanel({
@@ -91,7 +97,8 @@ export function ContactCallPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Log-a-call form
+  // Log-a-touch form (call or text)
+  const [channel, setChannel] = useState<"call" | "text">("call");
   const [outcome, setOutcome] = useState("reached");
   const [durationMinutes, setDurationMinutes] = useState("");
   const [callNotes, setCallNotes] = useState("");
@@ -199,15 +206,17 @@ export function ContactCallPanel({
     };
   }, [open, onClose]);
 
-  async function logCall() {
+  async function logTouch() {
     if (!leadId) return;
     setLogging(true);
     try {
-      const durationSeconds = durationMinutes ? Math.round(Number(durationMinutes) * 60) : undefined;
+      const durationSeconds =
+        channel === "call" && durationMinutes ? Math.round(Number(durationMinutes) * 60) : undefined;
       const r = await fetch(`/api/leads/${leadId}/log-call`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          channel,
           outcome,
           duration_seconds: durationSeconds,
           notes: callNotes.trim() || undefined,
@@ -223,6 +232,12 @@ export function ContactCallPanel({
     } finally {
       setLogging(false);
     }
+  }
+
+  // When channel changes, reset outcome to a valid default for that channel
+  function selectChannel(next: "call" | "text") {
+    setChannel(next);
+    setOutcome(next === "call" ? "reached" : "sent");
   }
 
   async function saveNotes() {
@@ -323,10 +338,45 @@ export function ContactCallPanel({
                 </div>
               </div>
 
-              {/* Log a call */}
+              {/* Log a touch — Call or Text */}
               <div className="border-t border-white/[0.06] pt-4 space-y-3">
-                <div className="font-mono text-[10px] uppercase tracking-eyebrow text-coral-400">
-                  Log a call
+                <div className="flex items-center justify-between">
+                  <div className="font-mono text-[10px] uppercase tracking-eyebrow text-coral-400">
+                    Log a {channel === "call" ? "call" : "text"}
+                  </div>
+                  {/* Channel toggle — small, tucked next to the label so
+                      the log flow feels like one thing with a switch, not
+                      two features stacked. */}
+                  <div
+                    role="tablist"
+                    aria-label="Channel"
+                    className="inline-flex items-center rounded border border-white/[0.08] bg-white/[0.02] p-0.5"
+                  >
+                    <button
+                      role="tab"
+                      aria-selected={channel === "call"}
+                      onClick={() => selectChannel("call")}
+                      className={`px-2.5 py-0.5 rounded font-mono text-[10px] uppercase tracking-eyebrow transition-colors ${
+                        channel === "call"
+                          ? "bg-coral-400/[0.15] text-coral-300"
+                          : "text-cream-subtle hover:text-cream"
+                      }`}
+                    >
+                      📞 Call
+                    </button>
+                    <button
+                      role="tab"
+                      aria-selected={channel === "text"}
+                      onClick={() => selectChannel("text")}
+                      className={`px-2.5 py-0.5 rounded font-mono text-[10px] uppercase tracking-eyebrow transition-colors ${
+                        channel === "text"
+                          ? "bg-coral-400/[0.15] text-coral-300"
+                          : "text-cream-subtle hover:text-cream"
+                      }`}
+                    >
+                      💬 Text
+                    </button>
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 gap-2">
                   <select
@@ -334,47 +384,55 @@ export function ContactCallPanel({
                     onChange={(e) => setOutcome(e.target.value)}
                     className="w-full px-3 py-2 rounded border border-white/[0.08] bg-white/[0.02] font-body text-[13px] text-cream focus:outline-none focus:border-coral-400/50"
                   >
-                    {OUTCOMES.map((o) => (
+                    {(channel === "call" ? CALL_OUTCOMES : TEXT_OUTCOMES).map((o) => (
                       <option key={o.value} value={o.value}>
                         {o.label}
                       </option>
                     ))}
                   </select>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={durationMinutes}
-                    onChange={(e) => setDurationMinutes(e.target.value)}
-                    placeholder="Duration (minutes, optional)"
-                    className="w-full px-3 py-2 rounded border border-white/[0.08] bg-white/[0.02] font-body text-[13px] text-cream focus:outline-none focus:border-coral-400/50"
-                  />
+                  {channel === "call" && (
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={durationMinutes}
+                      onChange={(e) => setDurationMinutes(e.target.value)}
+                      placeholder="Duration (minutes, optional)"
+                      className="w-full px-3 py-2 rounded border border-white/[0.08] bg-white/[0.02] font-body text-[13px] text-cream focus:outline-none focus:border-coral-400/50"
+                    />
+                  )}
                   <textarea
                     value={callNotes}
                     onChange={(e) => setCallNotes(e.target.value)}
                     rows={3}
-                    placeholder="What happened? (optional)"
+                    placeholder={
+                      channel === "call"
+                        ? "What happened? (optional)"
+                        : "What did you text them? (optional)"
+                    }
                     className="w-full px-3 py-2 rounded border border-white/[0.08] bg-white/[0.02] font-body text-[13px] text-cream focus:outline-none focus:border-coral-400/50"
                   />
                   <button
-                    onClick={logCall}
+                    onClick={logTouch}
                     disabled={logging}
                     className="px-4 py-2 rounded border border-coral-400/50 bg-coral-400/[0.14] hover:bg-coral-400/[0.24] font-heading text-[11.5px] uppercase tracking-eyebrow font-semibold text-coral-300 transition-colors disabled:opacity-50"
                   >
-                    {logging ? "Logging…" : "Log call"}
+                    {logging ? "Logging…" : channel === "call" ? "Log call" : "Log text"}
                   </button>
                 </div>
               </div>
 
-              {/* Prior calls */}
+              {/* Prior touches (calls + texts) */}
               {calls.length > 0 && (
                 <div className="border-t border-white/[0.06] pt-4 space-y-2">
                   <div className="font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle">
-                    Prior calls · {calls.length}
+                    Prior touches · {calls.length}
                   </div>
                   {calls.map((c) => (
                     <div key={c.id} className="rounded border border-white/[0.06] bg-white/[0.02] p-3">
                       <div className="flex items-baseline justify-between gap-2 font-mono text-[10.5px]">
-                        <span className="text-cream">{c.outcome.replace(/_/g, " ")}</span>
+                        <span className="text-cream">
+                          {c.channel === "text" ? "💬" : "📞"} {c.outcome.replace(/_/g, " ")}
+                        </span>
                         <span className="text-cream-subtle">
                           {new Date(c.called_at).toLocaleString()}
                           {c.duration_seconds ? ` · ${Math.floor(c.duration_seconds / 60)}m${c.duration_seconds % 60}s` : ""}
