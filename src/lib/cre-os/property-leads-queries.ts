@@ -87,6 +87,22 @@ export interface PropertyLead {
   vaultVisits: number;
   /** Free-form Crexi notes / qualification data */
   notes: string | null;
+
+  // ── Call list fields ────────────────────────────────────────────────
+  /** contact_id on the leads row — used by ContactCallPanel to fetch
+   *  Gmail history. Null when this row is CREXi-panel-only with no
+   *  contacts join. */
+  contactId: string | null;
+  /** Claude-extracted urgency on the underlying lead — hot / warm / cold. */
+  urgency: "hot" | "warm" | "cold" | null;
+  /** ISO of most recent call log entry, or null if never called */
+  lastCallAt: string | null;
+  /** Outcome of most recent call attempt */
+  lastCallOutcome: string | null;
+  /** How many calls we've logged */
+  callCount: number;
+  /** Composite priority score for the call list — higher = call sooner */
+  priorityScore: number;
 }
 
 export interface PropertyLeadActivitySummary {
@@ -143,7 +159,7 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       .order("last_activity_date", { ascending: false, nullsFirst: false }),
 
     sb.from("leads")
-      .select("id, sender_name, sender_email, sender_phone, urgency, status, qualifier_summary, source, auto_ack_sent_at, final_sent_at, created_at, updated_at, raw_body")
+      .select("id, contact_id, sender_name, sender_email, sender_phone, urgency, status, qualifier_summary, source, auto_ack_sent_at, final_sent_at, created_at, updated_at, raw_body")
       .eq("organization_id", ORG_ID)
       .eq("property_id", propertyId)
       .order("created_at", { ascending: false }),
@@ -544,12 +560,19 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       signedNda,
       vaultVisits: 0,
       notes,
+      contactId: c.contact_id ?? null,
+      urgency: null,
+      lastCallAt: null,
+      lastCallOutcome: null,
+      callCount: 0,
+      priorityScore: 0,
     });
   }
 
   // Direct leads (email inquiries)
   for (const l of (leadsRes.data ?? []) as Array<{
     id: string;
+    contact_id: string | null;
     sender_name: string | null;
     sender_email: string | null;
     sender_phone: string | null;
@@ -596,6 +619,15 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       signedNda,
       vaultVisits: vaultByLead.get(l.id) ?? 0,
       notes: l.qualifier_summary,
+      contactId: l.contact_id ?? null,
+      urgency:
+        l.urgency === "hot" || l.urgency === "warm" || l.urgency === "cold"
+          ? (l.urgency as "hot" | "warm" | "cold")
+          : null,
+      lastCallAt: null,
+      lastCallOutcome: null,
+      callCount: 0,
+      priorityScore: 0,
     });
   }
 
@@ -630,6 +662,12 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       signedNda: true,
       vaultVisits: 0,
       notes: null,
+      contactId: null,
+      urgency: null,
+      lastCallAt: null,
+      lastCallOutcome: null,
+      callCount: 0,
+      priorityScore: 0,
     });
   }
 
@@ -637,6 +675,76 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
     ...Array.from(byEmail.values()),
     ...Array.from(byNameAndPhone.values()),
   ];
+
+  // ── Call-log summary + priority-score post-pass ──
+  // Join call_logs by leadId, then compute a composite priority for the
+  // Call list view. Buckets (hot/cold/viewed/replied/all) filter on
+  // top of this ranking.
+  const leadIdsForCalls = leads.map((l) => l.leadId).filter((v): v is string => !!v);
+  if (leadIdsForCalls.length > 0) {
+    const { data: calls } = await sb
+      .from("call_logs")
+      .select("lead_id, called_at, outcome")
+      .eq("organization_id", ORG_ID)
+      .in("lead_id", leadIdsForCalls)
+      .order("called_at", { ascending: false });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const c of ((calls ?? []) as any[])) {
+      const target = leads.find((l) => l.leadId === c.lead_id);
+      if (!target) continue;
+      if (!target.lastCallAt) {
+        target.lastCallAt = c.called_at;
+        target.lastCallOutcome = c.outcome;
+      }
+      target.callCount += 1;
+    }
+  }
+
+  // Composite priority — mirrors the inbox call ranker, tuned for the
+  // per-property view: hot buyers with a phone that haven't been
+  // touched top the list; dead / wrong_number sink; already-called-today
+  // deprioritizes.
+  for (const lead of leads) {
+    let score = 0;
+    if (lead.urgency === "hot") score += 100;
+    else if (lead.urgency === "warm") score += 60;
+    else if (lead.urgency === "cold") score += 20;
+    else score += 30;
+
+    // Interest signal — engaged CREXi entries beat plain viewers
+    if (lead.interest === "executed_ca" || lead.interest === "offer_submitted") score += 50;
+    else if (lead.interest === "info_request") score += 30;
+    else if (lead.interest === "downloaded_om") score += 20;
+
+    if (lead.phone) score += 30;
+    if (lead.email && !lead.phone) score += 10;
+    if (!lead.phone && !lead.email) score -= 50;
+
+    // Fresher activity = higher priority
+    if (lead.lastActivityAt) {
+      const days = Math.max(
+        0,
+        (Date.now() - new Date(lead.lastActivityAt).getTime()) / 86_400_000
+      );
+      if (days < 7) score += Math.round(30 * (1 - days / 7));
+    }
+
+    // Already-touched signals
+    if (lead.lastTouchedAt) score -= 20; // Already emailed
+    if (lead.repliedAt) score += 40;     // They replied → high priority
+
+    // Call log dampening
+    if (lead.lastCallAt) {
+      const daysSinceCall = (Date.now() - new Date(lead.lastCallAt).getTime()) / 86_400_000;
+      if (daysSinceCall < 1) score -= 60;
+      else if (daysSinceCall < 3) score -= 30;
+      if (lead.lastCallOutcome === "dead" || lead.lastCallOutcome === "wrong_number") score -= 100;
+    } else if (!lead.lastTouchedAt) {
+      score += 40; // Never touched at all
+    }
+
+    lead.priorityScore = Math.round(score);
+  }
 
   // Sort: hot actions first, then by last activity desc
   const interestRank: Record<LeadInterestLevel, number> = {

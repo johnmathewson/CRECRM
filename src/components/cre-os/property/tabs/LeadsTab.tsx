@@ -7,6 +7,7 @@ import { Panel } from "@/components/cre-os/Panel";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { SendTouchDialog } from "@/components/cre-os/prospector/SendTouchDialog";
 import { useContactDrawer } from "@/components/cre-os/ContactDrawer";
+import { ContactCallPanel } from "@/components/cre-os/inbox/ContactCallPanel";
 import type {
   PropertyLeadsSnapshot,
   PropertyLead,
@@ -92,6 +93,8 @@ export function LeadsTab({
   const { activity, leads, totals } = snapshot;
   const { openLead } = useContactDrawer();
   const [filter, setFilter] = useState<FilterTab>("hot");
+  const [viewMode, setViewMode] = useState<"rows" | "call">("rows");
+  const [callPanelLeadId, setCallPanelLeadId] = useState<string | null>(null);
   const [searchQ, setSearchQ] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [composeTarget, setComposeTarget] = useState<PropertyLead | null>(null);
@@ -360,6 +363,37 @@ export function LeadsTab({
             count={leads.filter((l) => l.repliedAt).length}
           />
           <FilterChip label="All" active={filter === "all"} onClick={() => setFilter("all")} count={totals.leadCount} />
+          {/* View toggle — Rows (existing table/cards) vs Call (priority-sorted rows with tap-to-dial + panel) */}
+          <div
+            role="tablist"
+            aria-label="View"
+            className="ml-2 inline-flex items-center rounded border border-white/[0.08] bg-white/[0.02] p-0.5"
+          >
+            <button
+              role="tab"
+              aria-selected={viewMode === "rows"}
+              onClick={() => setViewMode("rows")}
+              className={`px-2.5 py-1 rounded font-mono text-[10px] uppercase tracking-eyebrow transition-colors ${
+                viewMode === "rows"
+                  ? "bg-coral-400/[0.15] text-coral-300"
+                  : "text-cream-subtle hover:text-cream"
+              }`}
+            >
+              Rows
+            </button>
+            <button
+              role="tab"
+              aria-selected={viewMode === "call"}
+              onClick={() => setViewMode("call")}
+              className={`px-2.5 py-1 rounded font-mono text-[10px] uppercase tracking-eyebrow transition-colors ${
+                viewMode === "call"
+                  ? "bg-coral-400/[0.15] text-coral-300"
+                  : "text-cream-subtle hover:text-cream"
+              }`}
+            >
+              Call
+            </button>
+          </div>
           <input
             type="search"
             value={searchQ}
@@ -512,8 +546,25 @@ export function LeadsTab({
           </p>
         ) : (
           <>
+            {/* CALL view — priority-sorted call rows with tap-to-dial +
+                slide-out panel. Same bucket filters + search apply. */}
+            {viewMode === "call" && (
+              <div className="space-y-2">
+                {[...filtered]
+                  .sort((a, b) => b.priorityScore - a.priorityScore)
+                  .map((l) => (
+                    <PropertyCallRow
+                      key={l.id}
+                      lead={l}
+                      onOpen={() => l.leadId && setCallPanelLeadId(l.leadId)}
+                    />
+                  ))}
+              </div>
+            )}
+
             {/* Mobile: stacked cards. Each lead is its own block with clear
                 tap targets — checkbox, name, interest chip, key data, action. */}
+            {viewMode === "rows" && (
             <div className="lg:hidden space-y-2">
               {filtered.map((l) => (
                 <LeadCardMobile
@@ -525,8 +576,10 @@ export function LeadsTab({
                 />
               ))}
             </div>
+            )}
 
-            {/* Desktop: full data table */}
+            {/* Desktop: full data table (only in rows view) */}
+            {viewMode === "rows" && (
             <div className="hidden lg:block overflow-x-auto -mx-5 px-5">
               <table className="w-full font-body text-[11.5px]">
                 <thead>
@@ -653,9 +706,18 @@ export function LeadsTab({
                 </tbody>
               </table>
             </div>
+            )}
           </>
         )}
       </Panel>
+
+      {/* Contact call panel — slides in from the right when a call row
+          is clicked. Shows full Gmail history + log-a-call form + notes
+          editor without leaving the property workspace. */}
+      <ContactCallPanel
+        leadId={callPanelLeadId}
+        onClose={() => setCallPanelLeadId(null)}
+      />
 
       {/* Individual compose dialog — pre-fills To: email and wires the
           AI-draft button to anchor on this specific lead's engagement */}
@@ -942,6 +1004,139 @@ function Stat({ label, value, tone = "default" }: { label: string; value: number
     <div className="rounded border border-white/[0.05] bg-white/[0.02] px-3 py-2">
       <div className="font-mono text-[9px] uppercase tracking-eyebrow text-cream-subtle">{label}</div>
       <div className={`mt-0.5 font-display text-xl tabular-nums ${t}`}>{value.toLocaleString()}</div>
+    </div>
+  );
+}
+
+// ── Property Call Row — compact call-list entry inside LeadsTab's Call view ──
+// Same UX pattern as the inbox call list: tap-to-dial phone button on the
+// right (stopPropagation so it doesn't also open the panel), context on the
+// left. Click anywhere else on the row → onOpen fires and ContactCallPanel
+// slides in. Rows without a leadId (pure CREXi panel entries with no leads
+// join) skip the panel-open behavior and just render as reference.
+function PropertyCallRow({
+  lead,
+  onOpen,
+}: {
+  lead: PropertyLead;
+  onOpen: () => void;
+}) {
+  const hasLead = !!lead.leadId;
+  const lastTouch = (() => {
+    if (lead.lastCallAt) {
+      const days = Math.floor((Date.now() - new Date(lead.lastCallAt).getTime()) / 86_400_000);
+      const outcome = lead.lastCallOutcome ? ` · ${lead.lastCallOutcome.replace(/_/g, " ")}` : "";
+      return days === 0 ? `Called today${outcome}` : `Called ${days}d ago${outcome}`;
+    }
+    if (lead.repliedAt) return "Replied";
+    if (lead.lastTouchedAt) return "Emailed";
+    return "Never contacted";
+  })();
+  const priorityTone =
+    lead.priorityScore >= 100 ? "coral" : lead.priorityScore >= 60 ? "amber" : "neutral";
+  const interestLabel = INTEREST_LABEL[lead.interest];
+
+  return (
+    <div
+      role={hasLead ? "button" : undefined}
+      tabIndex={hasLead ? 0 : undefined}
+      onClick={hasLead ? onOpen : undefined}
+      onKeyDown={hasLead ? (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
+      } : undefined}
+      className={`group rounded border bg-white/[0.02] ${
+        hasLead ? "hover:bg-white/[0.05] cursor-pointer" : "opacity-70"
+      } transition-colors p-4 flex items-start gap-4 ${
+        priorityTone === "coral"
+          ? "border-l-2 border-l-coral-400 border-y-white/[0.06] border-r-white/[0.06]"
+          : priorityTone === "amber"
+            ? "border-l-2 border-l-amber-400/60 border-y-white/[0.05] border-r-white/[0.05]"
+            : "border-white/[0.05]"
+      }`}
+    >
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-heading text-[14px] font-semibold text-cream group-hover:text-coral-300 transition-colors truncate">
+            {lead.name}
+          </span>
+          {lead.urgency && (
+            <span
+              className={`inline-flex items-center px-1.5 py-0.5 rounded border font-mono text-[9.5px] uppercase tracking-eyebrow ${
+                lead.urgency === "hot"
+                  ? "border-coral-400/40 bg-coral-400/[0.10] text-coral-300"
+                  : lead.urgency === "warm"
+                    ? "border-amber-400/40 bg-amber-400/[0.10] text-amber-300"
+                    : "border-white/[0.08] bg-white/[0.02] text-cream-subtle"
+              }`}
+            >
+              {lead.urgency}
+            </span>
+          )}
+          {lead.interest !== "unknown" && (
+            <span
+              className={`inline-flex items-center px-1.5 py-0.5 rounded border font-mono text-[9.5px] uppercase tracking-eyebrow ${INTEREST_TONE[lead.interest]}`}
+            >
+              {interestLabel}
+            </span>
+          )}
+          {lead.company && (
+            <span className="font-mono text-[10px] text-cream-subtle truncate">
+              · {lead.company}
+            </span>
+          )}
+        </div>
+        {lead.notes && (
+          <p className="mt-1 font-body text-[12px] text-cream-dim line-clamp-2">
+            {lead.notes}
+          </p>
+        )}
+        <div className="mt-2 flex items-center gap-3 flex-wrap font-mono text-[10.5px] text-cream-subtle">
+          <span>{lastTouch}</span>
+          {lead.callCount > 0 && (
+            <>
+              <span className="opacity-40">·</span>
+              <span>
+                {lead.callCount} call{lead.callCount === 1 ? "" : "s"}
+              </span>
+            </>
+          )}
+          {lead.visitCount != null && lead.visitCount > 0 && (
+            <>
+              <span className="opacity-40">·</span>
+              <span>{lead.visitCount} view{lead.visitCount === 1 ? "" : "s"}</span>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="shrink-0 flex flex-col items-end gap-1.5">
+        {lead.phone ? (
+          <a
+            href={`tel:${lead.phone}`}
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-teal-400/50 bg-teal-400/[0.12] hover:bg-teal-400/[0.22] font-heading text-[11.5px] font-semibold text-teal-300 transition-colors whitespace-nowrap"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5">
+              <path
+                d="M22 16.92v3a2 2 0 0 1-2.18 2 19.86 19.86 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.86 19.86 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            {lead.phone}
+          </a>
+        ) : (
+          <span className="font-mono text-[10px] text-cream-subtle">
+            {lead.email ? "no phone · email only" : "no channel"}
+          </span>
+        )}
+        <span className="font-mono text-[9.5px] text-cream-subtle">
+          score {lead.priorityScore}
+        </span>
+      </div>
     </div>
   );
 }
