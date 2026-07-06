@@ -57,6 +57,18 @@ export interface LeadCard {
   hoursSinceArrival: number;
   /** Past the 60-min substantive-reply SLA? */
   slaOverdue: boolean;
+
+  // ── Call list fields — surfaced on both views since they're cheap ──
+  /** Contact.id — used by the call panel to fetch Gmail thread history */
+  contactId: string | null;
+  /** ISO of most recent call log entry, or null if never called */
+  lastCallAt: string | null;
+  /** Outcome of the most recent call attempt */
+  lastCallOutcome: string | null;
+  /** How many calls we've logged on this lead */
+  callCount: number;
+  /** Composite priority score for the call list — higher = call sooner */
+  priorityScore: number;
 }
 
 export interface LeadDetail {
@@ -123,16 +135,44 @@ export async function loadInboxList(): Promise<LeadCard[]> {
     .from("leads")
     .select(
       `id, source, status, intent, urgency, sender_name, sender_email, sender_phone,
-       property_label, qualifier_summary, raw_subject, raw_body,
+       property_label, qualifier_summary, raw_subject, raw_body, contact_id,
        draft_reply, auto_ack_sent_at, final_sent_at, linked_deal_id, created_at,
-       property:properties(id, name, slug)`,
+       property:properties(id, name, slug, status)`,
     )
     .eq("organization_id", ORG_ID)
     .order("created_at", { ascending: false })
     .limit(200);
 
+  const leadIds = ((rows ?? []) as any[]).map((r) => r.id);
+
+  // Fetch call summaries per lead — one round-trip, group in memory.
+  // Empty at first because call_logs was just added, but this is the
+  // load-bearing input to the priority ranker.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const callSummary = new Map<string, { last: string; outcome: string; count: number }>();
+  if (leadIds.length > 0) {
+    const { data: calls } = await sb
+      .from("call_logs")
+      .select("lead_id, called_at, outcome")
+      .eq("organization_id", ORG_ID)
+      .in("lead_id", leadIds)
+      .order("called_at", { ascending: false });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const c of ((calls ?? []) as any[])) {
+      const prev = callSummary.get(c.lead_id);
+      if (!prev) {
+        callSummary.set(c.lead_id, { last: c.called_at, outcome: c.outcome, count: 1 });
+      } else {
+        callSummary.set(c.lead_id, { ...prev, count: prev.count + 1 });
+      }
+    }
+  }
+
   return ((rows ?? []) as any[]).map((r): LeadCard => {
-    const property = castOne<{ id: string; name: string; slug: string }>(r.property);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const propertyRaw = castOne<{ id: string; name: string; slug: string; status: string | null }>(r.property as any);
+    const property = propertyRaw ? { id: propertyRaw.id, name: propertyRaw.name, slug: propertyRaw.slug } : null;
+    const propertyStatus = (propertyRaw?.status ?? "").toLowerCase();
     const senderDisplay = r.sender_name?.trim() || r.sender_email || r.sender_phone || "Unknown";
     const hours = r.created_at
       ? Math.max(0, (Date.now() - new Date(r.created_at).getTime()) / 3_600_000)
@@ -140,6 +180,49 @@ export async function loadInboxList(): Promise<LeadCard[]> {
     const status = (r.status ?? "").toLowerCase();
     const slaOverdue =
       status === "new" && hours > 1 && !r.final_sent_at;
+
+    const call = callSummary.get(r.id) ?? null;
+    const hasPhone = !!r.sender_phone;
+    const hasEmail = !!r.sender_email;
+    const finalSent = !!r.final_sent_at;
+    const propertyActive = ["listed", "under_contract", "prospecting", "pitched"].includes(propertyStatus);
+
+    // Composite priority score for the call list. Higher = call sooner.
+    // Tuned so: hot buyers with a phone we haven't touched > everything;
+    // dead / wrong-number leads sink to the bottom.
+    let score = 0;
+    const urgency = (r.urgency ?? "").toLowerCase();
+    if (urgency === "hot") score += 100;
+    else if (urgency === "warm") score += 60;
+    else if (urgency === "cold") score += 20;
+    else score += 30;
+
+    const intent = (r.intent ?? "").toLowerCase();
+    const intentMult = intent === "buyer" || intent === "tenant"
+      ? 1.0
+      : intent === "browser"
+        ? 0.5
+        : intent === "tourist"
+          ? 0.2
+          : 0.7;
+    score = score * intentMult;
+
+    if (hasPhone) score += 30;
+    if (hasEmail && !hasPhone) score += 10;
+    if (!hasPhone && !hasEmail) score -= 50;
+    if (propertyActive) score += 20;
+    if (!call && !finalSent) score += 40; // Never touched → highest priority
+    if (finalSent) score -= 20;             // Already emailed
+    if (call) {
+      const daysSinceCall = (Date.now() - new Date(call.last).getTime()) / 86_400_000;
+      if (daysSinceCall < 1) score -= 60;   // Called today — don't spam
+      else if (daysSinceCall < 3) score -= 30;
+      if (call.outcome === "dead" || call.outcome === "wrong_number") score -= 100;
+    }
+    if (status === "archived" || status === "spam") score -= 200;
+    // Freshness bonus — decays over 7 days
+    const daysSinceArrival = Math.max(0, hours / 24);
+    if (daysSinceArrival < 7) score += Math.round(30 * (1 - daysSinceArrival / 7));
 
     return {
       id: r.id,
@@ -157,12 +240,17 @@ export async function loadInboxList(): Promise<LeadCard[]> {
       bodyPreview: previewBody(r.raw_body, r.source),
       hasDraft: !!r.draft_reply,
       ackSent: !!r.auto_ack_sent_at,
-      finalSent: !!r.final_sent_at,
+      finalSent,
       promotedToDeal: !!r.linked_deal_id,
       createdAt: r.created_at,
       createdRelative: relativeTime(r.created_at),
       hoursSinceArrival: hours,
       slaOverdue,
+      contactId: r.contact_id ?? null,
+      lastCallAt: call?.last ?? null,
+      lastCallOutcome: call?.outcome ?? null,
+      callCount: call?.count ?? 0,
+      priorityScore: Math.round(score),
     };
   });
 }

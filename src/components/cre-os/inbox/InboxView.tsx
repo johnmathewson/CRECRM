@@ -1,12 +1,15 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/cre-os/AppShell";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { Panel } from "@/components/cre-os/Panel";
 import type { RailSection } from "@/components/cre-os/InsightsRail";
 import type { InsightItem } from "@/components/cre-os/InsightCard";
 import { LeadCard } from "./LeadCard";
+import { CallListView } from "./CallListView";
+import { ContactCallPanel } from "./ContactCallPanel";
 import type { LeadBucket, LeadCard as LeadCardData } from "@/lib/cre-os/inbox-queries";
 import { bucketsForLead } from "@/lib/cre-os/inbox-bucket";
 
@@ -20,6 +23,25 @@ import { bucketsForLead } from "@/lib/cre-os/inbox-bucket";
  * leads from.
  */
 export function InboxView({ leads }: { leads: LeadCardData[] }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const viewParam = searchParams?.get("view");
+  const view: "inbox" | "call" = viewParam === "call" ? "call" : "inbox";
+  const openLeadId = searchParams?.get("leadId") ?? null;
+
+  const updateParams = useCallback(
+    (patch: Record<string, string | null>) => {
+      const params = new URLSearchParams(searchParams?.toString() ?? "");
+      for (const [k, v] of Object.entries(patch)) {
+        if (v === null) params.delete(k);
+        else params.set(k, v);
+      }
+      const qs = params.toString();
+      router.replace(qs ? `?${qs}` : "?");
+    },
+    [router, searchParams],
+  );
+
   const [bucket, setBucket] = useState<LeadBucket>("needs-response");
   const [q, setQ] = useState("");
 
@@ -172,9 +194,51 @@ export function InboxView({ leads }: { leads: LeadCardData[] }) {
           />
         </div>
 
+        {/* View toggle — Inbox (bucket-filtered chronology) vs Call list (priority-ranked outbound) */}
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle mr-1">
+            View
+          </span>
+          <div
+            role="tablist"
+            aria-label="View"
+            className="inline-flex items-center rounded border border-white/[0.08] bg-white/[0.02] p-0.5"
+          >
+            <button
+              role="tab"
+              aria-selected={view === "inbox"}
+              onClick={() => updateParams({ view: null })}
+              className={`px-2.5 py-1 rounded font-mono text-[10px] uppercase tracking-eyebrow transition-colors ${
+                view === "inbox"
+                  ? "bg-coral-400/[0.15] text-coral-300"
+                  : "text-cream-subtle hover:text-cream"
+              }`}
+            >
+              Inbox
+            </button>
+            <button
+              role="tab"
+              aria-selected={view === "call"}
+              onClick={() => updateParams({ view: "call" })}
+              className={`px-2.5 py-1 rounded font-mono text-[10px] uppercase tracking-eyebrow transition-colors ${
+                view === "call"
+                  ? "bg-coral-400/[0.15] text-coral-300"
+                  : "text-cream-subtle hover:text-cream"
+              }`}
+            >
+              Call list
+            </button>
+          </div>
+        </div>
+
         {/* List */}
         <div className="space-y-3 pb-8">
-          {filtered.length === 0 ? (
+          {view === "call" ? (
+            <CallListView
+              leads={leads}
+              onOpen={(leadId) => updateParams({ leadId })}
+            />
+          ) : filtered.length === 0 ? (
             <Panel>
               <p className="font-body text-[13px] text-cream-subtle py-8 text-center">
                 {labelForEmpty(bucket)}
@@ -185,6 +249,10 @@ export function InboxView({ leads }: { leads: LeadCardData[] }) {
           )}
         </div>
       </div>
+      <ContactCallPanel
+        leadId={openLeadId}
+        onClose={() => updateParams({ leadId: null })}
+      />
     </AppShell>
   );
 }
