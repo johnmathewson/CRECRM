@@ -484,8 +484,37 @@ export function ContactCallPanel({
                   <p className="font-body text-[12px] text-cream-dim">Loading Gmail…</p>
                 )}
                 {threadsError && (
-                  <div className="rounded border border-amber-400/30 bg-amber-500/[0.06] px-3 py-2 font-body text-[12px] text-amber-300">
-                    {threadsError}
+                  <div className="rounded border border-amber-400/30 bg-amber-500/[0.06] px-3 py-2.5 space-y-2">
+                    <p className="font-body text-[12px] text-amber-300">
+                      {/(401|unauthenticat|invalid.*credential|expected oauth|not connected)/i.test(threadsError)
+                        ? "Couldn't load Gmail history — the Gmail connection needs to be re-authorized."
+                        : "Couldn't load Gmail history — Gmail didn't respond. This is usually temporary."}
+                    </p>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => lead.contactId && reloadThreads(lead.contactId)}
+                        disabled={threadsLoading || !lead.contactId}
+                        className="px-2.5 py-1 rounded border border-amber-400/40 bg-amber-400/[0.12] hover:bg-amber-400/[0.22] font-heading text-[10px] uppercase tracking-eyebrow font-semibold text-amber-300 transition-colors disabled:opacity-40"
+                      >
+                        {threadsLoading ? "Retrying…" : "Retry"}
+                      </button>
+                      {/(401|unauthenticat|invalid.*credential|expected oauth|not connected)/i.test(threadsError) && (
+                        <a
+                          href="/cre-os/settings"
+                          className="font-heading text-[10px] uppercase tracking-eyebrow text-teal-400 hover:underline"
+                        >
+                          Reconnect Gmail →
+                        </a>
+                      )}
+                    </div>
+                    <details>
+                      <summary className="cursor-pointer font-mono text-[10px] text-cream-subtle">
+                        Technical details
+                      </summary>
+                      <p className="mt-1 font-mono text-[10px] text-cream-subtle break-all whitespace-pre-wrap">
+                        {threadsError}
+                      </p>
+                    </details>
                   </div>
                 )}
                 {!threadsLoading && !threadsError && threads.length === 0 && (

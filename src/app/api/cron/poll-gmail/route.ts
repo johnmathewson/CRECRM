@@ -520,10 +520,17 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
           // creation time via linkOrphanedComms in intake + crexi-report.
           // This job only needs to catch emails John sends directly from Gmail
           // (outside the CRM) — those will never appear in communications at all.
+          // NOTE: .limit(1) is load-bearing. Without it, .maybeSingle() throws
+          // once >1 row already shares this external_id — which flips the guard
+          // to "not logged" and inserts YET another dupe. Concurrent polls
+          // (this cron fires every minute) had raced past the check and seeded
+          // duplicates, and the erroring guard then snowballed them. Capping at
+          // one row makes the existence check correct again.
           const { data: alreadyLogged } = await supabase
             .from("communications")
             .select("id")
             .eq("external_id", ref.id)
+            .limit(1)
             .maybeSingle();
           if (alreadyLogged) { skipped++; continue; }
 
@@ -557,6 +564,11 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
           await supabase.from("communications").insert({
             organization_id: ORG_ID,
             lead_id: matchedLead.id,
+            // Link to the lead's contact so the email shows on the contact
+            // timeline + Gmail-history panel. For outbound mail WE are the
+            // sender, so the counterparty is the recipient — taken from the
+            // matched lead's contact_id, not from_address (always our mailbox).
+            contact_id: (matchedLead.contact_id as string | null) ?? null,
             property_id: (matchedLead.property_id as string | null) ?? null,
             channel: "email",
             direction: "outbound",

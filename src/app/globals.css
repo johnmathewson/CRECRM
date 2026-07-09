@@ -116,6 +116,13 @@
 .canvas-light .text-teal-400,
 .canvas-light .text-teal-300 { color: #1E9C90; }    /* deeper teal reads on white */
 .canvas-light .text-amber { color: #B8860B; }       /* amber on white needs depth */
+/* The stock Tailwind amber-200/300/400 are bright yellows that vanish on the
+   light glass (the theme only darkens the custom `.text-amber`). Retarget the
+   numeric text shades to a deep amber so warnings/notes stay readable. Borders,
+   bg fills and ::marker keep their bright tint — only the text color flips. */
+.canvas-light .text-amber-200,
+.canvas-light .text-amber-300,
+.canvas-light .text-amber-400 { color: #B45309; }   /* amber-700 — reads on white */
 
 html {
   -webkit-font-smoothing: antialiased;
