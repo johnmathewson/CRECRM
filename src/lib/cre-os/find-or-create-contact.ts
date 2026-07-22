@@ -44,6 +44,27 @@ function normalizePhone(p: string | null | undefined): string | null {
   return digits ? `+${digits}` : null;
 }
 
+// Identity-strength name comparison. Two people are considered the same
+// only when BOTH first-name AND last-name tokens match (case-insensitive,
+// punctuation-stripped). Handles "Anthony L Gutierrez" vs "Anthony
+// Gutierrez" (same first+last) but rejects "Anthony Gutierrez" vs "Brett
+// McDermott" — even if they share a phone number.
+//
+// Used exclusively on phone-only matches. Phone-alone identity was the
+// root cause of the 2026-07 contacts corruption (26% of CREXi-linked
+// contacts were mis-attributed).
+function nameSimilar(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  const tokens = (s: string) =>
+    s.toLowerCase().replace(/[^a-z\s]/g, "").split(/\s+/).filter(Boolean);
+  const ta = tokens(a);
+  const tb = tokens(b);
+  if (ta.length === 0 || tb.length === 0) return false;
+  const firstMatch = ta[0] === tb[0];
+  const lastMatch  = ta[ta.length - 1] === tb[tb.length - 1];
+  return firstMatch && lastMatch;
+}
+
 // CREXi interest-level → warmth mapping. Anything CA-level or stronger is hot.
 function warmthFor(level: string | null | undefined): "hot" | "warm" | "cold" {
   if (!level) return "warm";
@@ -132,26 +153,35 @@ export async function findOrCreateContact(
     }
   }
 
-  // ── 2. Try phone (compare normalized digits) ─────────────────────────
-  if (phone) {
+  // ── 2. Try phone + name (both must match — no phone-alone matches) ──
+  //
+  // ROOT-CAUSE FIX: previously this matched on phone alone, then backfilled
+  // the incoming row's email onto the matched contact. Two failure modes
+  // that corrupted ~26% of CREXi contacts:
+  //   1) Two different people share a phone (broker office line, family,
+  //      CREXi data-entry mixup) → one gets attached to the other's contact
+  //   2) Email backfill silently overwrote fields belonging to the WRONG
+  //      person, propagating the mis-attribution downstream
+  //
+  // The fix: phone match requires BOTH phone AND name similarity (same
+  // first + last name). Email backfill on phone-match is removed entirely —
+  // if the incoming email doesn't match, we'd rather over-create than
+  // silently cross-attach.
+  if (phone && name) {
     const { data: candidates } = await sb
       .from("contacts")
-      .select("id, phone")
+      .select("id, phone, full_name")
       .eq("organization_id", ORG_ID)
       .not("phone", "is", null);
     if (candidates) {
-      const found = candidates.find(
-        (c: { id: string; phone: string | null }) => normalizePhone(c.phone) === phone
+      const found = (candidates as { id: string; phone: string | null; full_name: string | null }[]).find(
+        (c) => normalizePhone(c.phone) === phone && nameSimilar(c.full_name, name)
       );
       if (found) {
-        // Backfill email if we have one
-        if (email) {
-          const { data: existing } = await sb
-            .from("contacts").select("email").eq("id", found.id).maybeSingle();
-          if (existing && !existing.email) {
-            await sb.from("contacts").update({ email }).eq("id", found.id);
-          }
-        }
+        // Intentionally NO email backfill. If the phone matches and the
+        // name matches but the emails differ, that's most likely the
+        // same person using a new email — better to keep the canonical
+        // email on the contact and let the CREXi row keep its own copy.
         return { contactId: found.id as string, created: false, matched: "phone" };
       }
     }

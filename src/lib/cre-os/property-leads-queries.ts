@@ -465,17 +465,26 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       byEmail.set(emailKey, lead);
       return;
     }
-    // No email — first check if an already-added has-email row has the
-    // SAME NAME. If so, merge into that row (this is the case where a
-    // CREXi row has the canonical email + a leads-table row for the same
-    // person has no email — we want to surface them as ONE row, not two).
+    // No email — try to merge into an already-added has-email row, but
+    // ONLY if we have a strong identity signal (same phone). Merging by
+    // NAME ALONE was the source of a real bug: two different people
+    // named "John Smith" (or common surnames like Patel / Khan / Singh)
+    // got merged, with the no-email row's phone/company/role overwriting
+    // the email-row's fields — producing "name X shown with wrong
+    // company Y" on the Leads tab. Same reasoning as
+    // feedback_no_surname_family_inference: same name != same person.
     const nameLc = lead.name.toLowerCase().trim();
-    if (nameLc && nameLc !== "(unknown)") {
+    const phoneKey = normalizePhone(lead.phone);
+    if (phoneKey && nameLc && nameLc !== "(unknown)") {
       for (const existing of Array.from(byEmail.values())) {
-        if (existing.name.toLowerCase().trim() === nameLc) {
-          // Merge non-conflicting fields into the email-bearing row
+        // Require BOTH same name AND same phone — a much stronger
+        // identity signal than name alone. Different phones = different
+        // people, even with the same name.
+        if (
+          existing.name.toLowerCase().trim() === nameLc &&
+          normalizePhone(existing.phone) === phoneKey
+        ) {
           existing.leadId = existing.leadId ?? lead.leadId;
-          existing.phone = existing.phone ?? lead.phone;
           existing.company = existing.company ?? lead.company;
           existing.role = existing.role ?? lead.role;
           existing.signedNda = existing.signedNda || lead.signedNda;
@@ -490,9 +499,22 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
         }
       }
     }
-    // Still no email match — dedupe by name + phone within the no-email bucket
-    const key = `${nameLc}::${lead.phone ?? ""}`;
+    // Still no strong match — bucket by name + phone. When phone is
+    // null, use the lead id as the disambiguator so two nameless-phoneless
+    // rows don't collide with each other. Trade-off: this can produce
+    // separate rows for what IS the same person when both sides lack
+    // email + phone; that's a cleaner failure mode than mis-attributing
+    // one person's company to another. A future "merge these" UI can
+    // reconcile.
+    const key = phoneKey
+      ? `${nameLc}::${phoneKey}`
+      : `${nameLc}::__no_phone__::${lead.id}`;
     if (!byNameAndPhone.has(key)) byNameAndPhone.set(key, lead);
+  }
+
+  function normalizePhone(p: string | null | undefined): string {
+    if (!p) return "";
+    return String(p).replace(/\D/g, "");
   }
 
   // CREXi state rows
