@@ -225,6 +225,37 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "raw_body or raw_subject required" }, { status: 400 });
   }
 
+  // Every CREXi lead must have an email. CREXi requires a verified email
+  // to interact with any listing — anyone on there has one. If we're
+  // receiving a CREXi lead without an email, our scraper (browser
+  // extension) is dropping the field, and downstream matching then
+  // falls back to phone-alone which caused the 2026-07 contacts
+  // corruption. Reject at the boundary so bad payloads don't enter the
+  // system, and log the reject so we can spot the scraper regressing.
+  if (body.source === "crexi") {
+    const email = typeof body.sender_email === "string" ? body.sender_email.trim() : "";
+    if (!email || !email.includes("@")) {
+      console.warn(
+        "[leads/intake] Rejected CREXi lead without email — scraper may be dropping the field",
+        {
+          sender_name: body.sender_name,
+          sender_phone: body.sender_phone,
+          source_message_id: body.source_message_id,
+          raw_body_preview: typeof body.raw_body === "string" ? body.raw_body.slice(0, 200) : null,
+        }
+      );
+      return NextResponse.json(
+        {
+          error:
+            "CREXi lead intake requires sender_email. All CREXi leads have verified emails — " +
+            "receiving one without an email indicates the scraper missed it. Reject to prevent " +
+            "contact corruption via phone-only matching.",
+        },
+        { status: 400 }
+      );
+    }
+  }
+
   const supabase = svc();
 
   // ── 0. Dedup by source_message_id ─────────────────────────────────────────
