@@ -143,8 +143,10 @@ function normalizeInterest(s: string | null | undefined): LeadInterestLevel {
   if (v.includes("executed") && v.includes("ca")) return "executed_ca";
   if (v.includes("offer")) return "offer_submitted";
   if (v.includes("info") && v.includes("request")) return "info_request";
-  if (v.includes("downloaded") || v.includes("opened")) return "downloaded_om";
-  if (v.includes("view")) return "visited";
+  if (v.includes("downloaded") || v.includes("opened") || v.includes("flyer")) return "downloaded_om";
+  // "view" catches "Viewed" / "Visited Page"; "visit" catches "Visitor";
+  // "follower" is CREXi's "watching from a distance" tier — still viewing.
+  if (v.includes("view") || v.includes("visit") || v.includes("follower")) return "visited";
   return "unknown";
 }
 
@@ -602,6 +604,7 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
     status: string | null;
     qualifier_summary: string | null;
     source: string | null;
+    auto_ack_sent_at: string | null;
     final_sent_at: string | null;
     created_at: string;
     updated_at: string;
@@ -629,7 +632,12 @@ export async function loadPropertyLeads(propertyId: string): Promise<PropertyLea
       interestRaw: l.qualifier_summary,
       visitCount: null,
       leadScore: null,
-      lastActivityAt: l.updated_at,
+      // Real lead-side activity signals only. Prefer final_sent_at
+      // (we replied) → auto_ack_sent_at (auto-ack fired) → created_at
+      // (lead landed). Deliberately NOT updated_at — that fires on any
+      // row mutation (contact_id rewire, sender_name sync, etc.) and
+      // was showing "today" for every row after the corruption sweep.
+      lastActivityAt: l.final_sent_at ?? l.auto_ack_sent_at ?? l.created_at,
       firstSeenAt: l.created_at,
       respondedAt: lastTouchedAt, // back-compat alias
       lastTouchedAt,
