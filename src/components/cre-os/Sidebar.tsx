@@ -43,6 +43,12 @@ const ICON = {
       <path d="M22 12h-6l-2 3h-4l-2-3H2M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
+  mail: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <path d="m2 7 10 6 10-6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
   users: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4">
       <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" strokeLinecap="round" strokeLinejoin="round" />
@@ -115,6 +121,7 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
       { label: "Properties",    href: "/cre-os/properties",     icon: ICON.building, legacyHref: "/properties" },
       { label: "Pipeline",      href: "/cre-os/pipeline",       icon: ICON.pipeline, legacyHref: "/deals" },
       { label: "Inbox",         href: "/cre-os/inbox",          icon: ICON.inbox },
+      { label: "Comms log",     href: "/cre-os/communications", icon: ICON.mail },
       { label: "Relationships", href: "/cre-os/relationships",  icon: ICON.users,    legacyHref: "/contacts" },
     ],
   },
