@@ -89,8 +89,12 @@ function touchKindForSource(source: string | undefined): string {
     case "bulk_ai":
     case "bulk-ai-followup":
       return "ai_followup";
+    // NB: the /api/lane-touches/send route decides between "campaign" and
+    // "manual" itself based on whether a lane was resolved — it can serve
+    // either motion. Don't add its route name here.
     case "lane_touch":
     case "lane-touch":
+    case "cadence":
     case "campaign":
       return "campaign";
     case "ack":

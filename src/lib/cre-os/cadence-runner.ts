@@ -459,6 +459,10 @@ export async function runCadence(options: CadenceRunOptions = {}): Promise<Caden
             contact_id: contact.id,
             lead_id: leadId,                     // null if no lead yet — healed on reply
             property_id: property.id,
+            // Cadence sends ARE the campaign motion. Without this the row
+            // lands with touch_kind=null on an outbound record and shows as
+            // "unclassified" in the comms dashboard.
+            touch_kind: "campaign",
             raw_payload: {
               gmail_message_id: gmailMessageId,
               gmail_thread_id: gmailThreadId,

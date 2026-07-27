@@ -153,6 +153,22 @@ export async function POST(req: NextRequest) {
     source: "outbound_touch",
   });
 
+  // Resolve the lane BEFORE sending. Two things depend on it:
+  //   1. touch_kind on the communications row — a lane-tagged send is
+  //      campaign outbound; an untagged one is a manual one-off.
+  //   2. Whether a lane_touches row belongs at all — that table is
+  //      campaign-scoped (lane_id NOT NULL), so one-offs must skip it.
+  let resolvedLaneId = body.laneId ?? null;
+  if (body.enrollmentId && !body.laneId) {
+    const { data: enr } = await supabase
+      .from("lane_enrollments")
+      .select("lane_id")
+      .eq("organization_id", ORG_ID)
+      .eq("id", body.enrollmentId)
+      .maybeSingle();
+    resolvedLaneId = enr?.lane_id ?? null;
+  }
+
   // Send
   let sent: { id: string; threadId: string };
   let sentAt: string;
@@ -165,7 +181,7 @@ export async function POST(req: NextRequest) {
       leadId: resolvedLeadId,
       propertyId: prop.id,
       contactId: resolvedContactId,
-      source: "lane_touch",
+      source: resolvedLaneId ? "campaign" : "manual",
       updateLeadStatus: !!resolvedLeadId,
       rawPayloadExtra: { lane_touch_source: "lane-touches-send" },
     });
@@ -193,58 +209,51 @@ export async function POST(req: NextRequest) {
     .select("id")
     .single();
 
-  // Lookup lane_id from enrollment if we have one (otherwise rely on the
-  // caller's laneId, or null for true one-off sends).
-  let resolvedLaneId = body.laneId ?? null;
-  if (body.enrollmentId && !body.laneId) {
-    const { data: enr } = await supabase
-      .from("lane_enrollments")
-      .select("lane_id")
-      .eq("organization_id", ORG_ID)
-      .eq("id", body.enrollmentId)
-      .maybeSingle();
-    resolvedLaneId = enr?.lane_id ?? null;
-  }
+  // lane_touches tracks CAMPAIGN state only (lane_id NOT NULL). A one-off
+  // send with no lane has no campaign state to track — the email is already
+  // recorded in communications by sendCrmEmail above, which is the universal
+  // message log. Writing lane_id=null rows here is what previously filled
+  // this table with 108 non-campaign touches.
+  let touchId: string | null = null;
+  if (resolvedLaneId) {
+    const { data: touch, error: touchErr } = await supabase
+      .from("lane_touches")
+      .insert({
+        organization_id: ORG_ID,
+        enrollment_id: body.enrollmentId ?? null,
+        lane_id: resolvedLaneId,
+        property_id: prop.id,
+        contact_id: resolvedContactId,
+        step_index: body.stepIndex ?? 0,
+        channel: "email",
+        status: "sent",
+        sent_at: sentAt,
+        subject: body.subject,
+        body: body.bodyText,
+        activity_id: activity?.id ?? null,
+        metadata: {
+          gmail_message_id: sent.id,
+          gmail_thread_id: sent.threadId,
+          to: recipientEmail,
+          to_name: recipientName ?? null,
+          from: token.email,
+          manual: !body.enrollmentId,
+        },
+      })
+      .select("id")
+      .single();
 
-  // Migration 0026 made enrollment_id + lane_id nullable so manual one-off
-  // sends can land in lane_touches alongside cadence-driven sends.
-  const { data: touch, error: touchErr } = await supabase
-    .from("lane_touches")
-    .insert({
-      organization_id: ORG_ID,
-      enrollment_id: body.enrollmentId ?? null,
-      lane_id: resolvedLaneId,
-      property_id: prop.id,
-      contact_id: resolvedContactId,
-      step_index: body.stepIndex ?? 0,
-      channel: "email",
-      status: "sent",
-      sent_at: sentAt,
-      subject: body.subject,
-      body: body.bodyText,
-      activity_id: activity?.id ?? null,
-      metadata: {
+    if (touchErr) {
+      return NextResponse.json({
+        ok: true,
+        warning: `Email sent but lane_touches insert failed: ${touchErr.message}`,
         gmail_message_id: sent.id,
         gmail_thread_id: sent.threadId,
-        to: recipientEmail,
-        to_name: recipientName ?? null,
-        from: token.email,
-        manual: !body.enrollmentId,
-      },
-    })
-    .select("id")
-    .single();
-
-  if (touchErr) {
-    return NextResponse.json({
-      ok: true,
-      warning: `Email sent but lane_touches insert failed: ${touchErr.message}`,
-      gmail_message_id: sent.id,
-      gmail_thread_id: sent.threadId,
-      activity_id: activity?.id,
-    });
+        activity_id: activity?.id,
+      });
+    }
+    touchId = touch.id;
   }
-  const touchId = touch.id;
 
   // communications row already written by sendCrmEmail above.
   // Patch in lane_touch_id + activity_id now that we have them.

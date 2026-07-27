@@ -203,37 +203,54 @@ export async function maybeRouteAsReply(
     if (contactRow) resolvedContactId = contactRow.id as string;
   }
 
-  // ── 3. Insert the inbound lane_touches row ───────────────────────────
-  const { data: replyRow, error: replyErr } = await supabase
-    .from("lane_touches")
-    .insert({
-      organization_id: ORG_ID,
-      enrollment_id: parent.enrollmentId,
-      lane_id: parent.laneId,
-      property_id: parent.propertyId,
-      contact_id: resolvedContactId,
-      step_index: 0,
-      channel: "email",
-      status: "responded",
-      responded_at: msg.receivedAt,
-      subject: msg.subject,
-      body: msg.bodyText,
-      metadata: {
-        direction: "inbound",
-        gmail_message_id: msg.gmailMessageId,
-        gmail_thread_id: msg.gmailThreadId,
-        parent_id: parent.parentId,
-        parent_source: parent.sourceTable,
-        from_email: msg.fromEmail,
-        from_name: msg.fromName,
-        classification,
-      },
-    })
-    .select("id")
-    .single();
-  if (replyErr) {
-    console.error("[reply-match] failed to insert reply touch:", replyErr.message);
-    return { matched: false };
+  // ── 3. Insert the inbound lane_touches row — CAMPAIGN REPLIES ONLY ───
+  //
+  // lane_touches is campaign-scoped: lane_id is NOT NULL. Only replies whose
+  // parent was itself a lane touch belong here.
+  //
+  // When the parent is a communications row (a bulk-AI follow-up or a manual
+  // send — the large majority of our outbound), there is no lane, so we skip
+  // this table entirely and let step 6 record the reply in communications.
+  // Writing a lane_id=null row here used to "work" and was exactly how
+  // lane_touches accumulated 108 rows of non-campaign traffic; now it would
+  // throw, abort this function early, and silently drop the reply.
+  let replyTouchId: string | null = null;
+  if (parent.sourceTable === "lane_touches" && parent.laneId) {
+    const { data: replyRow, error: replyErr } = await supabase
+      .from("lane_touches")
+      .insert({
+        organization_id: ORG_ID,
+        enrollment_id: parent.enrollmentId,
+        lane_id: parent.laneId,
+        property_id: parent.propertyId,
+        contact_id: resolvedContactId,
+        step_index: 0,
+        channel: "email",
+        status: "responded",
+        responded_at: msg.receivedAt,
+        subject: msg.subject,
+        body: msg.bodyText,
+        metadata: {
+          direction: "inbound",
+          gmail_message_id: msg.gmailMessageId,
+          gmail_thread_id: msg.gmailThreadId,
+          parent_id: parent.parentId,
+          parent_source: parent.sourceTable,
+          from_email: msg.fromEmail,
+          from_name: msg.fromName,
+          classification,
+        },
+      })
+      .select("id")
+      .single();
+    if (replyErr) {
+      // Don't bail — the reply still needs to reach communications so it
+      // shows up in the broker's thread. Losing the campaign-state row is
+      // recoverable; losing the reply is not.
+      console.error("[reply-match] failed to insert reply touch:", replyErr.message);
+    } else {
+      replyTouchId = replyRow?.id ?? null;
+    }
   }
 
   // ── 4. Flip parent state (only meaningful for lane_touches parents) ──
@@ -423,7 +440,10 @@ export async function maybeRouteAsReply(
     contact_id: parent.contactId,
   });
 
-  return { matched: true, touchId: replyRow.id, classification };
+  // touchId is null for communications-parent replies (no lane, so no
+  // lane_touches row was written). No caller reads it today; the field
+  // stays for campaign-reply callers that may want the state row.
+  return { matched: true, touchId: replyTouchId ?? undefined, classification };
 }
 
 /**
