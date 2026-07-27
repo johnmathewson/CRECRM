@@ -12,6 +12,7 @@ import { KpiTile } from "@/components/cre-os/KpiTile";
 // bundled into a client component.
 import {
   TOUCH_KIND_LABEL,
+  CHANNEL_LABEL,
   type CommsSnapshot,
   type CommsRow,
 } from "@/lib/cre-os/communications-types";
@@ -42,6 +43,18 @@ const KIND_TONE: Record<string, string> = {
 
 const KIND_ORDER = ["ai_followup", "campaign", "manual", "auto_ack", "internal"];
 
+const CHANNEL_ORDER = ["email", "website", "sms", "phone", "calendar", "voice"];
+
+const CHANNEL_TONE: Record<string, string> = {
+  email: "border-white/[0.10] bg-white/[0.03] text-cream-dim",
+  website: "border-violet-400/40 bg-violet-400/[0.10] text-violet-300",
+  sms: "border-sky-400/40 bg-sky-400/[0.10] text-sky-300",
+  phone: "border-emerald-400/40 bg-emerald-400/[0.10] text-emerald-300",
+  calendar: "border-white/[0.08] bg-white/[0.02] text-cream-subtle",
+  voice: "border-white/[0.08] bg-white/[0.02] text-cream-subtle",
+  manual_test: "border-white/[0.06] bg-white/[0.01] text-cream-subtle",
+};
+
 export function CommunicationsView({ snapshot }: { snapshot: CommsSnapshot }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -49,6 +62,7 @@ export function CommunicationsView({ snapshot }: { snapshot: CommsSnapshot }) {
   const { rows, summary, byProperty, propertyOptions, truncated } = snapshot;
 
   const activeKind = searchParams?.get("kind") ?? "all";
+  const activeChannel = searchParams?.get("channel") ?? "all";
   const activeDirection = searchParams?.get("direction") ?? "all";
   const activeProperty = searchParams?.get("property") ?? "";
   const activeSince = searchParams?.get("since") ?? "";
@@ -70,6 +84,7 @@ export function CommunicationsView({ snapshot }: { snapshot: CommsSnapshot }) {
 
   const hasFilters =
     activeKind !== "all" ||
+    activeChannel !== "all" ||
     activeDirection !== "all" ||
     !!activeProperty ||
     !!activeSince ||
@@ -147,6 +162,35 @@ export function CommunicationsView({ snapshot }: { snapshot: CommsSnapshot }) {
                 tone={KIND_TONE[kind]}
                 active={activeKind === kind}
                 onClick={() => setParams({ kind: activeKind === kind ? null : kind })}
+              />
+            );
+          })}
+        </div>
+
+        {/* Channel chips */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-heading text-[10px] uppercase tracking-eyebrow text-cream-subtle mr-1">
+            Channel
+          </span>
+          <KindChip
+            label="All"
+            count={summary.total}
+            active={activeChannel === "all"}
+            onClick={() => setParams({ channel: null })}
+          />
+          {CHANNEL_ORDER.map((ch) => {
+            const n = summary.byChannel[ch] ?? 0;
+            if (n === 0 && activeChannel !== ch) return null;
+            return (
+              <KindChip
+                key={ch}
+                label={CHANNEL_LABEL[ch] ?? ch}
+                count={n}
+                tone={CHANNEL_TONE[ch]}
+                active={activeChannel === ch}
+                onClick={() =>
+                  setParams({ channel: activeChannel === ch ? null : ch })
+                }
               />
             );
           })}
@@ -326,11 +370,29 @@ interface CoverageSide {
   missing: number;
   coveragePct: number;
   truncated: boolean;
+  /** Inbound only — gaps the poller saw and intentionally skipped, by reason */
+  explained?: Record<string, number>;
+  /** Inbound only — gaps missing from communications AND the ingest log */
+  unexplained?: number;
   sample: {
     gmailMessageId: string;
     subject: string | null;
     counterparty: string | null;
     date: string | null;
+    disposition?: string | null;
+  }[];
+}
+
+interface SpamReview {
+  inGmail: number;
+  reviewed: number;
+  truncated: boolean;
+  knownSenders: {
+    gmailMessageId: string;
+    from: string | null;
+    subject: string | null;
+    date: string | null;
+    matchedIn: string[];
   }[];
 }
 
@@ -339,9 +401,32 @@ interface CoverageResult {
   mailbox: string;
   outbound: CoverageSide;
   inbound: CoverageSide;
+  spam?: SpamReview;
   notes: string[];
   error?: string;
 }
+
+interface BackfillResult {
+  attempted: number;
+  remaining: number;
+  backfilled: number;
+  skippedAlreadyLogged: number;
+  errors: { gmailMessageId: string; error: string }[];
+  error?: string;
+}
+
+/** Human labels for ingest-log dispositions shown in the coverage panel. */
+const DISPOSITION_LABEL: Record<string, string> = {
+  routed_as_reply: "Routed as reply",
+  crexi_report: "CREXi report",
+  lead_intake: "Lead intake",
+  intake_rejected: "Intake rejected",
+  dropped_by_classifier: "Classifier drop",
+  unsubscribe: "Unsubscribe",
+  skipped_label: "Spam/trash label",
+  skipped_self: "Self-mail",
+  error: "Ingest error",
+};
 
 /**
  * Coverage check — reconciles Gmail against the log so "nothing falls
@@ -356,10 +441,13 @@ function CoveragePanel() {
   const [busy, setBusy] = useState(false);
   const [days, setDays] = useState(30);
   const [error, setError] = useState<string | null>(null);
+  const [backfill, setBackfill] = useState<BackfillResult | null>(null);
+  const [backfillBusy, setBackfillBusy] = useState(false);
 
   async function run() {
     setBusy(true);
     setError(null);
+    setBackfill(null);
     try {
       const r = await fetch(`/api/communications/coverage?days=${days}`, {
         cache: "no-store",
@@ -373,6 +461,32 @@ function CoveragePanel() {
       setBusy(false);
     }
   }
+
+  async function runBackfill() {
+    setBackfillBusy(true);
+    setError(null);
+    try {
+      const r = await fetch(`/api/communications/coverage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ days }),
+      });
+      const j = (await r.json()) as BackfillResult;
+      if (!r.ok) throw new Error(j.error ?? `HTTP ${r.status}`);
+      // Re-run the check so the cards reflect the repaired state, then show
+      // the backfill summary on top of the fresh numbers.
+      await run();
+      setBackfill(j);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBackfillBusy(false);
+    }
+  }
+
+  const totalMissing = result
+    ? result.outbound.missing + result.inbound.missing
+    : 0;
 
   return (
     <Panel
@@ -419,6 +533,63 @@ function CoveragePanel() {
             <CoverageCard label="Received" side={result.inbound} />
           </div>
 
+          {/* Inbound gap explanation — seen-and-skipped vs never-seen */}
+          {result.inbound.missing > 0 && (
+            <div className="rounded border border-white/[0.06] bg-white/[0.02] px-3 py-2.5 space-y-1.5">
+              <div className="font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle">
+                Why inbound is missing
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {Object.entries(result.inbound.explained ?? {}).map(([d, n]) => (
+                  <span
+                    key={d}
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-white/[0.08] bg-white/[0.03] font-mono text-[9.5px] text-cream-dim"
+                  >
+                    {DISPOSITION_LABEL[d] ?? d}
+                    <span className="tabular-nums opacity-70">{n}</span>
+                  </span>
+                ))}
+                {(result.inbound.unexplained ?? 0) > 0 && (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-amber-400/35 bg-amber-400/[0.08] font-mono text-[9.5px] text-amber-300">
+                    Unexplained
+                    <span className="tabular-nums">{result.inbound.unexplained}</span>
+                  </span>
+                )}
+              </div>
+              <p className="font-body text-[10.5px] text-cream-subtle">
+                Explained gaps were seen and intentionally skipped. Unexplained
+                gaps predate the ingest log or need a look — Backfill logs them.
+              </p>
+            </div>
+          )}
+
+          {/* Backfill */}
+          {totalMissing > 0 && (
+            <div className="flex items-center gap-3 flex-wrap">
+              <button
+                onClick={runBackfill}
+                disabled={backfillBusy || busy}
+                className="px-3 py-1.5 rounded border border-teal-400/40 bg-teal-400/[0.10] hover:bg-teal-400/[0.18] font-heading text-[10.5px] uppercase tracking-eyebrow font-semibold text-teal-300 transition-colors disabled:opacity-50"
+              >
+                {backfillBusy
+                  ? "Backfilling…"
+                  : `Backfill ${totalMissing.toLocaleString()} missing`}
+              </button>
+              <span className="font-body text-[10.5px] text-cream-subtle">
+                Writes each missing message into the log, matched to contact +
+                lead + property by email. Runs in batches — click again if any
+                remain.
+              </span>
+            </div>
+          )}
+          {backfill && (
+            <div className="rounded border border-teal-400/30 bg-teal-400/[0.05] px-3 py-2 font-mono text-[11px] text-teal-300 tabular-nums">
+              Backfilled {backfill.backfilled} · already logged{" "}
+              {backfill.skippedAlreadyLogged} · errors {backfill.errors.length}
+              {backfill.remaining > 0 && <> · {backfill.remaining} remaining — run again</>}
+            </div>
+          )}
+
           {(result.outbound.sample.length > 0 ||
             result.inbound.sample.length > 0) && (
             <div className="space-y-2">
@@ -439,6 +610,11 @@ function CoveragePanel() {
                     </span>
                     <span className="shrink-0 font-mono text-[9.5px] uppercase tracking-eyebrow text-amber-300">
                       {s.dir}
+                      {s.disposition && (
+                        <span className="ml-1.5 text-cream-subtle normal-case">
+                          {DISPOSITION_LABEL[s.disposition] ?? s.disposition}
+                        </span>
+                      )}
                     </span>
                   </div>
                   <div className="mt-0.5 font-mono text-[10px] text-cream-subtle truncate">
@@ -451,6 +627,45 @@ function CoveragePanel() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Spam review — real relationships buried by Gmail */}
+          {result.spam && (
+            <div className="space-y-2">
+              <div className="font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle">
+                Spam folder · {result.spam.inGmail} messages,{" "}
+                {result.spam.reviewed} reviewed
+              </div>
+              {result.spam.knownSenders.length === 0 ? (
+                <p className="font-body text-[11px] text-cream-subtle">
+                  No known contacts or leads found in spam.
+                </p>
+              ) : (
+                result.spam.knownSenders.map((s) => (
+                  <div
+                    key={s.gmailMessageId}
+                    className="rounded border border-red-400/30 bg-red-500/[0.05] px-3 py-2"
+                  >
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="font-heading text-[12px] text-cream truncate">
+                        {s.subject || "(no subject)"}
+                      </span>
+                      <span className="shrink-0 font-mono text-[9.5px] uppercase tracking-eyebrow text-red-300">
+                        known {s.matchedIn.join(" + ")}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 font-mono text-[10px] text-cream-subtle truncate">
+                      {s.from ?? "unknown"}
+                      {s.date && (
+                        <span className="ml-2">
+                          {new Date(s.date).toLocaleDateString()}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           )}
 
@@ -512,6 +727,12 @@ function CoverageCard({ label, side }: { label: string; side: CoverageSide }) {
 const inputCls =
   "w-full px-2.5 py-2 rounded border border-white/[0.08] bg-white/[0.02] font-body text-[12.5px] text-cream focus:outline-none focus:border-coral-400/50 focus:bg-coral-400/[0.03] transition-colors";
 
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n}B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)}KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)}MB`;
+}
+
 function FieldLabel({ children }: { children: React.ReactNode }) {
   return (
     <div className="font-mono text-[9.5px] uppercase tracking-eyebrow text-cream-subtle mb-1">
@@ -569,6 +790,15 @@ function MessageRow({ row }: { row: CommsRow }) {
             <span className="font-mono text-[9.5px] uppercase tracking-eyebrow text-cream-subtle">
               {isInbound ? "← received" : "→ sent"}
             </span>
+            {row.channel !== "email" && (
+              <span
+                className={`inline-flex items-center px-1.5 py-0.5 rounded border font-mono text-[9px] uppercase tracking-eyebrow ${
+                  CHANNEL_TONE[row.channel] ?? CHANNEL_TONE.email
+                }`}
+              >
+                {CHANNEL_LABEL[row.channel] ?? row.channel}
+              </span>
+            )}
             {row.touchKind && (
               <span
                 className={`inline-flex items-center px-1.5 py-0.5 rounded border font-mono text-[9px] uppercase tracking-eyebrow ${
@@ -594,6 +824,25 @@ function MessageRow({ row }: { row: CommsRow }) {
             <p className="mt-1 font-body text-[11.5px] text-cream-dim line-clamp-2">
               {row.bodyPreview}
             </p>
+          )}
+          {row.attachments.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              {row.attachments.map((a, i) => (
+                <span
+                  key={`${a.filename}-${i}`}
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-white/[0.08] bg-white/[0.03] font-mono text-[9.5px] text-cream-dim max-w-[220px]"
+                  title={`${a.filename}${a.sizeBytes ? ` · ${formatBytes(a.sizeBytes)}` : ""}`}
+                >
+                  <span aria-hidden>📎</span>
+                  <span className="truncate">{a.filename}</span>
+                  {a.sizeBytes != null && (
+                    <span className="text-cream-subtle shrink-0">
+                      {formatBytes(a.sizeBytes)}
+                    </span>
+                  )}
+                </span>
+              ))}
+            </div>
           )}
           <div className="mt-1.5 font-mono text-[10px] text-cream-subtle truncate">
             {isInbound ? "from" : "to"} {counterparty}

@@ -150,6 +150,31 @@ export async function POST(req: NextRequest) {
     .select("id")
     .single();
 
+  // ── Mirror into communications ──────────────────────────────────────────
+  // Every inbound expression of interest gets a communications row — the
+  // comms dashboard + coverage check treat that table as the universal log.
+  if (lead?.id) {
+    const { error: commErr } = await supabase.from("communications").insert({
+      organization_id: ORG_ID,
+      lead_id: lead.id,
+      contact_id: contactId,
+      property_id: property.id,
+      channel: "website",
+      direction: "inbound",
+      external_id: null,
+      subject: `Inquiry: ${property.headline || property.name}`,
+      body_preview:
+        `${body.lead_type} via questionnaire. ` +
+        `Budget: ${body.budget_range || "—"} · Timeline: ${body.timeline || "—"} · Company: ${body.company || "—"}`,
+      from_address: body.email.toLowerCase(),
+      occurred_at: new Date().toISOString(),
+      raw_payload: { source: "questionnaire", lead_type: body.lead_type },
+    });
+    if (commErr) {
+      console.error("[questionnaire] comm insert failed:", commErr.message);
+    }
+  }
+
   // ── Persist questionnaire submission ────────────────────────────────────
   const { data: submission, error: subErr } = await supabase
     .from("questionnaire_submissions")

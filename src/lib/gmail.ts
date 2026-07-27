@@ -304,3 +304,31 @@ function base64UrlDecode(input: string): string {
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return new TextDecoder("utf-8").decode(bytes);
 }
+
+export interface AttachmentMeta {
+  filename: string;
+  mimeType: string | null;
+  sizeBytes: number | null;
+}
+
+/**
+ * Walk the MIME tree and collect attachment metadata. An attachment is any
+ * part with a non-empty filename — Gmail leaves filename blank on body
+ * parts. Metadata only; the bytes stay in Gmail.
+ */
+export function extractAttachments(payload: GmailMessagePart | undefined): AttachmentMeta[] {
+  const out: AttachmentMeta[] = [];
+  if (!payload) return out;
+  function walk(part: GmailMessagePart) {
+    if (part.filename && part.filename.trim() !== "") {
+      out.push({
+        filename: part.filename,
+        mimeType: part.mimeType ?? null,
+        sizeBytes: part.body?.size ?? null,
+      });
+    }
+    for (const child of part.parts ?? []) walk(child);
+  }
+  walk(payload);
+  return out;
+}

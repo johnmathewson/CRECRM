@@ -491,6 +491,35 @@ async function ensureHotLeadRow(
     return null;
   }
 
+  // Mirror into communications so the comms dashboard + coverage check see
+  // this inbound interest. channel='website' — CREXi is a platform inquiry,
+  // and 'crexi' is not in the communications.channel CHECK vocabulary.
+  const { error: commErr } = await supabase.from("communications").insert({
+    organization_id: ORG_ID,
+    lead_id: created.id,
+    contact_id: contactId,
+    property_id: propertyId,
+    channel: "website",
+    direction: "inbound",
+    external_id: null,
+    subject: `CREXi activity: ${propertyName}`,
+    body_preview:
+      `${lead.levelOfInterest || "engaged"}` +
+      (lead.company ? ` · ${lead.company}` : "") +
+      (lead.industryRole ? ` · ${lead.industryRole}` : "") +
+      (lead.notes ? ` · ${String(lead.notes).slice(0, 200)}` : ""),
+    from_address: senderEmail,
+    occurred_at: new Date().toISOString(),
+    raw_payload: {
+      source: "crexi_report",
+      level_of_interest: lead.levelOfInterest,
+      activity_date: lead.activityDate,
+    },
+  });
+  if (commErr) {
+    console.error("[crexi-report] comm insert failed:", commErr.message);
+  }
+
   // Link any orphaned outbound communications for this email to the new lead
   // so the ContactDrawer thread is populated immediately on first open.
   await linkOrphanedComms(supabase, created.id, senderEmail, propertyId);

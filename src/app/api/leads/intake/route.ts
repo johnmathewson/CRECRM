@@ -49,6 +49,8 @@ interface IntakeBody {
   raw_body?: string | null;
   raw_payload?: any;
   source_message_id?: string | null;
+  /** Attachment metadata from Gmail — stored on the communications row. */
+  attachments?: { filename: string; mimeType: string | null; sizeBytes: number | null }[];
 }
 
 interface QualificationResult {
@@ -104,6 +106,33 @@ function svc() {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
+}
+
+/**
+ * Map a lead source onto the communications.channel CHECK vocabulary
+ * (email | calendar | sms | phone | voice | website | manual_test).
+ *
+ * This mapping is load-bearing: we used to insert `channel: body.source`
+ * directly, and source='crexi' violated the CHECK — the insert failed
+ * silently and 231 CREXi leads ended up with no inbound communications
+ * row. Never pass a raw source through as channel.
+ */
+function channelForSource(source: string): string {
+  switch (source) {
+    case "email":
+      return "email";
+    case "sms":
+    case "text":
+      return "sms";
+    case "phone":
+    case "call":
+      return "phone";
+    // CREXi inquiries arrive via the platform — closest bucket is website.
+    case "crexi":
+    case "website":
+    default:
+      return "website";
+  }
 }
 
 async function recordEvent(
@@ -304,18 +333,22 @@ export async function POST(req: NextRequest) {
         verdict: "spam",
         reasons: spamCheck.reasons,
       });
-      await supabase.from("communications").insert({
+      const { error: commErr } = await supabase.from("communications").insert({
         organization_id: ORG_ID,
         lead_id: lead.id,
-        channel: body.source,
+        channel: channelForSource(body.source),
         direction: "inbound",
         external_id: body.source_message_id || null,
         subject: body.raw_subject || null,
         body_preview: (body.raw_body || "").slice(0, 500),
         from_address: body.sender_email || body.sender_phone || null,
         occurred_at: new Date().toISOString(),
-        raw_payload: body.raw_payload || null,
+        attachments: body.attachments ?? [],
+        raw_payload: { ...(body.raw_payload || {}), lead_source: body.source },
       });
+      if (commErr) {
+        console.error("[leads/intake] spam comm insert failed:", commErr.message);
+      }
     }
     return NextResponse.json({
       lead_id: lead?.id || null,
@@ -418,19 +451,25 @@ ${body.raw_body || "(empty)"}`;
   await linkOrphanedComms(supabase, leadId, resolvedSenderEmail, matched?.id ?? null);
 
   // ── 6. Inbound communication ─────────────────────────────────────────────
-  await supabase.from("communications").insert({
+  const { error: commErr } = await supabase.from("communications").insert({
     organization_id: ORG_ID,
     lead_id: leadId,
     contact_id: contactId,
-    channel: body.source,
+    channel: channelForSource(body.source),
     direction: "inbound",
     external_id: body.source_message_id || null,
     subject: body.raw_subject || null,
     body_preview: (body.raw_body || "").slice(0, 500),
     from_address: body.sender_email || body.sender_phone || null,
     occurred_at: new Date().toISOString(),
-    raw_payload: body.raw_payload || null,
+    attachments: body.attachments ?? [],
+    raw_payload: { ...(body.raw_payload || {}), lead_source: body.source },
   });
+  if (commErr) {
+    // Loud, not silent — a missing comm row is exactly the kind of gap the
+    // coverage check exists to catch.
+    console.error("[leads/intake] comm insert failed:", commErr.message);
+  }
 
   // ── 7. Events: received + qualified + match outcome ──────────────────────
   await recordEvent(

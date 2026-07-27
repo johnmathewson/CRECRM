@@ -32,6 +32,10 @@ interface InboundMessage {
   subject: string | null;
   bodyText: string;
   receivedAt: string;
+  /** Attachment metadata (filename/mimeType/sizeBytes) — stored on the
+   *  communications row so a report/LOI/proposal in the thread is visible
+   *  from the comms log without opening Gmail. */
+  attachments?: { filename: string; mimeType: string | null; sizeBytes: number | null }[];
 }
 
 interface MatchedSource {
@@ -378,6 +382,7 @@ export async function maybeRouteAsReply(
         body_preview: msg.bodyText.slice(0, 500),
         from_address: msg.fromEmail,
         occurred_at: msg.receivedAt,
+        attachments: msg.attachments ?? [],
         raw_payload: {
           gmail_message_id: msg.gmailMessageId,
           gmail_thread_id: msg.gmailThreadId,
@@ -566,6 +571,7 @@ export async function routeAsReplyByEmail(
     body_preview: msg.bodyText.slice(0, 500),
     from_address: msg.fromEmail,
     occurred_at: msg.receivedAt,
+    attachments: msg.attachments ?? [],
     raw_payload: {
       gmail_message_id: msg.gmailMessageId,
       gmail_thread_id: msg.gmailThreadId,

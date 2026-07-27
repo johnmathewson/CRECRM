@@ -26,6 +26,7 @@ import {
   getMessage,
   getHeader,
   extractBody,
+  extractAttachments,
   parseAddress,
 } from "@/lib/gmail";
 import { maybeRouteAsReply, routeAsReplyByEmail } from "@/lib/cre-os/match-reply-to-touch";
@@ -117,6 +118,53 @@ export const maxDuration = 60;
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 
+/**
+ * Record what the poller decided about a message. Fire-and-forget by
+ * design: the audit trail must never break ingestion, so failures are
+ * logged to console and swallowed.
+ *
+ * The contract this enforces: any Gmail message missing from
+ * `communications` should have a row HERE explaining why. Missing from
+ * both tables = a real coverage bug. The /api/communications/coverage
+ * check joins against this table to split "missing but explained" from
+ * "missing and unexplained".
+ */
+async function logIngest(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  entry: {
+    gmailMessageId: string;
+    gmailThreadId?: string | null;
+    fromAddress?: string | null;
+    subject?: string | null;
+    disposition:
+      | "routed_as_reply"
+      | "crexi_report"
+      | "lead_intake"
+      | "intake_rejected"
+      | "dropped_by_classifier"
+      | "unsubscribe"
+      | "skipped_label"
+      | "skipped_self"
+      | "error";
+    detail?: Record<string, unknown>;
+  },
+): Promise<void> {
+  try {
+    await supabase.from("email_ingest_log").insert({
+      organization_id: ORG_ID,
+      gmail_message_id: entry.gmailMessageId,
+      gmail_thread_id: entry.gmailThreadId ?? null,
+      from_address: entry.fromAddress ?? null,
+      subject: entry.subject ?? null,
+      disposition: entry.disposition,
+      detail: entry.detail ?? {},
+    });
+  } catch (err) {
+    console.error("[poll-gmail] ingest-log write failed:", err);
+  }
+}
+
 interface PollResult {
   ok: boolean;
   poll: {
@@ -206,7 +254,22 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
             const msg = added.message;
             // Filter: don't ingest our own outbound (SENT label) or drafts.
             const labels = msg.labelIds || [];
-            if (labels.includes("SENT") || labels.includes("DRAFT") || labels.includes("TRASH") || labels.includes("SPAM")) continue;
+            if (labels.includes("SENT") || labels.includes("DRAFT") || labels.includes("TRASH") || labels.includes("SPAM")) {
+              // Audit only the interesting skips. SENT/DRAFT are structural
+              // noise (our own outbound is already logged by the send paths);
+              // SPAM/TRASH skips are the ones worth explaining later — a real
+              // inquiry Gmail misfiled lands here, and the coverage check's
+              // spam review reads this trail.
+              if (labels.includes("SPAM") || labels.includes("TRASH")) {
+                await logIngest(supabase, {
+                  gmailMessageId: msg.id,
+                  gmailThreadId: msg.threadId,
+                  disposition: "skipped_label",
+                  detail: { labels },
+                });
+              }
+              continue;
+            }
             newMessages.push({ id: msg.id, threadId: msg.threadId });
           }
         }
@@ -228,9 +291,19 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
 
           // Skip: our own outbound shouldn't appear here (filtered above), but
           // double-check — anything from our connected mailbox is us.
-          if (fromEmail && fromEmail.toLowerCase() === token.email.toLowerCase()) continue;
+          if (fromEmail && fromEmail.toLowerCase() === token.email.toLowerCase()) {
+            await logIngest(supabase, {
+              gmailMessageId: msg.id,
+              gmailThreadId: msg.threadId,
+              fromAddress: fromEmail,
+              subject,
+              disposition: "skipped_self",
+            });
+            continue;
+          }
 
           const { text, html } = extractBody(msg.payload);
+          const attachmentsMeta = extractAttachments(msg.payload);
 
           // ── First try: is this a REPLY to a cadence touch the agent sent? ──
           // If yes, route as reply (logs into lane_touches + flips enrollment
@@ -244,9 +317,18 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
             subject,
             bodyText: text || "",
             receivedAt: new Date().toISOString(),
+            attachments: attachmentsMeta,
           });
 
           if (replyResult.matched) {
+            await logIngest(supabase, {
+              gmailMessageId: msg.id,
+              gmailThreadId: msg.threadId,
+              fromAddress: fromEmail,
+              subject,
+              disposition: "routed_as_reply",
+              detail: { via: "thread_match" },
+            });
             dispatched += 1;
             continue; // skip lead-intake — this was a reply
           }
@@ -315,6 +397,14 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
             } catch (err) {
               console.error(`[poll-gmail] CREXi report dispatch error (parser may still run):`, err);
             }
+            await logIngest(supabase, {
+              gmailMessageId: msg.id,
+              gmailThreadId: msg.threadId,
+              fromAddress: fromEmail,
+              subject,
+              disposition: "crexi_report",
+              detail: { routedAs, attachments: attachmentsMeta.map((a) => a.filename) },
+            });
             dispatched += 1;
             continue; // unconditionally skip lead-intake on crexi_report classification
           }
@@ -322,6 +412,14 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
           // Drop these without auto-acking — they don't deserve a response
           if (classification.intent === "spam" || classification.intent === "internal") {
             console.log(`[poll-gmail] ${msg.id} dropped (${classification.intent}) — no auto-ack`);
+            await logIngest(supabase, {
+              gmailMessageId: msg.id,
+              gmailThreadId: msg.threadId,
+              fromAddress: fromEmail,
+              subject,
+              disposition: "dropped_by_classifier",
+              detail: { intent: classification.intent, reasoning: classification.reasoning },
+            });
             dispatched += 1;
             continue;
           }
@@ -335,6 +433,13 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
               reason: `Auto-detected unsubscribe via classifier: ${classification.reasoning}`,
             }, { onConflict: "organization_id,email" }).select();
             console.log(`[poll-gmail] ${msg.id} unsubscribed ${fromEmail}`);
+            await logIngest(supabase, {
+              gmailMessageId: msg.id,
+              gmailThreadId: msg.threadId,
+              fromAddress: fromEmail,
+              subject,
+              disposition: "unsubscribe",
+            });
             dispatched += 1;
             continue;
           }
@@ -358,9 +463,18 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
               subject,
               bodyText: text || "",
               receivedAt: new Date().toISOString(),
+              attachments: attachmentsMeta,
             });
             if (emailFallback.matched) {
               console.log(`[poll-gmail] ${msg.id} cadence_reply matched via email fallback (fromEmail=${fromEmail})`);
+              await logIngest(supabase, {
+                gmailMessageId: msg.id,
+                gmailThreadId: msg.threadId,
+                fromAddress: fromEmail,
+                subject,
+                disposition: "routed_as_reply",
+                detail: { via: "email_fallback" },
+              });
               dispatched += 1;
               continue;
             }
@@ -375,6 +489,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
             raw_subject: subject,
             raw_body: text,
             source_message_id: msg.id,
+            attachments: attachmentsMeta,
             raw_payload: {
               gmail_message_id: msg.id,
               gmail_thread_id: msg.threadId,
@@ -394,10 +509,38 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(intakePayload),
           });
-          if (intakeRes.ok) dispatched += 1;
+          if (intakeRes.ok) {
+            dispatched += 1;
+            await logIngest(supabase, {
+              gmailMessageId: msg.id,
+              gmailThreadId: msg.threadId,
+              fromAddress: fromEmail,
+              subject,
+              disposition: "lead_intake",
+              detail: { intent: classification.intent },
+            });
+          } else {
+            // Intake said no (e.g. CREXi lead without an email, validation
+            // failure). Record it — a rejected intake with no audit row was
+            // one of the silent-drop paths this log exists to eliminate.
+            const rejBody = await intakeRes.text().catch(() => "");
+            await logIngest(supabase, {
+              gmailMessageId: msg.id,
+              gmailThreadId: msg.threadId,
+              fromAddress: fromEmail,
+              subject,
+              disposition: "intake_rejected",
+              detail: { status: intakeRes.status, body: rejBody.slice(0, 300) },
+            });
+          }
         } catch (err) {
           // Log but keep going — single message failure shouldn't break the loop
           console.error(`[poll-gmail] failed to ingest message ${msgRef.id}:`, err);
+          await logIngest(supabase, {
+            gmailMessageId: msgRef.id,
+            disposition: "error",
+            detail: { message: err instanceof Error ? err.message : String(err) },
+          });
         }
       }
 
@@ -509,7 +652,11 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
     try {
       const cutoff = new Date(Date.now() - 21 * 24 * 3600_000);
       const afterStr = `${cutoff.getFullYear()}/${String(cutoff.getMonth() + 1).padStart(2, "0")}/${String(cutoff.getDate()).padStart(2, "0")}`;
-      const sentRefs = await listMessages(token.accessToken, `in:sent after:${afterStr}`, 20);
+      // 50/run (was 20): a busy send day plus the every-minute cron means the
+      // backlog clears within the hour instead of risking messages aging out
+      // of the 21-day window before they're ever scanned. Historical gaps
+      // beyond the window are the coverage backfill's job.
+      const sentRefs = await listMessages(token.accessToken, `in:sent after:${afterStr}`, 50);
 
       let synced = 0;
       let skipped = 0;
@@ -602,6 +749,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
             // Sent by hand from Gmail, outside the CRM — that's the "manual"
             // motion regardless of whether it happened to match a lead.
             touch_kind: "manual",
+            attachments: extractAttachments(msg.payload),
             raw_payload: {
               gmail_message_id: ref.id,
               gmail_thread_id: msg.threadId,

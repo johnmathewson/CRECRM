@@ -81,10 +81,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
-  // Load lead → we need contact_id + current notes to append.
+  // Load lead → we need contact_id + property_id + current notes to append.
   const { data: lead, error: leadErr } = await sb
     .from("leads")
-    .select("id, contact_id, notes")
+    .select("id, contact_id, property_id, notes, sender_phone")
     .eq("id", params.id)
     .eq("organization_id", ORG_ID)
     .maybeSingle();
@@ -114,6 +114,36 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   if (insertErr) {
     return NextResponse.json({ error: insertErr.message }, { status: 500 });
+  }
+
+  // Mirror into communications — the universal log the dashboard + coverage
+  // check read from. call_logs stays the granular source of truth (outcome,
+  // duration); this row makes the touch filterable alongside email/SMS.
+  // external_id call_log:<id> keeps it idempotent if this ever re-runs.
+  const isInboundText = channel === "text" && body.outcome === "reply_received";
+  const { error: commErr } = await sb.from("communications").insert({
+    organization_id: ORG_ID,
+    lead_id: lead.id,
+    contact_id: lead.contact_id,
+    property_id: lead.property_id,
+    channel: channel === "text" ? "sms" : "phone",
+    direction: isInboundText ? "inbound" : "outbound",
+    external_id: `call_log:${log.id}`,
+    subject: null,
+    body_preview: notes ?? `${channel === "text" ? "Text" : "Call"}: ${body.outcome}`,
+    from_address: isInboundText ? lead.sender_phone ?? null : null,
+    ...(isInboundText ? {} : lead.sender_phone ? { to_addresses: [lead.sender_phone] } : {}),
+    occurred_at: calledAt,
+    ...(isInboundText ? {} : { touch_kind: "manual" }),
+    raw_payload: {
+      source: "call_log",
+      call_log_id: log.id,
+      outcome: body.outcome,
+      duration_seconds: body.duration_seconds ?? null,
+    },
+  });
+  if (commErr) {
+    console.error("[log-call] comm mirror insert failed:", commErr.message);
   }
 
   // Append the touch to lead.notes so it's visible on the existing

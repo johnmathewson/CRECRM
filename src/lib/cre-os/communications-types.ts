@@ -24,11 +24,37 @@ export const TOUCH_KIND_LABEL: Record<string, string> = {
   unclassified: "Unclassified",
 };
 
+export type CommsChannel =
+  | "email"
+  | "sms"
+  | "phone"
+  | "website"
+  | "calendar"
+  | "voice"
+  | "manual_test";
+
+export const CHANNEL_LABEL: Record<string, string> = {
+  email: "Email",
+  sms: "SMS",
+  phone: "Phone",
+  website: "Website",
+  calendar: "Calendar",
+  voice: "Voice",
+  manual_test: "Test",
+};
+
+export interface AttachmentMeta {
+  filename: string;
+  mimeType: string | null;
+  sizeBytes: number | null;
+}
+
 export interface CommsFilters {
   /** Free-text over subject, body preview, from address */
   q?: string;
   propertyId?: string;
   touchKind?: TouchKind | "all";
+  channel?: CommsChannel | "all";
   direction?: "inbound" | "outbound" | "all";
   /** ISO date, inclusive */
   since?: string;
@@ -40,11 +66,13 @@ export interface CommsFilters {
 export interface CommsRow {
   id: string;
   direction: "inbound" | "outbound";
+  channel: string;
   touchKind: string | null;
   subject: string | null;
   bodyPreview: string | null;
   fromAddress: string | null;
   toAddresses: string[];
+  attachments: AttachmentMeta[];
   occurredAt: string;
   occurredRelative: string;
   property: { id: string; name: string; slug: string } | null;
@@ -57,6 +85,7 @@ export interface CommsSummary {
   inbound: number;
   outbound: number;
   byKind: Record<string, number>;
+  byChannel: Record<string, number>;
   distinctRecipients: number;
   /** inbound / (outbound excluding internal + auto_ack). Null when no
    *  reply-eligible outbound in range — avoids a misleading 0%. */

@@ -100,15 +100,57 @@ export async function POST(req: NextRequest) {
   const normalizedFrom = toE164(from) ?? from;
   const receivedAt = new Date().toISOString();
 
+  // ── 0a. Idempotency — Twilio retries webhooks on slow responses. If we
+  // already mirrored this MessageSid into communications, the whole message
+  // was already processed; drop the retry.
+  const { data: alreadyMirrored } = await supabase
+    .from("communications")
+    .select("id")
+    .eq("external_id", messageSid)
+    .maybeSingle();
+  if (alreadyMirrored) {
+    return twiml();
+  }
+
+  // ── 0b. Mirror EVERY inbound SMS into communications up front, before any
+  // branching — the universal log must not depend on which branch runs or
+  // whether it succeeds. The reply-matched branch enriches this row with
+  // property/lead context afterwards.
+  const { data: phoneContact } = await supabase
+    .from("contacts")
+    .select("id, full_name")
+    .eq("organization_id", ORG_ID)
+    .or(`phone.eq.${normalizedFrom},phone.eq.${from}`)
+    .maybeSingle();
+
+  const { data: mirrorRow, error: mirrorErr } = await supabase
+    .from("communications")
+    .insert({
+      organization_id: ORG_ID,
+      contact_id: phoneContact?.id ?? null,
+      channel: "sms",
+      direction: "inbound",
+      external_id: messageSid,
+      subject: null,
+      body_preview: body.slice(0, 500),
+      from_address: normalizedFrom,
+      occurred_at: receivedAt,
+      raw_payload: {
+        source: "twilio_webhook",
+        twilio_message_sid: messageSid,
+        to_phone: to,
+        intent,
+      },
+    })
+    .select("id")
+    .single();
+  if (mirrorErr) {
+    console.error("[twilio-webhook] comm mirror insert failed:", mirrorErr.message);
+  }
+
   // ── 1. Handle STOP ───────────────────────────────────────────────────
   if (intent === "stop") {
-    // Find contact by phone
-    const { data: contact } = await supabase
-      .from("contacts")
-      .select("id, full_name")
-      .eq("organization_id", ORG_ID)
-      .or(`phone.eq.${normalizedFrom},phone.eq.${from}`)
-      .maybeSingle();
+    const contact = phoneContact;
 
     if (contact) {
       // Append a note about opt-out (cleanest schema-wise without a new column)
@@ -222,6 +264,17 @@ export async function POST(req: NextRequest) {
       property_id: parent.property_id,
       contact_id: parent.contact_id,
     });
+
+    // Enrich the comms mirror row with the matched property/contact context
+    if (mirrorRow?.id) {
+      await supabase
+        .from("communications")
+        .update({
+          property_id: parent.property_id,
+          contact_id: parent.contact_id ?? phoneContact?.id ?? null,
+        })
+        .eq("id", mirrorRow.id);
+    }
   } else {
     // No matching outbound. Log as a standalone inbound for review —
     // future improvement: route into the regular lead-intake pipeline.

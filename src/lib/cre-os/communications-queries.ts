@@ -80,13 +80,15 @@ export async function loadCommunicationsForContact(contactId: string): Promise<T
 // callers that already import from this file.
 export type {
   TouchKind,
+  CommsChannel,
+  AttachmentMeta,
   CommsFilters,
   CommsRow,
   CommsSummary,
   PropertyCommsRollup,
   CommsSnapshot,
 } from "./communications-types";
-export { TOUCH_KIND_LABEL } from "./communications-types";
+export { TOUCH_KIND_LABEL, CHANNEL_LABEL } from "./communications-types";
 
 const DASHBOARD_ROW_LIMIT = 300;
 
@@ -108,6 +110,9 @@ export async function loadCommunicationsDashboard(
     if (filters.touchKind && filters.touchKind !== "all") {
       q = q.eq("touch_kind", filters.touchKind);
     }
+    if (filters.channel && filters.channel !== "all") {
+      q = q.eq("channel", filters.channel);
+    }
     if (filters.since) q = q.gte("occurred_at", filters.since);
     if (filters.until) q = q.lte("occurred_at", `${filters.until}T23:59:59Z`);
     if (filters.q?.trim()) {
@@ -124,8 +129,8 @@ export async function loadCommunicationsDashboard(
     sb
       .from("communications")
       .select(
-        `id, direction, touch_kind, subject, body_preview, from_address,
-         to_addresses, occurred_at, lead_id,
+        `id, direction, channel, touch_kind, subject, body_preview, from_address,
+         to_addresses, attachments, occurred_at, lead_id,
          property:properties(id, name, slug),
          contact:contacts(id, full_name, email)`,
       )
@@ -146,11 +151,13 @@ export async function loadCommunicationsDashboard(
     return {
       id: r.id,
       direction: r.direction,
+      channel: r.channel ?? "email",
       touchKind: r.touch_kind ?? null,
       subject: r.subject ?? null,
       bodyPreview: r.body_preview ?? null,
       fromAddress: r.from_address ?? null,
       toAddresses: Array.isArray(r.to_addresses) ? r.to_addresses : [],
+      attachments: Array.isArray(r.attachments) ? r.attachments : [],
       occurredAt: r.occurred_at,
       occurredRelative: relativeTime(r.occurred_at),
       property: property
@@ -169,7 +176,7 @@ export async function loadCommunicationsDashboard(
   const summaryQuery = applyFilters(
     sb
       .from("communications")
-      .select("direction, touch_kind, occurred_at, property_id, to_addresses")
+      .select("direction, channel, touch_kind, occurred_at, property_id, to_addresses")
       .eq("organization_id", ORG_ID),
   );
   const { data: summaryData } = await summaryQuery;
@@ -177,6 +184,7 @@ export async function loadCommunicationsDashboard(
   const all = (summaryData ?? []) as any[];
 
   const byKind: Record<string, number> = {};
+  const byChannel: Record<string, number> = {};
   const recipients = new Set<string>();
   let inbound = 0;
   let outbound = 0;
@@ -190,6 +198,8 @@ export async function loadCommunicationsDashboard(
   >();
 
   for (const r of all) {
+    const ch = r.channel ?? "email";
+    byChannel[ch] = (byChannel[ch] ?? 0) + 1;
     if (r.direction === "inbound") {
       inbound += 1;
     } else {
@@ -229,6 +239,7 @@ export async function loadCommunicationsDashboard(
     inbound,
     outbound,
     byKind,
+    byChannel,
     distinctRecipients: recipients.size,
     replyRatePct: replyEligible > 0 ? Math.round((inbound / replyEligible) * 100) : null,
     firstAt,

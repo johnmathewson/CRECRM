@@ -2,6 +2,7 @@ import { CommunicationsView } from "@/components/cre-os/communications/Communica
 import {
   loadCommunicationsDashboard,
   type CommsFilters,
+  type CommsChannel,
   type TouchKind,
 } from "@/lib/cre-os/communications-queries";
 
@@ -22,6 +23,16 @@ const VALID_KINDS: TouchKind[] = [
   "internal",
 ];
 
+const VALID_CHANNELS: CommsChannel[] = [
+  "email",
+  "sms",
+  "phone",
+  "website",
+  "calendar",
+  "voice",
+  "manual_test",
+];
+
 export default async function CommunicationsPage({
   searchParams,
 }: {
@@ -29,12 +40,14 @@ export default async function CommunicationsPage({
     q?: string;
     property?: string;
     kind?: string;
+    channel?: string;
     direction?: string;
     since?: string;
     until?: string;
   };
 }) {
   const kindParam = searchParams?.kind;
+  const channelParam = searchParams?.channel;
   const dirParam = searchParams?.direction;
 
   const filters: CommsFilters = {
@@ -45,6 +58,10 @@ export default async function CommunicationsPage({
     touchKind:
       kindParam && VALID_KINDS.includes(kindParam as TouchKind)
         ? (kindParam as TouchKind)
+        : "all",
+    channel:
+      channelParam && VALID_CHANNELS.includes(channelParam as CommsChannel)
+        ? (channelParam as CommsChannel)
         : "all",
     direction:
       dirParam === "inbound" || dirParam === "outbound" ? dirParam : "all",
