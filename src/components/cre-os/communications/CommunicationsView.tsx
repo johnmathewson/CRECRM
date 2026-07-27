@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/cre-os/AppShell";
@@ -285,6 +285,9 @@ export function CommunicationsView({ snapshot }: { snapshot: CommsSnapshot }) {
           </Panel>
         )}
 
+        {/* Coverage check */}
+        <CoveragePanel />
+
         {/* Message list */}
         <Panel
           eyebrow="Messages"
@@ -316,6 +319,195 @@ export function CommunicationsView({ snapshot }: { snapshot: CommsSnapshot }) {
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────
+
+interface CoverageSide {
+  inGmail: number;
+  logged: number;
+  missing: number;
+  coveragePct: number;
+  truncated: boolean;
+  sample: {
+    gmailMessageId: string;
+    subject: string | null;
+    counterparty: string | null;
+    date: string | null;
+  }[];
+}
+
+interface CoverageResult {
+  window: { days: number; since: string };
+  mailbox: string;
+  outbound: CoverageSide;
+  inbound: CoverageSide;
+  notes: string[];
+  error?: string;
+}
+
+/**
+ * Coverage check — reconciles Gmail against the log so "nothing falls
+ * through the cracks" is a number rather than an assumption.
+ *
+ * Deliberately on-demand, not on page load: it pages through Gmail and
+ * hydrates message headers, which is too slow and too many API calls to
+ * run every time the dashboard opens.
+ */
+function CoveragePanel() {
+  const [result, setResult] = useState<CoverageResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [days, setDays] = useState(30);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run() {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await fetch(`/api/communications/coverage?days=${days}`, {
+        cache: "no-store",
+      });
+      const j = (await r.json()) as CoverageResult;
+      if (!r.ok) throw new Error(j.error ?? `HTTP ${r.status}`);
+      setResult(j);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Panel
+      eyebrow="Coverage"
+      title="Is anything falling through?"
+      actions={
+        <div className="flex items-center gap-2">
+          <select
+            value={days}
+            onChange={(e) => setDays(Number(e.target.value))}
+            className="px-2 py-1 rounded border border-white/[0.08] bg-white/[0.02] font-mono text-[10px] text-cream-dim focus:outline-none focus:border-coral-400/40"
+          >
+            <option value={7}>7 days</option>
+            <option value={30}>30 days</option>
+            <option value={90}>90 days</option>
+          </select>
+          <button
+            onClick={run}
+            disabled={busy}
+            className="px-3 py-1.5 rounded border border-coral-400/40 bg-coral-400/[0.10] hover:bg-coral-400/[0.18] font-heading text-[10.5px] uppercase tracking-eyebrow font-semibold text-coral-300 transition-colors disabled:opacity-50"
+          >
+            {busy ? "Checking…" : "Run check"}
+          </button>
+        </div>
+      }
+    >
+      {!result && !error && !busy && (
+        <p className="font-body text-[12.5px] text-cream-subtle py-2">
+          Compares every message in Gmail over the window against what&apos;s in
+          this log. Anything in Gmail with no matching row is a gap.
+        </p>
+      )}
+
+      {error && (
+        <div className="rounded border border-red-400/40 bg-red-500/[0.08] px-3 py-2 font-body text-[12px] text-red-300">
+          {error}
+        </div>
+      )}
+
+      {result && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <CoverageCard label="Sent" side={result.outbound} />
+            <CoverageCard label="Received" side={result.inbound} />
+          </div>
+
+          {(result.outbound.sample.length > 0 ||
+            result.inbound.sample.length > 0) && (
+            <div className="space-y-2">
+              <div className="font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle">
+                Not in the log
+              </div>
+              {[
+                ...result.outbound.sample.map((s) => ({ ...s, dir: "sent" as const })),
+                ...result.inbound.sample.map((s) => ({ ...s, dir: "received" as const })),
+              ].map((s) => (
+                <div
+                  key={s.gmailMessageId}
+                  className="rounded border border-amber-400/25 bg-amber-400/[0.04] px-3 py-2"
+                >
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="font-heading text-[12px] text-cream truncate">
+                      {s.subject || "(no subject)"}
+                    </span>
+                    <span className="shrink-0 font-mono text-[9.5px] uppercase tracking-eyebrow text-amber-300">
+                      {s.dir}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 font-mono text-[10px] text-cream-subtle truncate">
+                    {s.counterparty ?? "unknown"}
+                    {s.date && (
+                      <span className="ml-2">
+                        {new Date(s.date).toLocaleDateString()}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {result.notes.length > 0 && (
+            <ul className="space-y-1 pt-1 border-t border-white/[0.06]">
+              {result.notes.map((n, i) => (
+                <li key={i} className="font-body text-[11px] text-cream-subtle">
+                  · {n}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function CoverageCard({ label, side }: { label: string; side: CoverageSide }) {
+  const clean = side.missing === 0;
+  return (
+    <div
+      className={`rounded border px-4 py-3 ${
+        clean
+          ? "border-teal-400/30 bg-teal-400/[0.05]"
+          : "border-amber-400/35 bg-amber-400/[0.06]"
+      }`}
+    >
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle">
+          {label}
+        </span>
+        <span
+          className={`font-display text-xl tabular-nums ${
+            clean ? "text-teal-300" : "text-amber-300"
+          }`}
+        >
+          {side.coveragePct}%
+        </span>
+      </div>
+      <div className="mt-1 font-mono text-[11px] text-cream-dim tabular-nums">
+        {side.logged.toLocaleString()} of {side.inGmail.toLocaleString()} logged
+        {side.missing > 0 && (
+          <span className="text-amber-300">
+            {" "}
+            · {side.missing.toLocaleString()} missing
+          </span>
+        )}
+      </div>
+      {side.truncated && (
+        <div className="mt-1 font-mono text-[9.5px] text-amber-300/80">
+          Gmail returned more than the page cap — widen with care.
+        </div>
+      )}
+    </div>
+  );
+}
 
 const inputCls =
   "w-full px-2.5 py-2 rounded border border-white/[0.08] bg-white/[0.02] font-body text-[12.5px] text-cream focus:outline-none focus:border-coral-400/50 focus:bg-coral-400/[0.03] transition-colors";

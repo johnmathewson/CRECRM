@@ -558,18 +558,39 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
             .limit(1)
             .maybeSingle();
 
-          if (!matchedLead) { skipped++; continue; }
+          // No lead match is NOT a reason to drop the email. This used to
+          // `continue` here, which meant anything sent from Gmail to someone
+          // who wasn't already a CRM lead — a broker, an owner being courted,
+          // an attorney on a deal — was never logged anywhere. That silently
+          // violated the "communications is the universal message log"
+          // contract. Now we always write the row and attach whatever context
+          // we can find; a row with null lead_id/property_id is far better
+          // than no row at all, and linkOrphanedComms heals lead_id later if
+          // that person becomes a lead.
+          //
+          // Fall back to a direct contact lookup by recipient address so the
+          // email still lands on the contact timeline even with no lead.
+          let resolvedContactId = (matchedLead?.contact_id as string | null) ?? null;
+          if (!resolvedContactId) {
+            const { data: contactRow } = await supabase
+              .from("contacts")
+              .select("id")
+              .eq("organization_id", ORG_ID)
+              .ilike("email", toEmail.trim())
+              .limit(1)
+              .maybeSingle();
+            resolvedContactId = (contactRow?.id as string | null) ?? null;
+          }
 
           const { text: bodyText } = extractBody(msg.payload);
           await supabase.from("communications").insert({
             organization_id: ORG_ID,
-            lead_id: matchedLead.id,
-            // Link to the lead's contact so the email shows on the contact
-            // timeline + Gmail-history panel. For outbound mail WE are the
-            // sender, so the counterparty is the recipient — taken from the
-            // matched lead's contact_id, not from_address (always our mailbox).
-            contact_id: (matchedLead.contact_id as string | null) ?? null,
-            property_id: (matchedLead.property_id as string | null) ?? null,
+            lead_id: (matchedLead?.id as string | null) ?? null,
+            // For outbound mail WE are the sender, so the counterparty is the
+            // recipient — from the matched lead's contact, or the direct
+            // address lookup above.
+            contact_id: resolvedContactId,
+            property_id: (matchedLead?.property_id as string | null) ?? null,
             channel: "email",
             direction: "outbound",
             external_id: ref.id,
@@ -578,16 +599,21 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
             from_address: token.email,
             to_addresses: [toEmail],
             occurred_at: sentAt,
+            // Sent by hand from Gmail, outside the CRM — that's the "manual"
+            // motion regardless of whether it happened to match a lead.
+            touch_kind: "manual",
             raw_payload: {
               gmail_message_id: ref.id,
               gmail_thread_id: msg.threadId,
               label_ids: msg.labelIds,
               source: "gmail_sent_sync",
+              matched_lead: !!matchedLead,
             },
           });
 
-          // Mark the lead as sent so it leaves the action queue
-          if (matchedLead.status !== "sent") {
+          // Mark the lead as sent so it leaves the action queue.
+          // Only meaningful when we actually matched one.
+          if (matchedLead && matchedLead.status !== "sent") {
             await supabase.from("leads").update({
               status: "sent",
               final_sent_at: sentAt,
