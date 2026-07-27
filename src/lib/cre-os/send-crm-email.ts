@@ -66,6 +66,43 @@ export interface SendCrmEmailResult {
   sentAt: string;
 }
 
+/**
+ * Map the caller's `source` tag onto the communications.touch_kind
+ * vocabulary. touch_kind is the reporting dimension — it answers "what
+ * KIND of outbound was this," which is coarser and more stable than
+ * `source` (which names the specific code path and drifts as we add
+ * routes).
+ *
+ *   ai_followup  — bulk AI follow-up to listing viewers
+ *   campaign     — lane-driven prospecting outbound
+ *   auto_ack     — automatic acknowledgement on a new inbound lead
+ *   manual       — broker-written one-off
+ *   internal     — system email to ourselves (Steward briefs)
+ *
+ * Unknown sources fall through to 'manual' — the safest default, since a
+ * mislabeled one-off is less misleading in reports than a phantom
+ * campaign or AI touch. If a new send path needs its own bucket, add the
+ * case here rather than letting it land in manual silently.
+ */
+function touchKindForSource(source: string | undefined): string {
+  switch (source) {
+    case "bulk_ai":
+    case "bulk-ai-followup":
+      return "ai_followup";
+    case "lane_touch":
+    case "lane-touch":
+    case "campaign":
+      return "campaign";
+    case "ack":
+      return "auto_ack";
+    case "steward_daily":
+    case "steward_weekly":
+      return "internal";
+    default:
+      return "manual";
+  }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function sendCrmEmail(
   supabase: SupabaseClient<any, any, any>,
@@ -100,6 +137,7 @@ export async function sendCrmEmail(
     from_address: extractEmail(params.from),
     to_addresses: [extractEmail(params.to)],
     occurred_at: sentAt,
+    touch_kind: touchKindForSource(params.source),
     raw_payload: {
       gmail_message_id: sent.id,
       gmail_thread_id: sent.threadId,
