@@ -67,6 +67,22 @@
 .canvas-light .hover\:bg-white\/\[0\.08\]:hover,
 .canvas-light .hover\:bg-white\/\[0\.10\]:hover { background-color: rgb(27 32 39 / 0.09); }
 
+/* Accent TEXT retargets (readability pass 2026-07-28). The -300 accent text
+   shades are pastels tuned for dark chrome — on the light canvas they wash
+   out to near-invisible (the faded chips John flagged). Retarget to deep
+   readable equivalents of the same hue. Attribute selectors catch opacity
+   variants (e.g. text-amber-300/80) too. */
+.canvas-light [class*="text-coral-300"]  { color: #A8472B; }
+.canvas-light [class*="text-coral-400"]  { color: #9E4226; }
+.canvas-light [class*="text-teal-300"]   { color: #0E7C74; }
+.canvas-light [class*="text-teal-400"]   { color: #0B6B64; }
+.canvas-light [class*="text-amber-300"]  { color: #8A6116; }
+.canvas-light [class*="text-amber-400"]  { color: #7C570F; }
+.canvas-light [class*="text-purple-300"] { color: #6D5BB8; }
+.canvas-light [class*="text-blue-300"]   { color: #2D6CB5; }
+.canvas-light [class*="text-green-300"],
+.canvas-light [class*="text-emerald-300"] { color: #2F7D46; }
+
 /* LIQUID GLASS cards. The trick is translucency + heavy backdrop-blur +
    a saturation boost (so colors behind the glass go vivid — this is what
    makes accents POP), plus a bright top edge-highlight and a layered
