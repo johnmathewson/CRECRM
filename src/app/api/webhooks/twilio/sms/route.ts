@@ -281,13 +281,8 @@ export async function POST(req: NextRequest) {
     // pipeline so it shows up in /cre-os/inbox instead of vanishing into
     // the activities log.
 
-    // 1. Known contact?
-    const { data: contact } = await supabase
-      .from("contacts")
-      .select("id, full_name")
-      .eq("organization_id", ORG_ID)
-      .or(`phone.eq.${normalizedFrom},phone.eq.${from}`)
-      .maybeSingle();
+    // 1. Known contact? (already looked up for the mirror row in 0b)
+    const contact = phoneContact;
 
     // 2. Open SMS lead for this number within 30 days → thread continuation.
     const cutoff = new Date(Date.now() - 30 * 86_400_000).toISOString();
@@ -324,22 +319,19 @@ export async function POST(req: NextRequest) {
       lead = created ?? null;
     }
 
-    // 4. Thread the message into communications (drives the inbox thread UI).
-    if (lead) {
-      await supabase.from("communications").insert({
-        organization_id: ORG_ID,
-        channel: "sms",
-        direction: "inbound",
-        external_id: messageSid,
-        subject: null,
-        body_preview: body,
-        from_address: normalizedFrom,
-        occurred_at: receivedAt,
-        lead_id: lead.id,
-        contact_id: lead.contact_id ?? contact?.id ?? null,
-        property_id: lead.property_id ?? null,
-        raw_payload: { source: "twilio-webhook", twilio_message_sid: messageSid },
-      });
+    // 4. Attach the mirror row (inserted upfront in 0b) to the lead — this is
+    // what makes the message appear in the lead's conversation thread. Do NOT
+    // insert a second communications row: the mirror already holds this
+    // MessageSid and the idempotency check keys on external_id.
+    if (lead && mirrorRow?.id) {
+      await supabase
+        .from("communications")
+        .update({
+          lead_id: lead.id,
+          contact_id: lead.contact_id ?? contact?.id ?? null,
+          property_id: lead.property_id ?? null,
+        })
+        .eq("id", mirrorRow.id);
     }
 
     // 5. Keep the activities log entry (timeline visibility + safety net if
