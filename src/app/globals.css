@@ -83,6 +83,16 @@
 .canvas-light [class*="text-green-300"],
 .canvas-light [class*="text-emerald-300"] { color: #2F7D46; }
 
+/* Whole-element opacity clamps. 91 usages of opacity-40/50/60 fade entire
+   chips/buttons/rows — tolerable on dark chrome, illegible on the light
+   canvas (this stacked ON TOP of pastel text colors). Clamp to 0.72 so
+   "de-emphasized" still reads as text, not a watermark. Disabled states
+   keep their look via cursor + border; if a surface truly needs deeper
+   fade, use a bg tint, not element opacity. */
+.canvas-light .opacity-40,
+.canvas-light .opacity-50,
+.canvas-light .opacity-60 { opacity: 0.72; }
+
 /* LIQUID GLASS cards. The trick is translucency + heavy backdrop-blur +
    a saturation boost (so colors behind the glass go vivid — this is what
    makes accents POP), plus a bright top edge-highlight and a layered

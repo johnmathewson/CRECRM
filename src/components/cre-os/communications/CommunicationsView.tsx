@@ -758,10 +758,10 @@ function KindChip({
   return (
     <button
       onClick={onClick}
-      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded border font-mono text-[10px] uppercase tracking-eyebrow transition-colors ${
+      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded border font-mono text-[11px] uppercase tracking-eyebrow transition-shadow ${
         active
           ? `${base} ring-1 ring-inset ring-current`
-          : `${base} opacity-60 hover:opacity-100`
+          : `${base} hover:ring-1 hover:ring-inset hover:ring-current`
       }`}
     >
       {label}
