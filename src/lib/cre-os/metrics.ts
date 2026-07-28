@@ -98,13 +98,17 @@ export async function countUnanswered(): Promise<number> {
     .order("occurred_at", { ascending: false })
     .limit(2000);
 
-  const latestByLead = new Map<string, { direction: string; channel: string; source: string }>();
+  const latestByLead = new Map<string, { direction: string; channel: string; source: string; answeredCall: boolean }>();
   for (const row of (data ?? []) as Array<{ lead_id: string; direction: string; channel: string; raw_payload: Record<string, unknown> | null }>) {
     if (!latestByLead.has(row.lead_id)) {
+      const payload = row.raw_payload as Record<string, unknown> | null;
       latestByLead.set(row.lead_id, {
         direction: row.direction,
         channel: row.channel,
-        source: String((row.raw_payload as Record<string, unknown> | null)?.source ?? ""),
+        source: String(payload?.source ?? ""),
+        // A phone call John picked up is inbound in the log but already
+        // handled — the conversation happened live.
+        answeredCall: row.channel === "phone" && payload?.status === "answered",
       });
     }
   }
@@ -113,7 +117,7 @@ export async function countUnanswered(): Promise<number> {
   for (const last of Array.from(latestByLead.values())) {
     const humanChannel = ["email", "sms", "phone", "website"].includes(last.channel);
     const automated = ["crexi_report", "internal", "steward"].includes(last.source);
-    if (last.direction === "inbound" && humanChannel && !automated) n += 1;
+    if (last.direction === "inbound" && humanChannel && !automated && !last.answeredCall) n += 1;
   }
   return n;
 }

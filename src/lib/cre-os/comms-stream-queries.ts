@@ -81,7 +81,7 @@ export async function loadCommsStream(limit = 400): Promise<StreamData> {
   const raw = (rowsRaw ?? []) as any[];
 
   // Answered/unanswered: newest-first walk; a party's latest row decides.
-  const latestSeen = new Map<string, { direction: string; automated: boolean }>();
+  const latestSeen = new Map<string, { direction: string; automated: boolean; answeredCall: boolean }>();
   for (const r of raw) {
     const key = partyKey(r);
     if (!latestSeen.has(key)) {
@@ -89,6 +89,9 @@ export async function loadCommsStream(limit = 400): Promise<StreamData> {
       latestSeen.set(key, {
         direction: r.direction,
         automated: AUTOMATED_KINDS.has(r.touch_kind ?? "") || src === "crexi_report",
+        // An answered phone call is inbound in the log but already handled
+        // — John took the call live. Must not resurface as Unanswered.
+        answeredCall: r.channel === "phone" && r.raw_payload?.status === "answered",
       });
     }
   }
@@ -123,7 +126,8 @@ export async function loadCommsStream(limit = 400): Promise<StreamData> {
       unanswered:
         r.direction === "inbound" &&
         latest?.direction === "inbound" &&
-        !latest.automated,
+        !latest.automated &&
+        !latest.answeredCall,
     };
   });
 
