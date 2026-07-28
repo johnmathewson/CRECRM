@@ -32,6 +32,8 @@ export interface StreamRow {
   occurredAt: string;
   when: string;
   dayKey: string;
+  /** is_read=true — user cleared it from the stream (reversible, never deleted) */
+  cleared: boolean;
   /** Latest inbound with no later outbound to same party → needs John */
   unanswered: boolean;
 }
@@ -67,7 +69,7 @@ export async function loadCommsStream(limit = 400): Promise<StreamData> {
     .from("communications")
     .select(
       `id, channel, direction, subject, body_preview, from_address, to_addresses,
-       occurred_at, touch_kind, raw_payload, lead_id, contact_id,
+       occurred_at, touch_kind, raw_payload, lead_id, contact_id, is_read,
        contact:contacts(id, full_name),
        property:properties(id, name)`
     )
@@ -115,6 +117,7 @@ export async function loadCommsStream(limit = 400): Promise<StreamData> {
       leadId: r.lead_id ?? null,
       contactId: contact?.id ?? r.contact_id ?? null,
       occurredAt: r.occurred_at,
+      cleared: !!r.is_read,
       when: relativeTime(r.occurred_at),
       dayKey: d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }),
       unanswered:

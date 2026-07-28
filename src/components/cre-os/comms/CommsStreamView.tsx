@@ -30,10 +30,27 @@ export function CommsStreamView({ data }: { data: StreamData }) {
   const [unansweredOnly, setUnansweredOnly] = useState(false);
   const [peopleOnly, setPeopleOnly] = useState(true);
   const [search, setSearch] = useState("");
+  const [showCleared, setShowCleared] = useState(false);
+  const [clearedIds, setClearedIds] = useState<Record<string, boolean>>({});
+
+  async function toggleCleared(id: string, cleared: boolean) {
+    setClearedIds((m) => ({ ...m, [id]: cleared }));
+    try {
+      await fetch(`/api/communications/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cleared }),
+      });
+    } catch {
+      setClearedIds((m) => ({ ...m, [id]: !cleared }));
+    }
+  }
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return data.rows.filter((r) => {
+      const isCleared = clearedIds[r.id] ?? r.cleared;
+      if (showCleared !== isCleared) return false;
       if (channel && r.channel !== channel) return false;
       if (propertyId && r.property?.id !== propertyId) return false;
       if (unansweredOnly && !r.unanswered) return false;
@@ -44,7 +61,7 @@ export function CommsStreamView({ data }: { data: StreamData }) {
       }
       return true;
     });
-  }, [data.rows, channel, propertyId, unansweredOnly, peopleOnly, search]);
+  }, [data.rows, channel, propertyId, unansweredOnly, peopleOnly, search, showCleared, clearedIds]);
 
   const groups = useMemo(() => {
     const g: Array<{ day: string; items: StreamRow[] }> = [];
@@ -90,6 +107,9 @@ export function CommsStreamView({ data }: { data: StreamData }) {
           ))}
           <button className={chip(!peopleOnly)} onClick={() => setPeopleOnly((v) => !v)} title="Include automated sends (AI follow-ups, auto-acks, briefs)">
             {peopleOnly ? "People only" : "Incl. automated"}
+          </button>
+          <button className={chip(showCleared)} onClick={() => setShowCleared((v) => !v)} title="Cleared touches are hidden, never deleted">
+            {showCleared ? "Viewing cleared" : "Cleared"}
           </button>
           <select
             value={propertyId ?? ""}
@@ -168,6 +188,17 @@ export function CommsStreamView({ data }: { data: StreamData }) {
                           Unanswered
                         </span>
                       )}
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          toggleCleared(r.id, !showCleared);
+                        }}
+                        className="ml-auto px-2 py-0.5 rounded border border-white/10 bg-white/[0.03] hover:bg-white/[0.08] font-mono text-[10px] uppercase tracking-eyebrow text-cream-dim hover:text-cream transition-colors"
+                        title={showCleared ? "Restore to the stream" : "Clear from the stream (kept in history — reversible)"}
+                      >
+                        {showCleared ? "Restore" : "Clear"}
+                      </button>
                     </div>
                   </Row>
                 );
