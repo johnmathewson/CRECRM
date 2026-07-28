@@ -428,3 +428,25 @@ When someone proposes a new agent skill / instruction document:
    voice-learning loop.
 4. Implement surgically. Migrations + SQL updates beat appending text to
    a prompt nine times out of ten.
+
+---
+
+## STATE OF THE WORLD — 2026-07-28 (pick up here)
+
+**A2P 10DLC: APPROVED + LIVE.** Campaign `CM80f43e0659fb3e4801d6f1078cffdb44` (Low Volume Mixed, TCR ID CWHCUNR) on brand `BNbe70570…` ("Stewardship Commercial Real Estate"). We deleted 11 duplicate/failed campaigns and registered one clean one — never stack campaigns again; ONE campaign, edit via its fields. Messaging Service `MG433c934afdf170850586d136c6317058` ("Stewardship CRE (A2P approved)") has the number +13178041980 and the inbound webhook. `TWILIO_TEST_MODE=false` since 7/28 (~18:15Z) — **sends are REAL now**. First production SMS sent to Rahul (Super 8) 7/28.
+
+**SMS both directions works end-to-end:**
+- Inbound: `/api/webhooks/twilio/sms` → mirrors to `communications` (idempotent on MessageSid) → finds/creates lead (30-day thread window by phone) → attaches mirror row to lead. STOP/HELP/START handled.
+- Outbound: `/api/leads/[id]/send-sms` (session-authed) + "Text message" composer panel in the lead workspace (`LeadDetail.tsx`). Threads as touch_kind='manual'.
+- GAP: no SMS notification to John's cell on inbound reply (design says Twilio SMS with /inbox/[id] deeplink). NEXT UP.
+- GAP: **VOICE IS DEAD AIR.** +13178041980 has no voice config. Next session: forward to +12197819547, auto-log calls to communications, voicemail transcription. People WILL call the number that texts them.
+
+**New Communications stream** at `/cre-os/stream` (nav: "Communications") — north-star surface: chronological, day-grouped, filter chips (Unanswered / channel / property / People-only), read-only over `communications`, rows link to lead workspace. Old Inbox + Comms log still in nav until stream absorbs reply-bar + threads. Design docs (in ~/Documents/Claude/Projects/Commercial Real Estate/): `CRM-North-Star-Architecture.md` (the model: two nouns, one stream, Unanswered = only status, AI draft pre-loaded in reply bar), `CRM-Full-UI-Audit.md` (per-screen verdicts, 16→8 nav, metrics disagreements), `Inbox-Overhaul-Diagnosis.md`, `A2P-SUBMIT-THIS.md`.
+
+**Readability pass (done):** cream tiers now dim 86% / muted 72% / subtle 62% (tailwind.config). `.canvas-light` retargets in globals.css: accent -300/-400 text → deep hues; opacity-40/50/60 clamped to 0.72. ROOT CAUSE was whole-element opacity fades stacking on pastel text — check for that pattern before touching colors again. `metrics.ts` created (canonical hot/unanswered/active-listing/stage defs) — **not yet wired into screens** (Home/Inbox/Properties/Listings/Reports each still compute their own disagreeing numbers).
+
+**Marketing site (stewardshipcre):** SMS consent checkbox live on /contact + inquire flow (`SMS_CONSENT_TEXT` in src/lib/sms-consent.ts — if wording changes, campaign registration must match). Real number on /contact. **STILL BROKEN: /contact form submit is a setTimeout stub — silently discards every lead.** Wire to CRM intake. Consent fields sent by inquire flow are IGNORED by `/api/public/questionnaire` — no consent columns in DB yet.
+
+**Build queue (order):** 1) voice setup + reply notifications, 2) wire screens to metrics.ts, 3) contact dedupe (Al Dziadkowiec ×3, Kamini ×2 — lower(email)/phone match + merge tool), 4) thread view + reply bar w/ AI draft in stream, 5) contact form + consent columns + sms_optouts, 6) Today absorbs Home; Properties absorbs Listings; retire Inbox/Comms log; Prospector launch-or-hide.
+
+**Ops notes:** Twilio balance was ~$1.53 — TOP UP. 11 orphaned Messaging Services (MG…) remain, harmless. Push via `git push origin main` (remote is SSH now; sandbox can't push — John pushes). Netlify env changes need a redeploy to take effect.
