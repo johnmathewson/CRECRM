@@ -70,9 +70,9 @@ const config: Config = {
           // supporting text, subtle = metadata/captions — nothing below 52%.
           // These three numbers govern ~1,800 usages; change them together
           // or not at all.
-          muted: "rgb(var(--ink) / 0.62)",
-          subtle: "rgb(var(--ink) / 0.52)",
-          dim: "rgb(var(--ink) / 0.78)",
+          muted: "rgb(var(--ink) / 0.72)",
+          subtle: "rgb(var(--ink) / 0.62)",
+          dim: "rgb(var(--ink) / 0.86)",
         },
         charcoal: {
           50:  "#F7F7F7",
