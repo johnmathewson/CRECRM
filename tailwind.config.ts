@@ -65,9 +65,14 @@ const config: Config = {
           300: "#E5E0D8",
           400: "#D4CEC4",
           DEFAULT: "rgb(var(--ink) / <alpha-value>)",
-          muted: "rgb(var(--ink) / 0.50)",
-          subtle: "rgb(var(--ink) / 0.30)",
-          dim: "rgb(var(--ink) / 0.65)",
+          // Readability contract (2026-07-28): three tiers, all ≥ WCAG-ish
+          // legibility on both canvases. dim = secondary text, muted =
+          // supporting text, subtle = metadata/captions — nothing below 52%.
+          // These three numbers govern ~1,800 usages; change them together
+          // or not at all.
+          muted: "rgb(var(--ink) / 0.62)",
+          subtle: "rgb(var(--ink) / 0.52)",
+          dim: "rgb(var(--ink) / 0.78)",
         },
         charcoal: {
           50:  "#F7F7F7",

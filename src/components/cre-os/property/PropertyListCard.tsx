@@ -6,6 +6,14 @@ import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { ArchivePropertyDialog } from "./ArchivePropertyDialog";
 import type { PropertyCard } from "@/lib/cre-os/property-queries";
 
+/** Collapse status/stage variants ("listed", "LISTING", "under_contract") to
+ *  one comparable token so redundant lifecycle chips can be suppressed. */
+const normalizeLifecycle = (s: string | null | undefined) =>
+  (s ?? "")
+    .toLowerCase()
+    .replace(/[_\s-]+/g, "")
+    .replace(/(ing|ed)$/, "");
+
 const fmtMoney = (n: number | null) => {
   if (n === null || !Number.isFinite(n) || n <= 0) return "—";
   if (n >= 1_000_000) return "$" + (n / 1_000_000).toFixed(2) + "M";
@@ -141,10 +149,15 @@ export function PropertyListCard({
             )}
           </div>
 
-          {/* Lifecycle badges — what KIND of asset is this */}
+          {/* Lifecycle badges — what KIND of asset is this. Stage chip only
+              renders when it adds information beyond status: "LISTED" +
+              "LISTING" (or PROSPECTING ×2) read as a stutter, not a signal. */}
           <div className="flex flex-col items-end gap-1.5 shrink-0">
             {p.status && <StatusBadge size="xs" tone={statusTone}>{p.status.replace("_", " ")}</StatusBadge>}
-            {p.pipelineStage && <StatusBadge size="xs" tone={stageTone}>{p.pipelineStage}</StatusBadge>}
+            {p.pipelineStage &&
+              normalizeLifecycle(p.pipelineStage) !== normalizeLifecycle(p.status) && (
+                <StatusBadge size="xs" tone={stageTone}>{p.pipelineStage}</StatusBadge>
+              )}
           </div>
         </div>
 

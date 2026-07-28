@@ -45,14 +45,23 @@ export function InsightCard({ item }: { item: InsightItem }) {
       className={`block p-3 rounded border bg-white/[0.02] border-white/5 hover:bg-white/[0.04] hover:border-white/10 transition-colors`}
     >
       <div className="flex items-start gap-3">
-        {/* Confidence dial */}
-        <div
-          className={`shrink-0 w-9 h-9 rounded-full ring-1 ring-inset ${ringClass} bg-white/[0.02] flex items-center justify-center`}
-        >
-          <span className="font-mono text-[11px] font-semibold text-cream">
-            {Math.round(item.confidence)}
-          </span>
-        </div>
+        {/* Confidence dial — only when there's a real score. Every legacy
+            caller hardcodes 100, which turned this into meaningless wallpaper
+            ("100" on every card). Until callers pass genuine confidence,
+            100 renders as a quiet tone dot instead of a fake number. */}
+        {item.confidence < 100 ? (
+          <div
+            className={`shrink-0 w-9 h-9 rounded-full ring-1 ring-inset ${ringClass} bg-white/[0.02] flex items-center justify-center`}
+          >
+            <span className="font-mono text-[11px] font-semibold text-cream">
+              {Math.round(item.confidence)}
+            </span>
+          </div>
+        ) : (
+          <div className={`shrink-0 mt-1.5 w-2 h-2 rounded-full ring-2 ring-inset ${ringClass} ${
+            tone === "teal" ? "bg-teal-400/70" : tone === "amber" ? "bg-amber/70" : tone === "neutral" ? "bg-white/30" : "bg-coral-400/70"
+          }`} aria-hidden="true" />
+        )}
 
         <div className="flex-1 min-w-0">
           <div className="font-heading text-[12px] font-semibold text-cream leading-snug">
