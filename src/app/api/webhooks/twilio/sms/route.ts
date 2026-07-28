@@ -276,14 +276,83 @@ export async function POST(req: NextRequest) {
         .eq("id", mirrorRow.id);
     }
   } else {
-    // No matching outbound. Log as a standalone inbound for review —
-    // future improvement: route into the regular lead-intake pipeline.
+    // No matching outbound lane touch — this is a fresh inbound text (or a
+    // continuation of an inbox SMS conversation). Route it into the leads
+    // pipeline so it shows up in /cre-os/inbox instead of vanishing into
+    // the activities log.
+
+    // 1. Known contact?
+    const { data: contact } = await supabase
+      .from("contacts")
+      .select("id, full_name")
+      .eq("organization_id", ORG_ID)
+      .or(`phone.eq.${normalizedFrom},phone.eq.${from}`)
+      .maybeSingle();
+
+    // 2. Open SMS lead for this number within 30 days → thread continuation.
+    const cutoff = new Date(Date.now() - 30 * 86_400_000).toISOString();
+    const { data: existingLeads } = await supabase
+      .from("leads")
+      .select("id, status, contact_id, property_id")
+      .eq("organization_id", ORG_ID)
+      .or(`sender_phone.eq.${normalizedFrom},sender_phone.eq.${from}`)
+      .not("status", "in", '("archived","spam")')
+      .gte("created_at", cutoff)
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    let lead: { id: string; status: string | null; contact_id: string | null; property_id: string | null } | null =
+      (existingLeads ?? [])[0] ?? null;
+
+    // 3. Otherwise create a new lead so it lands in the inbox as "new".
+    if (!lead) {
+      const { data: created } = await supabase
+        .from("leads")
+        .insert({
+          organization_id: ORG_ID,
+          source: "sms",
+          status: "new",
+          contact_id: contact?.id ?? null,
+          sender_name: contact?.full_name ?? null,
+          sender_phone: normalizedFrom,
+          raw_subject: `Text from ${contact?.full_name ?? normalizedFrom}`,
+          raw_body: body,
+          urgency: "warm",
+        })
+        .select("id, status, contact_id, property_id")
+        .maybeSingle();
+      lead = created ?? null;
+    }
+
+    // 4. Thread the message into communications (drives the inbox thread UI).
+    if (lead) {
+      await supabase.from("communications").insert({
+        organization_id: ORG_ID,
+        channel: "sms",
+        direction: "inbound",
+        external_id: messageSid,
+        subject: null,
+        body_preview: body,
+        from_address: normalizedFrom,
+        occurred_at: receivedAt,
+        lead_id: lead.id,
+        contact_id: lead.contact_id ?? contact?.id ?? null,
+        property_id: lead.property_id ?? null,
+        raw_payload: { source: "twilio-webhook", twilio_message_sid: messageSid },
+      });
+    }
+
+    // 5. Keep the activities log entry (timeline visibility + safety net if
+    // the lead insert failed).
     await supabase.from("activities").insert({
       organization_id: ORG_ID,
       activity_type: "text",
-      subject: `Unmatched SMS from ${normalizedFrom}`,
+      subject: lead
+        ? `SMS from ${contact?.full_name ?? normalizedFrom}`
+        : `Unmatched SMS from ${normalizedFrom} (lead insert failed)`,
       body,
       occurred_at: receivedAt,
+      contact_id: contact?.id ?? null,
     });
   }
 

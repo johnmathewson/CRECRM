@@ -27,10 +27,11 @@ export function LeadDetail({ lead }: { lead: LeadDetailData }) {
   const [bodyExpanded, setBodyExpanded] = useState(false);
   const [pending, startTransition] = useTransition();
   const [actionState, setActionState] = useState<{
-    busy: "send" | "archive" | "spam" | "promote" | "redraft" | null;
+    busy: "send" | "archive" | "spam" | "promote" | "redraft" | "sms" | null;
     error: string | null;
     success: string | null;
   }>({ busy: null, error: null, success: null });
+  const [smsText, setSmsText] = useState("");
 
   const status = (lead.status ?? "").toLowerCase();
   const isArchived = status === "archived" || status === "spam";
@@ -49,6 +50,29 @@ export function LeadDetail({ lead }: { lead: LeadDetailData }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Send failed");
       setActionState({ busy: null, error: null, success: "Reply sent" });
+      startTransition(() => router.refresh());
+    } catch (e: any) {
+      setActionState({ busy: null, error: e.message, success: null });
+    }
+  }
+
+  async function sendText() {
+    if (!smsText.trim()) return setActionState({ busy: null, error: "Text is empty.", success: null });
+    setActionState({ busy: "sms", error: null, success: null });
+    try {
+      const res = await fetch(`/api/leads/${lead.id}/send-sms`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: smsText }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Text failed");
+      setSmsText("");
+      setActionState({
+        busy: null,
+        error: null,
+        success: data.rerouted ? "Text sent (TEST MODE — rerouted to your cell)" : "Text sent",
+      });
       startTransition(() => router.refresh());
     } catch (e: any) {
       setActionState({ busy: null, error: e.message, success: null });
@@ -333,6 +357,11 @@ export function LeadDetail({ lead }: { lead: LeadDetailData }) {
                   <div className="flex items-baseline justify-between gap-2 mb-1">
                     <span className="font-heading text-[11px] font-semibold text-cream">
                       {m.direction === "outbound" ? "You" : (m.fromAddress ?? "Inbound")}
+                      {m.channel === "sms" && (
+                        <span className="ml-2 px-1.5 py-0.5 rounded bg-teal-400/[0.10] border border-teal-400/25 font-mono text-[9px] uppercase tracking-wide text-teal-300 align-middle">
+                          sms
+                        </span>
+                      )}
                     </span>
                     <span className="font-mono text-[10px] text-cream-subtle">{m.when}</span>
                   </div>
@@ -342,6 +371,36 @@ export function LeadDetail({ lead }: { lead: LeadDetailData }) {
                   )}
                 </div>
               ))}
+            </div>
+          </Panel>
+        )}
+
+        {/* SMS composer — renders whenever the lead has a phone number.
+            Sends from the business line (317-804-1980) via the A2P-registered
+            Messaging Service. Honors TWILIO_TEST_MODE. */}
+        {lead.senderPhone && !isArchived && (
+          <Panel eyebrow="Text message" num={lead.thread.length > 0 ? 4 : 3} title={`Text ${lead.senderDisplay}`}>
+            <div className="space-y-2">
+              <textarea
+                value={smsText}
+                onChange={(e) => setSmsText(e.target.value)}
+                rows={3}
+                maxLength={1600}
+                placeholder={`Text ${lead.senderPhone} from (317) 804-1980…`}
+                className="w-full rounded border border-white/10 bg-white/[0.03] px-3 py-2.5 font-body text-[13px] text-cream placeholder:text-cream-subtle focus:border-teal-400/40 focus:outline-none resize-y"
+              />
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-mono text-[10px] text-cream-subtle">
+                  {smsText.length > 0 && `${smsText.length} chars · ${Math.ceil(smsText.length / 160)} segment${smsText.length > 160 ? "s" : ""}`}
+                </span>
+                <button
+                  onClick={sendText}
+                  disabled={!!actionState.busy || !smsText.trim()}
+                  className="px-4 py-2 rounded border border-teal-400/40 bg-teal-400/[0.06] text-teal-300 hover:bg-teal-400/[0.10] font-heading text-[12px] font-semibold uppercase tracking-eyebrow disabled:opacity-50 transition-colors"
+                >
+                  {actionState.busy === "sms" ? "Sending…" : "Send text"}
+                </button>
+              </div>
             </div>
           </Panel>
         )}
