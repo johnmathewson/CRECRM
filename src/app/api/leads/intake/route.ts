@@ -408,6 +408,87 @@ ${body.raw_body || "(empty)"}`;
     body.sender_phone || null
   );
 
+  // ── 4b. Thread repeat inquiries into the existing open lead ──────────────
+  // Same person + same property (or both property-less) within 30 days is a
+  // continuation of ONE conversation, not a new lead. Without this, every
+  // repeat submission minted a sibling lead (Kamini Patel accumulated five)
+  // and the person's thread got scattered across lead files. Same 30-day
+  // window rule as the SMS webhook.
+  const threadEmail = qualification.sender_email_clean || body.sender_email || null;
+  if (threadEmail && !isLikelySpam) {
+    let threadQuery = supabase
+      .from("leads")
+      .select("id, raw_body, status")
+      .eq("organization_id", ORG_ID)
+      .ilike("sender_email", threadEmail.trim())
+      .not("status", "in", '("archived","spam")')
+      .gte("created_at", new Date(Date.now() - 30 * 86_400_000).toISOString())
+      .order("created_at", { ascending: false })
+      .limit(1);
+    threadQuery = matched
+      ? threadQuery.eq("property_id", matched.id)
+      : threadQuery.is("property_id", null);
+    const { data: openLeads } = await threadQuery;
+    const openLead = (openLeads ?? [])[0] ?? null;
+
+    if (openLead) {
+      const stamp = new Date().toISOString().slice(0, 16).replace("T", " ") + "Z";
+      const entry = `[repeat inquiry ${stamp}] ${body.raw_subject || ""}\n${body.raw_body || ""}`.trim();
+      await supabase
+        .from("leads")
+        .update({
+          raw_body: openLead.raw_body ? `${openLead.raw_body}\n\n${entry}` : entry,
+          // They reached out again — back into the queue even if previously
+          // replied ('sent') or contacted.
+          status: "new",
+          urgency: qualification.urgency,
+          qualifier_summary: qualification.qualifier_summary,
+          ...(contactId ? { contact_id: contactId } : {}),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", openLead.id);
+
+      const { error: threadCommErr } = await supabase.from("communications").insert({
+        organization_id: ORG_ID,
+        lead_id: openLead.id,
+        contact_id: contactId,
+        channel: channelForSource(body.source),
+        direction: "inbound",
+        external_id: body.source_message_id || null,
+        subject: body.raw_subject || null,
+        body_preview: (body.raw_body || "").slice(0, 500),
+        from_address: body.sender_email || body.sender_phone || null,
+        occurred_at: new Date().toISOString(),
+        attachments: body.attachments ?? [],
+        raw_payload: { ...(body.raw_payload || {}), lead_source: body.source, repeat_inquiry: true },
+      });
+      if (threadCommErr) {
+        console.error("[leads/intake] threaded comm insert failed:", threadCommErr.message);
+      }
+
+      await recordEvent(
+        supabase,
+        openLead.id,
+        "received",
+        "system",
+        `Repeat inquiry via ${body.source} — threaded into existing lead (was '${openLead.status}')`,
+        { source: body.source, source_message_id: body.source_message_id }
+      );
+
+      // No auto-ack on repeat inquiries — the receipt is a first-touch-only
+      // courtesy. The drafter self-skips if a reply was already sent; the
+      // reply bar's regenerate button covers fresh drafts on demand.
+      return NextResponse.json({
+        lead_id: openLead.id,
+        status: "threaded",
+        qualification,
+        matched_property: matched
+          ? { id: matched.id, name: matched.name, slug: matched.slug }
+          : null,
+      });
+    }
+  }
+
   // ── 5. Insert lead row ────────────────────────────────────────────────────
   const status = isLikelySpam ? "spam" : matched ? "new" : "unmatched";
 

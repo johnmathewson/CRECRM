@@ -122,8 +122,44 @@ export async function POST(req: NextRequest) {
     contactId = newContact?.id || null;
   }
 
+  // ── Thread repeat submissions into the existing open lead ───────────────
+  // A returning person re-submitting the form for the SAME property must
+  // never mint a sibling lead (Kamini Patel accumulated five this way —
+  // her conversation got scattered across lead files). 30-day window,
+  // same rule as email intake + the SMS webhook. A different property
+  // still gets its own lead.
+  const threadCutoff = new Date(Date.now() - 30 * 86_400_000).toISOString();
+  const { data: openLeads } = await supabase
+    .from("leads")
+    .select("id, raw_body, status")
+    .eq("organization_id", ORG_ID)
+    .ilike("sender_email", body.email.trim())
+    .eq("property_id", property.id)
+    .not("status", "in", '("archived","spam")')
+    .gte("created_at", threadCutoff)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  const openLead = (openLeads ?? [])[0] ?? null;
+
+  if (openLead) {
+    const stamp = new Date().toISOString().slice(0, 16).replace("T", " ") + "Z";
+    const entry =
+      `[repeat questionnaire ${stamp}] Lead type: ${body.lead_type} · Budget: ${body.budget_range || "—"} · Timeline: ${body.timeline || "—"} · Company: ${body.company || "—"}`;
+    await supabase
+      .from("leads")
+      .update({
+        raw_body: openLead.raw_body ? `${openLead.raw_body}\n\n${entry}` : entry,
+        status: "new", // they reached out again — back into the queue
+        ...(contactId ? { contact_id: contactId } : {}),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", openLead.id);
+  }
+
   // ── Create a lead row so this surfaces in /inbox alongside email leads ──
-  const { data: lead } = await supabase
+  const { data: lead } = openLead
+    ? { data: { id: openLead.id } }
+    : await supabase
     .from("leads")
     .insert({
       organization_id: ORG_ID,
