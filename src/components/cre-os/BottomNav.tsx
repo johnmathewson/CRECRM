@@ -54,7 +54,10 @@ const ICON_INBOX = (
 const TABS: BottomTab[] = [
   { href: "/cre-os",                label: "Home",       icon: ICON_HOME },
   { href: "/cre-os/prospector",     label: "Prospector", icon: ICON_RADAR },
-  { href: "/cre-os/inbox",          label: "Inbox",      icon: ICON_INBOX },
+  // Inbox retired 2026-07-29 — Communications (the stream + ThreadPanel
+  // reply bar) is the one front door. Lead files at /cre-os/inbox/[id]
+  // still exist and every deeplink keeps working.
+  { href: "/cre-os/stream",         label: "Comms",      icon: ICON_INBOX },
   { href: "/cre-os/properties",     label: "Properties", icon: ICON_BUILDING },
   { href: "/cre-os/pipeline",       label: "Pipeline",   icon: ICON_PIPELINE },
 ];

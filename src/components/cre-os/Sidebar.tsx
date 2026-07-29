@@ -120,8 +120,9 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
       { label: "Home",          href: "/cre-os",                icon: ICON.home,     legacyHref: "/" },
       { label: "Properties",    href: "/cre-os/properties",     icon: ICON.building, legacyHref: "/properties" },
       { label: "Pipeline",      href: "/cre-os/pipeline",       icon: ICON.pipeline, legacyHref: "/deals" },
-      { label: "Inbox",         href: "/cre-os/inbox",          icon: ICON.inbox },
-      { label: "Communications", href: "/cre-os/stream",        icon: ICON.mail },
+      // Inbox tab retired 2026-07-29 — the stream owns triage + reply now.
+      // /cre-os/inbox/[id] lead files remain live for every deeplink.
+      { label: "Communications", href: "/cre-os/stream",        icon: ICON.inbox },
       { label: "Outreach tracker", href: "/cre-os/communications", icon: ICON.mail },
       { label: "Relationships", href: "/cre-os/relationships",  icon: ICON.users,    legacyHref: "/contacts" },
     ],
