@@ -105,9 +105,17 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Recording disclosure BEFORE the dial — Illinois (and other all-party
+  // consent states) callers are routine here; continuing after the notice
+  // is implied consent everywhere. Do not remove the <Say> while the
+  // record attribute is on.
   const origin = req.nextUrl.origin;
   return twiml(
-    `<Dial action="${origin}/api/webhooks/twilio/voice/complete" method="POST" timeout="20" answerOnBridge="true">` +
+    `<Say voice="Polly.Matthew-Neural">This call may be recorded for quality purposes.</Say>` +
+      `<Dial action="${origin}/api/webhooks/twilio/voice/complete" method="POST" timeout="20" answerOnBridge="true"` +
+      ` record="record-from-answer-dual"` +
+      ` recordingStatusCallback="${origin}/api/webhooks/twilio/voice/recording"` +
+      ` recordingStatusCallbackMethod="POST">` +
       `<Number>${escapeXml(forwardToNumber())}</Number>` +
       `</Dial>`
   );
