@@ -38,10 +38,13 @@ export async function GET(
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!lead) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  // Fetch events, primary thread (by lead_id), and any orphaned comms for the
-  // same contact+property that haven't been linked yet (lead_id IS NULL).
-  // The orphan fallback surfaces sends that happened before the leads row
-  // existed — e.g. cadence or bulk-AI sends to cold CREXi contacts.
+  // Fetch events, the primary thread (by lead_id), and EVERY communication
+  // with the same contact — regardless of which lead it's attached to.
+  // One person = one conversation: duplicate-lead intake (e.g. repeat
+  // questionnaire submissions minting a fresh lead per submission) used to
+  // scatter a single relationship's messages across sibling lead files, so
+  // the thread showed "unanswered" while the actual reply sat on a sibling.
+  // The contact-wide fetch also covers the old orphan case (lead_id NULL).
   const [{ data: events }, { data: primaryThread }, orphanResult] = await Promise.all([
     supabase
       .from("lead_events")
@@ -59,8 +62,6 @@ export async function GET(
           .select("*")
           .eq("organization_id", ORG_ID)
           .eq("contact_id", lead.contact_id)
-          .eq("property_id", lead.property_id)
-          .is("lead_id", null)
           .order("occurred_at", { ascending: true })
       : Promise.resolve({ data: [] as Record<string, unknown>[] }),
   ]);
