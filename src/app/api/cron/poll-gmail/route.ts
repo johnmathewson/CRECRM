@@ -30,6 +30,7 @@ import {
   parseAddress,
 } from "@/lib/gmail";
 import { maybeRouteAsReply, routeAsReplyByEmail } from "@/lib/cre-os/match-reply-to-touch";
+import { captureVoiceExample } from "@/lib/cre-os/voice-examples";
 import {
   classifyInboundEmail,
   collectAttachmentFilenames,
@@ -782,6 +783,20 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
               matched_lead: !!matchedLead,
             },
           });
+
+          // Feed the voice-learning loop — an email John typed himself in
+          // Gmail is the purest example of his voice. Only when it went to
+          // someone the CRM knows (keeps the pool business-relevant).
+          if (matchedLead || resolvedContactId) {
+            await captureVoiceExample(supabase, {
+              channel: "email",
+              subject,
+              body: bodyText,
+              source: "manual",
+              propertyId: (matchedLead?.property_id as string | null) ?? null,
+              sentAt,
+            });
+          }
 
           // Mark the lead as sent so it leaves the action queue.
           // Only meaningful when we actually matched one.

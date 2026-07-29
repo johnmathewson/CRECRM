@@ -23,6 +23,7 @@
  */
 
 import { callAnthropic, MODELS } from "./anthropic";
+import { retrieveVoiceExamples, renderExamplesAsFewShot } from "./cre-os/voice-examples";
 import { gatherIntel, formatIntelForPrompt } from "./agent-intel";
 import { personalizeTouch, DEFAULT_SENDER } from "./cre-os/ai-touch-personalize";
 
@@ -289,11 +290,20 @@ Draft John's outreach email now.`;
       draftReply = touch.body.trim();
       // personalizeTouch doesn't expose token usage; leave draftTokens null
     } else {
-      // first_touch: keep the existing direct-Claude path — it's a reply to
-      // an inbound message and doesn't need cold-outreach framing.
+      // first_touch: direct-Claude path for replies to inbound — but WITH
+      // John's real sent emails as few-shot voice examples. This was the
+      // feedback-loop gap (found 7/29): captures were flowing in from every
+      // send, but this drafter never read them, so drafts never got closer
+      // to how John actually writes.
+      const examples = await retrieveVoiceExamples(supabase, {
+        channel: "email",
+        propertyId: lead.property_id || null,
+        limit: 4,
+      });
+      const fewShot = renderExamplesAsFewShot(examples);
       const result = await callAnthropic({
         model: MODELS.SONNET,
-        system: DRAFT_SYSTEM_BASE,
+        system: fewShot ? `${DRAFT_SYSTEM_BASE}\n\n${fewShot}` : DRAFT_SYSTEM_BASE,
         messages: [{ role: "user", content: userMessage }],
         maxTokens: 1024,
         temperature: 0.6,

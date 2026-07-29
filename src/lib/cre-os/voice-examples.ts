@@ -155,11 +155,16 @@ export async function retrieveVoiceExamples(
   if (!data || data.length === 0) return [];
 
   const rows = data as VoiceExample[];
-  // Rank: same property (3pts) + starred (2pts) + recency-bucket
+  // Rank: human-written first (manual/edited beat the AI's own unedited
+  // output — otherwise the model trains on itself), then same property,
+  // starred, recency.
   const now = Date.now();
   const ranked = rows
     .map((r) => {
       let score = 0;
+      if (r.source === "manual") score += 4;
+      else if (r.source === "ai_edited") score += 2;
+      else score -= 2; // ai_drafted: last resort only
       if (opts.propertyId && r.property_id === opts.propertyId) score += 3;
       if (r.is_starred) score += 2;
       const ageDays = (now - new Date(r.sent_at).getTime()) / 86_400_000;

@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { sendSms, toE164 } from "@/lib/twilio";
+import { captureVoiceExample } from "@/lib/cre-os/voice-examples";
 
 export const dynamic = "force-dynamic";
 
@@ -118,6 +119,16 @@ export async function POST(
       twilio_status: result.status,
       test_mode_rerouted: result.rerouted,
     },
+  });
+
+  // Feed the voice-learning loop — John's real texts teach the SMS drafts.
+  // Best-effort: never blocks the send (already out the door anyway).
+  await captureVoiceExample(supabase, {
+    channel: "sms",
+    body,
+    source: "manual",
+    propertyId: lead.property_id ?? null,
+    sentAt: now,
   });
 
   // A texted reply counts as acknowledging the lead. Don't downgrade
