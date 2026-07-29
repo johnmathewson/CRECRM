@@ -19,6 +19,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { verifyTwilioSignature, classifyInboundSms, toE164 } from "@/lib/twilio";
+import { notifyJohn } from "@/lib/twilio-voice";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +47,19 @@ function twiml(messageBody?: string): NextResponse {
     status: 200,
     headers: { "Content-Type": "text/xml; charset=utf-8" },
   });
+}
+
+/** Trim the inbound text to a notification-sized snippet. */
+function snippet(body: string): string {
+  const oneLine = body.replace(/\s+/g, " ").trim();
+  return oneLine.length > 90 ? `${oneLine.slice(0, 90)}…` : oneLine;
+}
+
+/** Don't notify John about John — e.g. texting the business line from his
+ *  own cell to test. */
+function isFromJohn(phoneE164: string): boolean {
+  const notifyTo = toE164(process.env.TWILIO_NOTIFY_TO_NUMBER ?? null);
+  return notifyTo !== null && notifyTo === phoneE164;
 }
 
 function escapeXml(s: string): string {
@@ -275,6 +289,24 @@ export async function POST(req: NextRequest) {
         })
         .eq("id", mirrorRow.id);
     }
+
+    // Notify John — a reply to cold outreach is exactly the text he wants
+    // to see instantly.
+    if (!isFromJohn(normalizedFrom)) {
+      let propertyName: string | null = null;
+      if (parent.property_id) {
+        const { data: prop } = await supabase
+          .from("properties")
+          .select("name")
+          .eq("id", parent.property_id)
+          .maybeSingle();
+        propertyName = prop?.name ?? null;
+      }
+      const who = phoneContact?.full_name ?? normalizedFrom;
+      await notifyJohn(
+        `${who} replied${propertyName ? ` re ${propertyName}` : ""}: "${snippet(body)}"`
+      );
+    }
   } else {
     // No matching outbound lane touch — this is a fresh inbound text (or a
     // continuation of an inbox SMS conversation). Route it into the leads
@@ -332,6 +364,17 @@ export async function POST(req: NextRequest) {
           property_id: lead.property_id ?? null,
         })
         .eq("id", mirrorRow.id);
+    }
+
+    // Notify John with the inbox deeplink so he can reply from the lead
+    // workspace within the SLA window.
+    if (!isFromJohn(normalizedFrom)) {
+      const who = contact?.full_name ?? normalizedFrom;
+      await notifyJohn(
+        lead
+          ? `Text from ${who}: "${snippet(body)}" — reply: ${req.nextUrl.origin}/cre-os/inbox/${lead.id}`
+          : `Text from ${who}: "${snippet(body)}"`
+      );
     }
 
     // 5. Keep the activities log entry (timeline visibility + safety net if
