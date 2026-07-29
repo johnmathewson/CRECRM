@@ -150,8 +150,10 @@ function normalizeEmail(e?: string | null): string | null {
 
 function normalizePhone(p?: string | null): string | null {
   if (!p) return null;
-  // Keep digits only. CREXi shows "317.617.4900" → "3176174900"
+  // E.164, same as every other write path — mixed formats split SMS threads.
   const digits = p.replace(/\D/g, "");
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
   return digits.length >= 7 ? digits : null;
 }
 

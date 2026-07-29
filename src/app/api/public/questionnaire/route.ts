@@ -69,6 +69,9 @@ export async function POST(req: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
+  // Phones are stored E.164 everywhere — mixed formats split SMS threads.
+  if (body.phone) body.phone = toE164(body.phone) ?? body.phone;
+
   // ── Look up the property ────────────────────────────────────────────────
   const { data: property } = await supabase
     .from("properties")

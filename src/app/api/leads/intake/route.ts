@@ -29,6 +29,7 @@ import { checkSpam } from "@/lib/spam-filter";
 import { matchProperty, MATCH_CONFIDENCE_THRESHOLD } from "@/lib/property-match";
 import { draftLeadReply } from "@/lib/draft-lead-reply";
 import { linkOrphanedComms } from "@/lib/cre-os/send-crm-email";
+import { toE164 } from "@/lib/twilio";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // Netlify Pro: up to 60s. Two Claude calls can run long.
@@ -302,6 +303,11 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Phones are stored E.164 (+1XXXXXXXXXX) everywhere — the SMS/voice
+  // webhooks match on exact strings, and mixed formats ("610.416.1341")
+  // split one person's thread into phantom leads (Arjun, 7/29).
+  if (body.sender_phone) body.sender_phone = toE164(body.sender_phone) ?? body.sender_phone;
+
   // ── 1. Heuristic spam check ───────────────────────────────────────────────
   const spamCheck = checkSpam({
     sender_email: body.sender_email,
@@ -378,6 +384,11 @@ ${body.raw_body || "(empty)"}`;
     const parsed = parseJsonResponse<QualificationResult>(result.text);
     if (!parsed) throw new Error("Could not parse qualification JSON");
     qualification = parsed;
+    // Haiku's "clean" phone is free-form — force E.164 like every other path.
+    if (qualification.sender_phone_clean) {
+      qualification.sender_phone_clean =
+        toE164(qualification.sender_phone_clean) ?? qualification.sender_phone_clean;
+    }
   } catch (err: any) {
     console.error("Qualification failed:", err);
     return NextResponse.json(
