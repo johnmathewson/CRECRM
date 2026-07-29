@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { AppShell } from "@/components/cre-os/AppShell";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
+import { ThreadPanel } from "./ThreadPanel";
 import type { StreamData, StreamRow } from "@/lib/cre-os/comms-stream-queries";
 
 /**
@@ -10,11 +11,12 @@ import type { StreamData, StreamRow } from "@/lib/cre-os/comms-stream-queries";
  *
  * One chronological stream of every touch (email / text / call), newest
  * first, grouped by day. Filters are client-side chips: channel, property,
- * Unanswered, and "people only" (hides automated sends). Rows link into the
- * lead workspace when one exists.
+ * Unanswered, and "people only" (hides automated sends).
  *
- * READ-ONLY over the communications log — replies happen in the lead
- * workspace (SMS composer + email send live there).
+ * Tapping a row with a lead opens the ThreadPanel: the conversation with
+ * that person + a channel-aware reply bar (text / email, AI draft on tap).
+ * The stream itself stays read-only over the log; all sends go through the
+ * existing lead routes.
  */
 
 const CHANNEL_META: Record<string, { label: string; glyph: string }> = {
@@ -32,6 +34,7 @@ export function CommsStreamView({ data }: { data: StreamData }) {
   const [search, setSearch] = useState("");
   const [showCleared, setShowCleared] = useState(false);
   const [clearedIds, setClearedIds] = useState<Record<string, boolean>>({});
+  const [openThread, setOpenThread] = useState<{ leadId: string; channel: string } | null>(null);
 
   async function toggleCleared(id: string, cleared: boolean) {
     setClearedIds((m) => ({ ...m, [id]: cleared }));
@@ -142,13 +145,20 @@ export function CommsStreamView({ data }: { data: StreamData }) {
             <div className="mt-2 space-y-2">
               {g.items.map((r) => {
                 const meta = CHANNEL_META[r.channel] ?? { label: r.channel, glyph: "•" };
-                const href = r.leadId ? `/cre-os/inbox/${r.leadId}` : undefined;
-                const Row = href ? "a" : "div";
                 return (
-                  <Row
+                  <div
                     key={r.id}
-                    {...(href ? { href } : {})}
-                    className={`block p-3 rounded border transition-colors ${
+                    {...(r.leadId
+                      ? {
+                          onClick: () => setOpenThread({ leadId: r.leadId!, channel: r.channel }),
+                          role: "button",
+                          tabIndex: 0,
+                          onKeyDown: (e: React.KeyboardEvent) => {
+                            if (e.key === "Enter") setOpenThread({ leadId: r.leadId!, channel: r.channel });
+                          },
+                        }
+                      : {})}
+                    className={`block p-3 rounded border transition-colors ${r.leadId ? "cursor-pointer" : ""} ${
                       r.unanswered
                         ? "border-coral-400/40 bg-coral-400/[0.04] hover:bg-coral-400/[0.07]"
                         : "border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05]"
@@ -200,13 +210,21 @@ export function CommsStreamView({ data }: { data: StreamData }) {
                         {showCleared ? "Restore" : "Clear"}
                       </button>
                     </div>
-                  </Row>
+                  </div>
                 );
               })}
             </div>
           </section>
         ))}
       </div>
+
+      {openThread && (
+        <ThreadPanel
+          leadId={openThread.leadId}
+          initialChannel={openThread.channel}
+          onClose={() => setOpenThread(null)}
+        />
+      )}
     </AppShell>
   );
 }
