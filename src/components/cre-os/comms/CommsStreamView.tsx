@@ -145,20 +145,28 @@ export function CommsStreamView({ data }: { data: StreamData }) {
             <div className="mt-2 space-y-2">
               {g.items.map((r) => {
                 const meta = CHANNEL_META[r.channel] ?? { label: r.channel, glyph: "•" };
+                // Click behavior: lead → thread panel with reply bar;
+                // no lead but a known contact → their relationship
+                // workspace; neither (internal/system mail) → inert.
+                const open = r.leadId
+                  ? () => setOpenThread({ leadId: r.leadId!, channel: r.channel })
+                  : r.contactId
+                    ? () => { window.location.href = `/cre-os/relationships/${r.contactId}`; }
+                    : null;
                 return (
                   <div
                     key={r.id}
-                    {...(r.leadId
+                    {...(open
                       ? {
-                          onClick: () => setOpenThread({ leadId: r.leadId!, channel: r.channel }),
+                          onClick: open,
                           role: "button",
                           tabIndex: 0,
                           onKeyDown: (e: React.KeyboardEvent) => {
-                            if (e.key === "Enter") setOpenThread({ leadId: r.leadId!, channel: r.channel });
+                            if (e.key === "Enter") open();
                           },
                         }
                       : {})}
-                    className={`block p-3 rounded border transition-colors ${r.leadId ? "cursor-pointer" : ""} ${
+                    className={`block p-3 rounded border transition-colors ${open ? "cursor-pointer" : ""} ${
                       r.unanswered
                         ? "border-coral-400/40 bg-coral-400/[0.04] hover:bg-coral-400/[0.07]"
                         : "border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05]"
