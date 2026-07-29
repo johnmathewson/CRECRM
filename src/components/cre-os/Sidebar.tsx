@@ -122,7 +122,7 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
       { label: "Pipeline",      href: "/cre-os/pipeline",       icon: ICON.pipeline, legacyHref: "/deals" },
       { label: "Inbox",         href: "/cre-os/inbox",          icon: ICON.inbox },
       { label: "Communications", href: "/cre-os/stream",        icon: ICON.mail },
-      { label: "Comms log",     href: "/cre-os/communications", icon: ICON.mail },
+      { label: "Outreach tracker", href: "/cre-os/communications", icon: ICON.mail },
       { label: "Relationships", href: "/cre-os/relationships",  icon: ICON.users,    legacyHref: "/contacts" },
     ],
   },
