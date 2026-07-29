@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "@/lib/cors";
 import { draftLeadReply } from "@/lib/draft-lead-reply";
+import { toE164 } from "@/lib/twilio";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // Sonnet drafting can be slow
