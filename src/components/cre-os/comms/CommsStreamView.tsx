@@ -48,7 +48,7 @@ export function CommsStreamView({ data }: { data: StreamData }) {
   const [search, setSearch] = useState("");
   const [showCleared, setShowCleared] = useState(false);
   const [clearedIds, setClearedIds] = useState<Record<string, boolean>>({});
-  const [openThread, setOpenThread] = useState<{ leadId: string; channel: string } | null>(null);
+  const [openThread, setOpenThread] = useState<{ leadId?: string; contactId?: string; channel: string } | null>(null);
 
   async function toggleCleared(id: string, cleared: boolean) {
     setClearedIds((m) => ({ ...m, [id]: cleared }));
@@ -194,10 +194,13 @@ export function CommsStreamView({ data }: { data: StreamData }) {
             <div className="mt-2 space-y-2">
               {g.items.map((c) => {
                 const meta = CHANNEL_META[c.latest.channel] ?? { label: c.latest.channel, glyph: "•" };
+                // Lead or contact, the panel opens either way — replying to
+                // a lead-less contact mints the lead on first send. Only
+                // system rows (no person at all) stay inert.
                 const open = c.leadId
                   ? () => setOpenThread({ leadId: c.leadId!, channel: c.latest.channel })
                   : c.contactId
-                    ? () => { window.location.href = `/cre-os/relationships/${c.contactId}`; }
+                    ? () => setOpenThread({ contactId: c.contactId!, channel: c.latest.channel })
                     : null;
                 const youSpokeLast = c.latest.direction === "outbound";
                 return (
@@ -273,7 +276,8 @@ export function CommsStreamView({ data }: { data: StreamData }) {
 
       {openThread && (
         <ThreadPanel
-          leadId={openThread.leadId}
+          leadId={openThread.leadId ?? null}
+          contactId={openThread.contactId ?? null}
           initialChannel={openThread.channel}
           onClose={() => setOpenThread(null)}
         />
