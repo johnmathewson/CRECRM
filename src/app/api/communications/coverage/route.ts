@@ -452,9 +452,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 
+  // Personal sends skipped on earlier runs never enter `communications`,
+  // so the raw diff would surface them again forever — clogging every
+  // batch window and starving older messages of slots. The ingest log is
+  // the ledger for "seen and deliberately not stored": filter those out.
+  const sentDispositions = await ingestDispositions(supabase, diff.missingSent);
+  const backfillableSent = diff.missingSent.filter(
+    (id) => sentDispositions.get(id) !== "skipped_personal",
+  );
+
   const work: { id: string; direction: "inbound" | "outbound" }[] = [];
   if (direction !== "inbound") {
-    for (const id of diff.missingSent) work.push({ id, direction: "outbound" });
+    for (const id of backfillableSent) work.push({ id, direction: "outbound" });
   }
   if (direction !== "outbound") {
     for (const id of diff.missingReceived)
@@ -537,6 +546,15 @@ export async function POST(req: NextRequest) {
 
       if (!isPrimary && !contactId && !leadId) {
         results.skippedPersonal += 1;
+        // Ledger entry so future diffs skip this id without refetching it.
+        // Deliberately minimal — no subject/counterparty: personal mail's
+        // content stays out of the database entirely.
+        await supabase.from("email_ingest_log").insert({
+          organization_id: ORG_ID,
+          gmail_message_id: item.id,
+          disposition: "skipped_personal",
+          detail: { mailbox: token.email },
+        });
         continue;
       }
 
