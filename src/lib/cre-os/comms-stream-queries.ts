@@ -46,6 +46,19 @@ export interface StreamData {
 
 const AUTOMATED_KINDS = new Set(["ai_followup", "auto_ack", "internal", "campaign"]);
 
+/** Engagement signals (CREXi page views, CA executions…) are robot events,
+ *  not messages — they must never mark a party Unanswered or pose as a
+ *  human touch. Matched by source AND subject prefix: a 7/29 backfill once
+ *  wrote them under a different source and polluted the Unanswered count
+ *  with 81 phantom parties. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function isSignal(r: any): boolean {
+  return (
+    String(r.raw_payload?.source ?? "") === "crexi_report" ||
+    String(r.subject ?? "").startsWith("CREXi activity")
+  );
+}
+
 /** Identity key for answered/unanswered pairing: contact if linked, else
  *  normalized counterparty address (email lowercased / phone digits). */
 function partyKey(r: {
@@ -85,10 +98,9 @@ export async function loadCommsStream(limit = 400): Promise<StreamData> {
   for (const r of raw) {
     const key = partyKey(r);
     if (!latestSeen.has(key)) {
-      const src = String(r.raw_payload?.source ?? "");
       latestSeen.set(key, {
         direction: r.direction,
-        automated: AUTOMATED_KINDS.has(r.touch_kind ?? "") || src === "crexi_report",
+        automated: AUTOMATED_KINDS.has(r.touch_kind ?? "") || isSignal(r),
         // An answered phone call is inbound in the log but already handled
         // — John took the call live. Must not resurface as Unanswered.
         answeredCall: r.channel === "phone" && r.raw_payload?.status === "answered",
@@ -103,7 +115,7 @@ export async function loadCommsStream(limit = 400): Promise<StreamData> {
     if (property?.id) propSet.set(property.id, property.name);
     const key = partyKey(r);
     const latest = latestSeen.get(key);
-    const automated = AUTOMATED_KINDS.has(r.touch_kind ?? "");
+    const automated = AUTOMATED_KINDS.has(r.touch_kind ?? "") || isSignal(r);
     const counterparty =
       r.direction === "inbound" ? r.from_address : (r.to_addresses ?? [])[0];
     const d = new Date(r.occurred_at);
