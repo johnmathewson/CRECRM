@@ -29,7 +29,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
-import { getActiveGmailToken } from "@/lib/gmail-auth";
+import { getActiveGmailToken, getActiveGmailTokens, PRIMARY_MAILBOX } from "@/lib/gmail-auth";
 import {
   getMessage,
   getHeader,
@@ -57,6 +57,15 @@ function sb(): SB {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
   );
+}
+
+/** Resolve which connected mailbox to measure/backfill. Defaults to the
+ *  primary (inquiries@); pass ?mailbox= / body.mailbox to target another
+ *  connected account (e.g. john@ for deep sent-mail backfill). */
+async function resolveToken(supabase: SB, mailbox: string | null) {
+  if (!mailbox) return getActiveGmailToken(supabase);
+  const tokens = await getActiveGmailTokens(supabase);
+  return tokens.find((t) => t.email.toLowerCase() === mailbox.toLowerCase()) ?? null;
 }
 
 async function listAllMessageIds(
@@ -314,10 +323,10 @@ export async function GET(req: NextRequest) {
 
   const supabase = sb();
 
-  const token = await getActiveGmailToken(supabase);
+  const token = await resolveToken(supabase, req.nextUrl.searchParams.get("mailbox"));
   if (!token) {
     return NextResponse.json(
-      { error: "Gmail is not connected — cannot measure coverage." },
+      { error: "That mailbox is not connected — cannot measure coverage." },
       { status: 503 },
     );
   }
@@ -402,6 +411,8 @@ interface BackfillBody {
   direction?: "both" | "inbound" | "outbound";
   limit?: number;
   dryRun?: boolean;
+  /** Which connected mailbox to backfill (default: primary). */
+  mailbox?: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -413,20 +424,25 @@ export async function POST(req: NextRequest) {
   }
 
   const days = Math.min(Math.max(Math.trunc(body.days ?? 30), 1), 180);
-  const direction = body.direction ?? "both";
   // Each message needs a Gmail fetch + 2-3 DB queries; keep well inside the
   // 60s function budget. Run POST repeatedly to work through a big backlog.
   const limit = Math.min(Math.max(Math.trunc(body.limit ?? 50), 1), 150);
   const dryRun = body.dryRun === true;
 
   const supabase = sb();
-  const token = await getActiveGmailToken(supabase);
+  const token = await resolveToken(supabase, body.mailbox ?? null);
   if (!token) {
     return NextResponse.json(
-      { error: "Gmail is not connected — cannot backfill." },
+      { error: "That mailbox is not connected — cannot backfill." },
       { status: 503 },
     );
   }
+
+  // Secondary mailboxes (John's personal account) carry personal mail:
+  // never touch their inbox, and only log sent mail addressed to someone
+  // the CRM already knows. Same contract as the live SENT-sync.
+  const isPrimary = token.email.toLowerCase() === PRIMARY_MAILBOX;
+  const direction = isPrimary ? (body.direction ?? "both") : "outbound";
 
   let diff: Awaited<ReturnType<typeof computeDiff>>;
   try {
@@ -450,6 +466,9 @@ export async function POST(req: NextRequest) {
   const results = {
     backfilled: 0,
     skippedAlreadyLogged: 0,
+    /** Non-primary mailbox only: sent mail to someone the CRM doesn't know
+     *  — personal correspondence, never stored. */
+    skippedPersonal: 0,
     errors: [] as { gmailMessageId: string; error: string }[],
     rows: [] as {
       gmailMessageId: string;
@@ -516,6 +535,11 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      if (!isPrimary && !contactId && !leadId) {
+        results.skippedPersonal += 1;
+        continue;
+      }
+
       results.rows.push({
         gmailMessageId: item.id,
         direction: item.direction,
@@ -551,6 +575,7 @@ export async function POST(req: NextRequest) {
           gmail_thread_id: msg.threadId,
           label_ids: msg.labelIds,
           source: "coverage_backfill",
+          mailbox: token.email,
           to_header: toHeader,
         },
       });
@@ -566,6 +591,7 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     window: { days, since: diff.cutoff.toISOString().slice(0, 10) },
+    mailbox: token.email,
     direction,
     dryRun,
     attempted: batch.length,
