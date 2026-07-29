@@ -40,7 +40,10 @@ interface Conversation {
 export function CommsStreamView({ data }: { data: StreamData }) {
   const [channel, setChannel] = useState<string | null>(null);
   const [propertyId, setPropertyId] = useState<string | null>(null);
-  const [unansweredOnly, setUnansweredOnly] = useState(false);
+  // The QUEUE is the default view (John's call, 7/29): land on the people
+  // waiting on you; replying makes them leave this screen. "All" is the
+  // browsable archive, one tap away.
+  const [unansweredOnly, setUnansweredOnly] = useState(true);
   const [peopleOnly, setPeopleOnly] = useState(true);
   const [search, setSearch] = useState("");
   const [showCleared, setShowCleared] = useState(false);
@@ -132,7 +135,9 @@ export function CommsStreamView({ data }: { data: StreamData }) {
           <Eyebrow>Communications · every conversation</Eyebrow>
           <h1 className="font-heading text-[26px] font-bold text-cream mt-1">One stream</h1>
           <p className="font-body text-[13px] text-cream-dim mt-1">
-            One row per person, newest activity first. Red means they&apos;re waiting on you — reply and it clears.
+            {unansweredOnly
+              ? "Your queue: people waiting on a reply. Answer someone and they leave this screen."
+              : "Every conversation, newest activity first. Red means they're waiting on you."}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -177,7 +182,9 @@ export function CommsStreamView({ data }: { data: StreamData }) {
 
         {groups.length === 0 && (
           <p className="font-body text-[13px] text-cream-dim py-8 text-center">
-            No conversations match. Clear a filter or include automated sends.
+            {unansweredOnly && !search && !channel && !propertyId
+              ? "All caught up — nobody is waiting on you. Tap All to browse past conversations."
+              : "No conversations match. Clear a filter or include automated sends."}
           </p>
         )}
 
