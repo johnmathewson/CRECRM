@@ -10,6 +10,7 @@
  */
 
 import { createServerSupabase } from "@/lib/supabase/server";
+import { ACTIVE_LISTING_STATUSES } from "./metrics";
 import { numOrNull } from "./time-utils";
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
@@ -112,7 +113,7 @@ export async function loadListingsSnapshot(): Promise<ListingsSnapshot> {
     .from("properties")
     .select("id, name, headline, slug, address, city, state, zip, asset_type, status, transaction_type, asking_price, lease_rate, sqft, cap_rate, noi, images, crexi_url, loopnet_url, publish_to_website, created_at")
     .eq("organization_id", ORG_ID)
-    .in("status", ["listed", "under_contract"])
+    .in("status", [...ACTIVE_LISTING_STATUSES]) // canonical set from metrics.ts
     .order("created_at", { ascending: false });
 
   // Buy-side: active buyer-rep deals with a property attached.

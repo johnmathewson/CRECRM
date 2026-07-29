@@ -31,7 +31,7 @@ export function CommandCenterView({
 
   // Build the Copilot focus chips from real counts
   const copilotChips: CopilotChip[] = [
-    { label: "Hot leads",        count: chips.hotLeads,      tone: chips.hotLeads > 0 ? "coral" : "neutral",   href: "/cre-os/inbox?bucket=hot",                  caption: chips.hotLeads ? "Need response" : "All clear" },
+    { label: "Hot leads",        count: chips.hotLeads,      tone: chips.hotLeads > 0 ? "coral" : "neutral",   href: "/cre-os/stream",                  caption: chips.hotLeads ? "Need response" : "All clear" },
     { label: "Underwriting",     count: chips.underwriting,  tone: chips.underwriting > 0 ? "amber" : "neutral", href: "/cre-os/pipeline?stage=Underwriting",       caption: "DD review" },
     { label: "Owner check-ins",  count: chips.ownerCheckIns, tone: chips.ownerCheckIns > 0 ? "neutral" : "neutral", href: "/cre-os/relationships?bucket=owners",  caption: "Update due" },
     { label: "Closing soon",     count: chips.closingSoon,   tone: chips.closingSoon > 0 ? "teal" : "neutral",  href: "/cre-os/pipeline?stage=Closing",            caption: "Within 7 days" },
@@ -63,7 +63,7 @@ export function CommandCenterView({
           confidence: 0,
           headline: `Follow up with ${chips.hotLeads} hot lead${chips.hotLeads === 1 ? "" : "s"}`,
           caption: "Inbound inquiries flagged hot by the AI extractor",
-          href: "/cre-os/inbox?bucket=hot",
+          href: "/cre-os/stream",
           tone: "coral" as const,
         }] : []),
         ...(kpis.tasksOverdue > 0 ? [{

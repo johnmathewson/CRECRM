@@ -7,6 +7,7 @@
  */
 
 import { createServerSupabase } from "@/lib/supabase/server";
+import { countActiveListings, countHotLeads } from "./metrics";
 import { formatDueLabel, formatShortDate, humanizeActivity, relativeTime } from "./time-utils";
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
@@ -169,21 +170,12 @@ async function loadKpis(): Promise<DashboardKpis> {
     capRateAvg = den > 0 ? num / den : null;
   }
 
-  // Active listings — properties marked active or listed and not dead
-  const { count: activeListingsCount } = await sb
-    .from("properties")
-    .select("id", { count: "exact", head: true })
-    .eq("organization_id", ORG_ID)
-    .in("status", ["active", "listed"])
-    .or("is_dead.is.null,is_dead.eq.false");
-
-  // Hot leads
-  const { count: hotLeadsCount } = await sb
-    .from("leads")
-    .select("id", { count: "exact", head: true })
-    .eq("organization_id", ORG_ID)
-    .eq("urgency", "hot")
-    .not("status", "in", "(archived,spam,sent,converted)");
+  // Canonical counts from metrics.ts — this block used to compute its own
+  // ("active","listed") set and disagreed with Listings and Reports.
+  const [activeListingsCount, hotLeadsCount] = await Promise.all([
+    countActiveListings(),
+    countHotLeads(),
+  ]);
 
   // Tasks today + overdue
   const today = new Date().toISOString().slice(0, 10);
@@ -248,14 +240,9 @@ async function loadPipeline(): Promise<PipelineStageStats[]> {
 async function loadCopilotChips(): Promise<CopilotChipData> {
   const sb = createServerSupabase();
 
-  const [{ count: hotLeads }, { count: underwriting }, { count: closingSoon }, { count: ownerCheckIns }] =
+  const [hotLeads, { count: underwriting }, { count: closingSoon }, { count: ownerCheckIns }] =
     await Promise.all([
-      sb
-        .from("leads")
-        .select("id", { count: "exact", head: true })
-        .eq("organization_id", ORG_ID)
-        .eq("urgency", "hot")
-        .not("status", "in", "(archived,spam,sent,converted)"),
+      countHotLeads(),
       sb
         .from("deal_stages")
         .select("id", { count: "exact", head: true })

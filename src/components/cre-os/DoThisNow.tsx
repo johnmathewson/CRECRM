@@ -74,8 +74,8 @@ export function DoThisNow({ leads }: { leads: LeadCardData[] }) {
       num={0}
       title="Action queue"
       actions={
-        <a href="/cre-os/inbox" className="font-heading text-[11px] uppercase tracking-eyebrow text-coral-400 hover:text-coral-300">
-          Full inbox →
+        <a href="/cre-os/stream" className="font-heading text-[11px] uppercase tracking-eyebrow text-coral-400 hover:text-coral-300">
+          Communications →
         </a>
       }
     >

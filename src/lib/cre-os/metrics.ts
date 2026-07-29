@@ -30,10 +30,38 @@ const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 
 export const ACTIVE_LISTING_STATUSES = ["listed", "for_lease", "under_contract"] as const;
 
-/** One agreed stage vocabulary. If the DB grows a new stage, add it here —
- *  screens render THIS order, and flag unknown stages loudly instead of
- *  silently inventing their own ladder. */
-export const STAGE_ORDER = ["Lead", "Prospecting", "Qualifying", "BOV", "Active Listing", "Under Contract", "Due Diligence", "Closed"] as const;
+/** A hot lead stops being "hot" once it's handled or junk. `sent` = replied,
+ *  `converted` = promoted to a deal. PostgREST `.not("status","in",...)`
+ *  string form. */
+export const HOT_LEAD_EXCLUDED = '("archived","spam","sent","converted")';
+
+/** One agreed stage vocabulary — stage-config.ts owns it (Pipeline and
+ *  Reports already normalize through normalizeStage there). Re-exported so
+ *  metric consumers have a single import site. */
+export { PIPELINE_LADDER as STAGE_ORDER } from "./stage-config";
+
+/** Canonical counters. Every screen/rail imports THESE — never inline the
+ *  filter, or the numbers drift apart again. */
+export async function countHotLeads(): Promise<number> {
+  const sb = createServerSupabase();
+  const { count } = await sb
+    .from("leads")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", ORG_ID)
+    .eq("urgency", "hot")
+    .not("status", "in", HOT_LEAD_EXCLUDED);
+  return count ?? 0;
+}
+
+export async function countActiveListings(): Promise<number> {
+  const sb = createServerSupabase();
+  const { count } = await sb
+    .from("properties")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", ORG_ID)
+    .in("status", [...ACTIVE_LISTING_STATUSES]);
+  return count ?? 0;
+}
 
 export interface HeadlineMetrics {
   hotLeads: number;
@@ -48,16 +76,9 @@ export async function loadHeadlineMetrics(): Promise<HeadlineMetrics> {
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
 
-  const [hot, listings, today, drafts, unanswered] = await Promise.all([
-    sb.from("leads")
-      .select("id", { count: "exact", head: true })
-      .eq("organization_id", ORG_ID)
-      .eq("urgency", "hot")
-      .not("status", "in", '("archived","spam","sent")'),
-    sb.from("properties")
-      .select("id", { count: "exact", head: true })
-      .eq("organization_id", ORG_ID)
-      .in("status", [...ACTIVE_LISTING_STATUSES]),
+  const [hotLeads, activeListings, today, drafts, unanswered] = await Promise.all([
+    countHotLeads(),
+    countActiveListings(),
     sb.from("leads")
       .select("id", { count: "exact", head: true })
       .eq("organization_id", ORG_ID)
@@ -66,13 +87,13 @@ export async function loadHeadlineMetrics(): Promise<HeadlineMetrics> {
       .select("id", { count: "exact", head: true })
       .eq("organization_id", ORG_ID)
       .not("draft_reply", "is", null)
-      .not("status", "in", '("archived","spam","sent")'),
+      .not("status", "in", HOT_LEAD_EXCLUDED),
     countUnanswered(),
   ]);
 
   return {
-    hotLeads: hot.count ?? 0,
-    activeListings: listings.count ?? 0,
+    hotLeads,
+    activeListings,
     newLeadsToday: today.count ?? 0,
     draftsReady: drafts.count ?? 0,
     unanswered,

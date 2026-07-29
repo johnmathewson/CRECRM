@@ -10,6 +10,7 @@
  */
 
 import { createServerSupabase } from "@/lib/supabase/server";
+import { ACTIVE_LISTING_STATUSES } from "./metrics";
 import { numOrNull } from "./time-utils";
 import { normalizeStage, type StageKey } from "./stage-config";
 
@@ -151,11 +152,13 @@ export async function loadReportSnapshot(): Promise<ReportSnapshot> {
       .select("id, source, status, created_at")
       .eq("organization_id", ORG_ID)
       .gte("created_at", eightWeeksAgo),
-    // Active listings (the 4 properties at status in (listed, under_contract, pitched, prospecting))
+    // Active listings — canonical set from metrics.ts. This used to include
+    // pitched + prospecting, which is why Reports claimed more "active
+    // listings" than Home and Listings did.
     sb.from("properties")
       .select("id, name, headline, slug, city, state, status, created_at")
       .eq("organization_id", ORG_ID)
-      .in("status", ["listed", "under_contract", "pitched", "prospecting"])
+      .in("status", [...ACTIVE_LISTING_STATUSES])
       .order("created_at", { ascending: false }),
     // Last 7d listing metrics (CREXi + LoopNet + Site)
     sb.from("listing_metrics")
