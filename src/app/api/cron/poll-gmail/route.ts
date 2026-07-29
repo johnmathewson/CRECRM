@@ -18,7 +18,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { getActiveGmailToken } from "@/lib/gmail-auth";
+import { getActiveGmailToken, getActiveGmailTokens } from "@/lib/gmail-auth";
 import {
   getProfile,
   listHistory,
@@ -178,11 +178,13 @@ interface PollResult {
     failed?: number;
     error?: string;
   };
-  sentSync: {
+  /** Per-mailbox results — SENT-sync runs on EVERY connected account so
+   *  replies John sends from john@ (not just inquiries@) get logged. */
+  sentSync: Record<string, {
     synced?: number;
     skipped?: number;
     error?: string;
-  };
+  }>;
   duration_ms: number;
 }
 
@@ -646,9 +648,19 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
   // Catches emails John sent directly from Gmail (not via the CRM send button)
   // so the action queue doesn't keep surfacing leads he already contacted.
   //
-  // Searches the last 21 days of SENT mail, 20 messages per run (dedup by
-  // external_id means repeated runs quickly skip already-processed messages).
-  if (token) {
+  // Runs on EVERY connected mailbox — inquiries@ AND john@ once connected —
+  // because John replies to leads from his own address. Inbound polling
+  // (Job 1) deliberately stays on the primary mailbox only: the intake
+  // pipeline auto-acks new senders, which must never happen to someone
+  // emailing john@ directly.
+  //
+  // Searches the last 21 days of SENT mail, 50 messages per account per run
+  // (dedup by external_id means repeated runs quickly skip already-processed
+  // messages).
+  const syncAccounts = await getActiveGmailTokens(supabase);
+  const ourEmails = new Set(syncAccounts.map((t) => t.email.toLowerCase()));
+
+  for (const acct of syncAccounts) {
     try {
       const cutoff = new Date(Date.now() - 21 * 24 * 3600_000);
       const afterStr = `${cutoff.getFullYear()}/${String(cutoff.getMonth() + 1).padStart(2, "0")}/${String(cutoff.getDate()).padStart(2, "0")}`;
@@ -656,7 +668,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
       // backlog clears within the hour instead of risking messages aging out
       // of the 21-day window before they're ever scanned. Historical gaps
       // beyond the window are the coverage backfill's job.
-      const sentRefs = await listMessages(token.accessToken, `in:sent after:${afterStr}`, 50);
+      const sentRefs = await listMessages(acct.accessToken, `in:sent after:${afterStr}`, 50);
 
       let synced = 0;
       let skipped = 0;
@@ -681,14 +693,15 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
             .maybeSingle();
           if (alreadyLogged) { skipped++; continue; }
 
-          const msg = await getMessage(token.accessToken, ref.id);
+          const msg = await getMessage(acct.accessToken, ref.id);
           const toHeader = getHeader(msg.payload, "To");
           const subject = getHeader(msg.payload, "Subject");
           const { email: toEmail } = parseAddress(toHeader);
 
-          // Skip messages sent to ourselves or without a real recipient
+          // Skip messages without a real recipient, or sent between our own
+          // mailboxes (inquiries@ ↔ john@ is internal plumbing, not a touch)
           if (!toEmail) { skipped++; continue; }
-          if (toEmail.toLowerCase() === token.email.toLowerCase()) { skipped++; continue; }
+          if (ourEmails.has(toEmail.toLowerCase())) { skipped++; continue; }
 
           const sentAt = msg.internalDate
             ? new Date(parseInt(msg.internalDate)).toISOString()
@@ -743,7 +756,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
             external_id: ref.id,
             subject,
             body_preview: bodyText.slice(0, 500),
-            from_address: token.email,
+            from_address: acct.email,
             to_addresses: [toEmail],
             occurred_at: sentAt,
             // Sent by hand from Gmail, outside the CRM — that's the "manual"
@@ -755,6 +768,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
               gmail_thread_id: msg.threadId,
               label_ids: msg.labelIds,
               source: "gmail_sent_sync",
+              mailbox: acct.email,
               matched_lead: !!matchedLead,
             },
           });
@@ -775,10 +789,10 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
         }
       }
 
-      result.sentSync = { synced, skipped };
+      result.sentSync[acct.email] = { synced, skipped };
     } catch (syncErr: any) {
-      result.sentSync = { error: syncErr.message };
-      console.error("[poll-gmail] sent-sync job failed:", syncErr.message);
+      result.sentSync[acct.email] = { error: syncErr.message };
+      console.error(`[poll-gmail] sent-sync failed for ${acct.email}:`, syncErr.message);
     }
   }
 
