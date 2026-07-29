@@ -26,7 +26,7 @@ export interface ActiveGmailToken {
  * inbound polling or flip the send identity. Override via env if the
  * primary ever changes.
  */
-const PRIMARY_MAILBOX = (process.env.GMAIL_PRIMARY_MAILBOX ?? "inquiries@stewardshipcre.com").toLowerCase();
+export const PRIMARY_MAILBOX = (process.env.GMAIL_PRIMARY_MAILBOX ?? "inquiries@stewardshipcre.com").toLowerCase();
 
 interface TokenRow {
   id: string;

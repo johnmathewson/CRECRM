@@ -18,7 +18,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { getActiveGmailToken, getActiveGmailTokens } from "@/lib/gmail-auth";
+import { getActiveGmailToken, getActiveGmailTokens, PRIMARY_MAILBOX } from "@/lib/gmail-auth";
 import {
   getProfile,
   listHistory,
@@ -740,6 +740,16 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
               .limit(1)
               .maybeSingle();
             resolvedContactId = (contactRow?.id as string | null) ?? null;
+          }
+
+          // Secondary mailboxes (John's personal account) carry personal
+          // correspondence too. Only log sends to people the CRM already
+          // knows — a matched lead or contact. The log-everything contract
+          // applies to the PRIMARY (business) mailbox only.
+          const isPrimary = acct.email.toLowerCase() === PRIMARY_MAILBOX;
+          if (!isPrimary && !matchedLead && !resolvedContactId) {
+            skipped++;
+            continue;
           }
 
           const { text: bodyText } = extractBody(msg.payload);
