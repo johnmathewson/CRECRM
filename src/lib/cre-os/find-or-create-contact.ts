@@ -53,7 +53,10 @@ function normalizePhone(p: string | null | undefined): string | null {
 // Used exclusively on phone-only matches. Phone-alone identity was the
 // root cause of the 2026-07 contacts corruption (26% of CREXi-linked
 // contacts were mis-attributed).
-function nameSimilar(a: string | null | undefined, b: string | null | undefined): boolean {
+// Exported: every ingest path that matches contacts MUST use this same
+// rule. The Aug 2026 corruption happened because the extension route kept
+// its own private phone-alone matcher after this module was fixed in July.
+export function nameSimilar(a: string | null | undefined, b: string | null | undefined): boolean {
   if (!a || !b) return false;
   const tokens = (s: string) =>
     s.toLowerCase().replace(/[^a-z\s]/g, "").split(/\s+/).filter(Boolean);

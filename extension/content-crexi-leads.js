@@ -254,6 +254,10 @@
     if (/^[A-Z][a-z]{2}\s+\d{1,2},\s+\d{4}$/.test(text)) return false;
     if (/grant access|listing rep|landlord rep|tenant rep|buyer rep/i.test(text)) return false;
     if (/^(new|unassigned|hot|warm|cold)$/i.test(text)) return false;
+    // CREXi UI widgets that read as two capitalized words. "Your Rating"
+    // passed this filter in Aug 2026, inflated the name-row list, and
+    // shifted every name/phone pairing after it by one row.
+    if (/^(your rating|lead score|crexi score|listing activity|number of visits|last activity|level of interest|verification method|date added)$/i.test(text)) return false;
     return text.includes(" ") || /^[A-Z][a-z]/.test(text);
   }
 
@@ -298,15 +302,38 @@
       }
     }
 
-    // Pair name-rows with phone-rows by index. If counts don't match,
-    // fall back to phone-row-only parsing (we'll have phone but no name
-    // for those — better than nothing).
+    // Pair name-rows with phone-rows by VERTICAL POSITION, never by array
+    // index. CREXi's sticky-column layout renders the two rows for one
+    // lead at the same vertical offset, so geometry is the ground truth.
+    // Index-zipping broke whenever a non-lead element (e.g. the "Your
+    // Rating" widget) slipped into the name-row list: every pairing after
+    // it shifted by one, attaching each name to its alphabetical
+    // neighbor's phone — which then poisoned contact matching server-side
+    // (Aug 2026 corruption).
     const pairs = [];
-    for (let i = 0; i < phoneRows.length; i++) {
-      pairs.push({
-        phoneRow: phoneRows[i],
-        nameRow: nameRows[i] || null,
-      });
+    const usedNameRows = new Set();
+    for (const phoneRow of phoneRows) {
+      const phoneTop = phoneRow.row.getBoundingClientRect().top;
+      let best = null;
+      let bestDist = Infinity;
+      for (const nameRow of nameRows) {
+        if (usedNameRows.has(nameRow)) continue;
+        const d = Math.abs(nameRow.row.getBoundingClientRect().top - phoneTop);
+        if (d < bestDist) {
+          bestDist = d;
+          best = nameRow;
+        }
+      }
+      // Paired rows sit at identical offsets; 8px covers sub-pixel and
+      // border rounding. Anything farther is a DIFFERENT lead's row, and
+      // pairing it would recreate the shift bug — better to drop the row
+      // (no name → skipped below) than to guess.
+      if (best && bestDist <= 8) {
+        usedNameRows.add(best);
+        pairs.push({ phoneRow, nameRow: best });
+      } else {
+        pairs.push({ phoneRow, nameRow: null });
+      }
     }
 
     const out = [];
@@ -530,7 +557,7 @@
     return true;
   }
 
-  async function scrapePanel(row, isFirstAttempt = false) {
+  async function scrapePanel(row, isFirstAttempt = false, expectedName = null) {
     // Capture pre-click email set for diff detection
     const emailsBefore = new Set(
       (document.body.textContent.match(/\b[\w.+-]+@[\w.-]+\.\w{2,}\b/g) || [])
@@ -628,6 +655,29 @@
 
     const text = panel.textContent || "";
     const html = panel.innerHTML || "";
+
+    // STALE-PANEL GUARD: only trust the panel if it is showing THIS lead.
+    // The panel populates asynchronously, and when a close fails or the
+    // render lags, its text still holds the PREVIOUSLY clicked lead.
+    // Grabbing "any email in the panel" then attaches the previous
+    // person's email to this name — which poisons contact matching
+    // downstream. No email is strictly better than a wrong one.
+    if (expectedName) {
+      const tokens = expectedName
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((t) => t.length >= 3);
+      const panelLower = text.toLowerCase();
+      if (tokens.length > 0 && !tokens.some((t) => panelLower.includes(t))) {
+        return {
+          email: null,
+          activity_timeline: null,
+          buyer_evaluation: null,
+          stale_panel: true,
+          raw_panel_text_sample: text.slice(0, 400),
+        };
+      }
+    }
 
     // Email — prefer the one labeled "Email:" (avoids accidentally
     // capturing the user's own logged-in email if it shows in the chrome).
@@ -838,9 +888,9 @@
           // fallback (it's the same DOM tree, so it's unlikely to work
           // if the name-row click didn't).
           if (row.nameRowEl) {
-            panel = await scrapePanel(row.nameRowEl, isFirstDeepScrape);
+            panel = await scrapePanel(row.nameRowEl, isFirstDeepScrape, row.name);
           } else if (row.phoneRowEl) {
-            panel = await scrapePanel(row.phoneRowEl, isFirstDeepScrape);
+            panel = await scrapePanel(row.phoneRowEl, isFirstDeepScrape, row.name);
           }
           if (panel) {
             baseLead.email = panel.email || baseLead.email;

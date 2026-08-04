@@ -28,6 +28,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { ORG_ID, hashSecret } from "@/lib/owner-dashboard";
+import { nameSimilar } from "@/lib/cre-os/find-or-create-contact";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -244,7 +245,16 @@ export async function POST(req: NextRequest) {
     "name", "first", "last", "email", "phone", "company", "role",
     "crexi score", "crexi lead score", "industry role", "level of interest",
     "no. visits", "date", "verification method",
+    // UI widgets the scraper captured as people (Aug 2026): "Your Rating"
+    // inflated the name-row list and shifted every downstream pairing.
+    "your rating", "lead score", "listing activity", "number of visits",
+    "last activity", "date added",
   ]);
+
+  // The broker's own name appears on CREXi listing pages (listing agent
+  // header). A scrape that reads it as a lead creates duplicate self
+  // contacts — 6 "John Mathewson" contact rows existed by Aug 2026.
+  const SELF_NAMES = new Set(["john mathewson"]);
 
   for (const lead of body.leads) {
     try {
@@ -257,23 +267,49 @@ export async function POST(req: NextRequest) {
         errors.push({ name: lead.name, reason: "Rejected scrape artifact (column header captured as name)" });
         continue;
       }
+      if (SELF_NAMES.has(lead.name.trim().toLowerCase())) {
+        stats.skipped += 1;
+        errors.push({ name: lead.name, reason: "Rejected: broker's own name scraped from the listing page" });
+        continue;
+      }
 
       const email = normalizeEmail(lead.email);
       const phone = normalizePhone(lead.phone);
 
       // ── 1. Find or create contact ─────────────────────────────────────
+      // Identity rules (same standard as find-or-create-contact.ts — the
+      // July AND August 2026 corruptions both came from looser matching in
+      // an ingest path):
+      //   - email match is trusted only when the contact's name is similar
+      //     (a scraped email attached to a DIFFERENT existing person is the
+      //     signature of a stale side-panel scrape → reject the whole row)
+      //   - phone match REQUIRES name similarity (phone-alone matching is
+      //     how abdul basit got Anthony Gutierrez's identity in July)
       let contactId: string | null = null;
       let contactCreated = false;
 
-      // Try email first (canonical), then phone
       if (email) {
         const { data: byEmail } = await supabase
           .from("contacts")
-          .select("id")
+          .select("id, full_name")
           .eq("organization_id", ORG_ID)
           .ilike("email", email)
           .maybeSingle();
-        if (byEmail) contactId = byEmail.id;
+        if (byEmail) {
+          if (nameSimilar(byEmail.full_name, lead.name)) {
+            contactId = byEmail.id;
+          } else {
+            // Poison signature: this email already belongs to someone with
+            // a different name. Trusting either half would corrupt data —
+            // skip the row entirely and let a clean scrape resubmit.
+            stats.skipped += 1;
+            errors.push({
+              name: lead.name,
+              reason: `Rejected: scraped email ${email} belongs to existing contact "${byEmail.full_name}" — likely stale side-panel capture`,
+            });
+            continue;
+          }
+        }
       }
       if (!contactId && phone) {
         // Phone in the DB is stored as raw "317.617.4900" / "(317) 617-4900"
@@ -283,13 +319,14 @@ export async function POST(req: NextRequest) {
         // this is fast enough.
         const { data: candidates } = await supabase
           .from("contacts")
-          .select("id, phone")
+          .select("id, phone, full_name")
           .eq("organization_id", ORG_ID)
           .not("phone", "is", null);
         if (candidates) {
           const found = candidates.find(
-            (c: { id: string; phone: string | null }) =>
-              normalizePhone(c.phone) === phone
+            (c: { id: string; phone: string | null; full_name: string | null }) =>
+              normalizePhone(c.phone) === phone &&
+              nameSimilar(c.full_name, lead.name)
           );
           if (found) contactId = found.id;
         }
@@ -322,16 +359,15 @@ export async function POST(req: NextRequest) {
         contactCreated = true;
         stats.new_contacts += 1;
       } else {
-        // Backfill email/phone if we have new info
-        const updates: Record<string, unknown> = {};
-        if (email) {
-          const { data: existing } = await supabase
-            .from("contacts").select("email, phone").eq("id", contactId).maybeSingle();
-          if (existing && !existing.email) updates.email = email;
-          if (existing && !existing.phone && lead.phone) updates.phone = lead.phone;
-        }
-        if (Object.keys(updates).length > 0) {
-          await supabase.from("contacts").update(updates).eq("id", contactId);
+        // Backfill PHONE only, never email. Same policy as
+        // find-or-create-contact.ts: a scraped email landing on an
+        // existing contact is how the July corruption spread (abdul basit
+        // received Anthony Gutierrez's email). The scraped email stays on
+        // the crexi_leads_state row where it can be reviewed.
+        const { data: existing } = await supabase
+          .from("contacts").select("phone").eq("id", contactId).maybeSingle();
+        if (existing && !existing.phone && lead.phone) {
+          await supabase.from("contacts").update({ phone: lead.phone }).eq("id", contactId);
           stats.updated_contacts += 1;
         }
       }
