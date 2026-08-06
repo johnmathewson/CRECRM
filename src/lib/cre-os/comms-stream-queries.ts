@@ -94,7 +94,7 @@ export async function loadCommsStream(limit = 400): Promise<StreamData> {
   const raw = (rowsRaw ?? []) as any[];
 
   // Answered/unanswered: newest-first walk; a party's latest row decides.
-  const latestSeen = new Map<string, { direction: string; automated: boolean; answeredCall: boolean }>();
+  const latestSeen = new Map<string, { direction: string; automated: boolean; answeredCall: boolean; cleared: boolean }>();
   for (const r of raw) {
     const key = partyKey(r);
     if (!latestSeen.has(key)) {
@@ -104,6 +104,10 @@ export async function loadCommsStream(limit = 400): Promise<StreamData> {
         // An answered phone call is inbound in the log but already handled
         // — John took the call live. Must not resurface as Unanswered.
         answeredCall: r.channel === "phone" && r.raw_payload?.status === "answered",
+        // Cleared = explicit triage; the queue hides the conversation, so
+        // the badge must not count it either. (The badge/queue disagreed
+        // in Aug 2026: "Unanswered · 15" over an empty queue.)
+        cleared: !!r.is_read,
       });
     }
   }
@@ -144,7 +148,12 @@ export async function loadCommsStream(limit = 400): Promise<StreamData> {
   });
 
   const unansweredParties = new Set(
-    rows.filter((r) => r.unanswered).map((r) => (r.contactId ? `c:${r.contactId}` : r.who))
+    raw
+      .filter((r, i) => rows[i].unanswered && !latestSeen.get(partyKey(r))?.cleared)
+      .map((r) => {
+        const contactId = (Array.isArray(r.contact) ? r.contact[0] : r.contact)?.id ?? r.contact_id;
+        return contactId ? `c:${contactId}` : partyKey(r);
+      })
   );
 
   return {
