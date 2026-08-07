@@ -1,9 +1,12 @@
 /**
  * Netlify scheduled function — Property Enrichment Agent.
  *
- * Daily at 08:00 UTC (3am CT): one batch of DB-only enrichment. Same
- * trigger pattern as poll-gmail: the function just POSTs the API route
- * with the cron secret; all real work (and the run ledger) lives there.
+ * Hourly at :10 (raised from daily 2026-08-07 with John's sign-off —
+ * runs take 3-9s against the 60s cap, so frequency is the safe lever;
+ * 40/batch x 24 runs ≈ 960 properties/day → full 15k sweep in ~16 days,
+ * then steady-state re-scans as 14-day cooldowns lapse). Same trigger
+ * pattern as poll-gmail: the function just POSTs the API route with the
+ * cron secret; all real work (and the run ledger) lives there.
  */
 
 import type { Config } from "@netlify/functions";
@@ -31,5 +34,5 @@ export default async function handler() {
 }
 
 export const config: Config = {
-  schedule: "0 8 * * *",
+  schedule: "10 * * * *",
 };
