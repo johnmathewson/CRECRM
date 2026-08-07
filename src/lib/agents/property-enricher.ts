@@ -346,29 +346,51 @@ async function selectBatch(sb: SB, batchSize: number): Promise<PropRow[]> {
     for (const p of (data ?? []) as PropRow[]) { if (!pickedIds.has(p.id)) { picked.push(p); pickedIds.add(p.id); } }
   }
 
+  // Page through an ordered candidate list until the batch is full.
+  //
+  // WHY PAGING IS LOAD-BEARING: scanning writes a _scanned fact but never
+  // touches properties.updated_at (on purpose — updated_at carries UI
+  // meaning). So a single fixed-window fetch returns the SAME oldest rows
+  // every run; once they're all inside the cooldown the filter empties the
+  // window and the agent declares 15k properties "done" (Aug 3–7 2026:
+  // five consecutive no-op runs at 172/15,130 scanned). Paging keeps
+  // walking past the cooled-down rows until it finds fresh work.
+  const PAGE = 200;
+  const MAX_PAGES = 100; // 20k rows — comfortably past the full inventory
+  const fillFrom = async (
+    fetchPage: (from: number, to: number) => Promise<PropRow[]>,
+  ): Promise<void> => {
+    for (let page = 0; page < MAX_PAGES && picked.length < batchSize; page++) {
+      const rows = await fetchPage(page * PAGE, page * PAGE + PAGE - 1);
+      for (const p of rows) {
+        if (picked.length >= batchSize) break;
+        if (!pickedIds.has(p.id) && !recentlyScanned.has(p.id)) { picked.push(p); pickedIds.add(p.id); }
+      }
+      if (rows.length < PAGE) break; // ran out of candidates
+    }
+  };
+
   // 2. Working set: anything with a real status or role (John's actual book)
   if (picked.length < batchSize) {
-    const { data } = await sb
-      .from("properties").select(SELECT).eq("organization_id", ORG_ID)
-      .in("status", ["listed", "for_lease", "under_contract", "pitched", "prospecting", "owned"])
-      .order("updated_at", { ascending: true })
-      .limit(batchSize * 2);
-    for (const p of (data ?? []) as PropRow[]) {
-      if (picked.length >= batchSize) break;
-      if (!pickedIds.has(p.id) && !recentlyScanned.has(p.id)) { picked.push(p); pickedIds.add(p.id); }
-    }
+    await fillFrom(async (from, to) => {
+      const { data } = await sb
+        .from("properties").select(SELECT).eq("organization_id", ORG_ID)
+        .in("status", ["listed", "for_lease", "under_contract", "pitched", "prospecting", "owned"])
+        .order("updated_at", { ascending: true })
+        .range(from, to);
+      return (data ?? []) as PropRow[];
+    });
   }
 
   // 3. Cold inventory rotation — oldest-updated first so the 15k grinds evenly
   if (picked.length < batchSize) {
-    const { data } = await sb
-      .from("properties").select(SELECT).eq("organization_id", ORG_ID)
-      .order("updated_at", { ascending: true })
-      .limit(batchSize * 4);
-    for (const p of (data ?? []) as PropRow[]) {
-      if (picked.length >= batchSize) break;
-      if (!pickedIds.has(p.id) && !recentlyScanned.has(p.id)) { picked.push(p); pickedIds.add(p.id); }
-    }
+    await fillFrom(async (from, to) => {
+      const { data } = await sb
+        .from("properties").select(SELECT).eq("organization_id", ORG_ID)
+        .order("updated_at", { ascending: true })
+        .range(from, to);
+      return (data ?? []) as PropRow[];
+    });
   }
 
   return picked;
