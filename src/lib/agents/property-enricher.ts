@@ -321,12 +321,22 @@ export async function runPropertyEnricher(opts?: { batchSize?: number }): Promis
 /** Queue first, working set second, cold inventory last — skip recently scanned. */
 async function selectBatch(sb: SB, batchSize: number): Promise<PropRow[]> {
   const cutoff = new Date(Date.now() - SCAN_COOLDOWN_DAYS * 86_400_000).toISOString();
-  const { data: scannedRows } = await sb
-    .from("property_facts")
-    .select("property_id")
-    .eq("field", "_scanned")
-    .gte("verified_at", cutoff);
-  const recentlyScanned = new Set(((scannedRows ?? []) as PropRow[]).map((r) => r.property_id as string));
+  // PAGE THIS QUERY. PostgREST silently caps un-ranged selects at 1,000
+  // rows — once >1,000 properties were inside the cooldown, the set
+  // truncated and ~90% of every batch re-scanned already-done rows
+  // (Aug 2026 bulk sweep: 19,950 scans for 1,932 new properties).
+  const recentlyScanned = new Set<string>();
+  for (let from = 0; ; from += 1000) {
+    const { data } = await sb
+      .from("property_facts")
+      .select("property_id")
+      .eq("field", "_scanned")
+      .gte("verified_at", cutoff)
+      .range(from, from + 999);
+    const rows = (data ?? []) as PropRow[];
+    for (const r of rows) recentlyScanned.add(r.property_id as string);
+    if (rows.length < 1000) break;
+  }
 
   const picked: PropRow[] = [];
   const pickedIds = new Set<string>();

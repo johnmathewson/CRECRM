@@ -120,17 +120,24 @@ async function computeDiff(accessToken: string, supabase: SB, days: number) {
 
   // What's in the log. Pull external_ids for the window once and diff in
   // memory — cheaper and more accurate than a per-message existence query.
-  const { data: loggedRows, error: logErr } = await supabase
-    .from("communications")
-    .select("external_id")
-    .eq("organization_id", ORG_ID)
-    .gte("occurred_at", cutoff.toISOString())
-    .not("external_id", "is", null);
-  if (logErr) throw new Error(logErr.message);
-
-  const logged = new Set(
-    ((loggedRows ?? []) as { external_id: string }[]).map((r) => r.external_id),
-  );
+  // PAGED: PostgREST silently caps un-ranged selects at 1,000 rows; a
+  // truncated set here would report logged messages as "missing" and make
+  // the backfill re-attempt them (harmless but wrong — the same trap
+  // caused the Aug 2026 enricher re-scan churn).
+  const logged = new Set<string>();
+  for (let from = 0; ; from += 1000) {
+    const { data: loggedRows, error: logErr } = await supabase
+      .from("communications")
+      .select("external_id")
+      .eq("organization_id", ORG_ID)
+      .gte("occurred_at", cutoff.toISOString())
+      .not("external_id", "is", null)
+      .range(from, from + 999);
+    if (logErr) throw new Error(logErr.message);
+    const rows = (loggedRows ?? []) as { external_id: string }[];
+    for (const r of rows) logged.add(r.external_id);
+    if (rows.length < 1000) break;
+  }
 
   return {
     cutoff,
