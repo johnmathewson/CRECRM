@@ -11,6 +11,7 @@
  */
 
 import { createServerSupabase } from "@/lib/supabase/server";
+import { createServiceSupabase } from "@/lib/supabase/service";
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 
@@ -82,7 +83,10 @@ export interface PortalContactCandidate {
 
 // ── Loader ────────────────────────────────────────────────────────────────
 export async function loadPortalSnapshot(): Promise<PortalSnapshot> {
-  const sb = createServerSupabase();
+  // Service-role: owner_access_tokens no longer has an anon policy. Safe here
+  // because every caller is a /cre-os page, and middleware gates all non-/api
+  // routes to a signed-in staff session.
+  const sb = createServiceSupabase();
 
   const { data: tokenRows } = await sb
     .from("owner_access_tokens")

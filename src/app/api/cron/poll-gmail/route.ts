@@ -17,7 +17,6 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { getActiveGmailToken, getActiveGmailTokens, PRIMARY_MAILBOX } from "@/lib/gmail-auth";
 import {
   getProfile,
@@ -36,6 +35,7 @@ import {
   collectAttachmentFilenames,
   type InboundClassification,
 } from "@/lib/cre-os/classify-inbound-email";
+import { createServiceSupabase } from "@/lib/supabase/service";
 
 // Walk a Gmail message payload tree looking for an attachment whose
 // filename matches a CREXi Lead Report pattern. CREXi sends the file with
@@ -201,10 +201,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
     );
   }
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  const supabase = createServiceSupabase();
 
   const result: PollResult = {
     ok: true,

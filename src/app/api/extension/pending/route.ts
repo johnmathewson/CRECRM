@@ -10,8 +10,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { ORG_ID, hashSecret } from "@/lib/owner-dashboard";
+import { createServiceSupabase } from "@/lib/supabase/service";
 
 export const dynamic = "force-dynamic";
 
@@ -28,10 +28,7 @@ export async function OPTIONS() {
 }
 
 export async function GET(req: NextRequest) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  const supabase = createServiceSupabase();
   const key = req.headers.get("x-extension-key");
   if (!key) {
     return NextResponse.json({ error: "Missing x-extension-key" }, { status: 401, headers: corsHeaders() });

@@ -34,10 +34,10 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { ORG_ID, hashSecret } from "@/lib/owner-dashboard";
 import { parseCrexiReport, CrexiLeadRow } from "@/lib/crexi-csv-parser";
 import { draftLeadReply } from "@/lib/draft-lead-reply";
+import { createServiceSupabase } from "@/lib/supabase/service";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Up to 5 min — large CSV with many drafts
@@ -366,10 +366,7 @@ export async function POST(_req: NextRequest) {
 // Legacy implementation kept below for reference but unreachable.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function _legacyImpl_unused(req: NextRequest) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  const supabase = createServiceSupabase();
 
   // Auth
   const auth = await authKey(supabase, req.headers.get("x-extension-key"));

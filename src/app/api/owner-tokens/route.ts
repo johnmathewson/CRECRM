@@ -2,13 +2,15 @@
  * GET  /api/owner-tokens               — list active tokens
  * POST /api/owner-tokens                — create a new magic link
  *
- * In-app only (middleware gates everything outside /api/*; admin pages live
- * behind it).
+ * Staff-only. NOTE: middleware does NOT cover /api — its matcher excludes
+ * `api` explicitly, so each handler must gate itself via requireStaff().
+ * This file previously assumed the opposite and was reachable unauthenticated.
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { ORG_ID, generateToken } from "@/lib/owner-dashboard";
+import { createServiceSupabase } from "@/lib/supabase/service";
+import { requireStaff } from "@/lib/auth/require-staff";
 
 export const dynamic = "force-dynamic";
 
@@ -24,10 +26,11 @@ interface CreateBody {
 }
 
 export async function GET() {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  // Staff-only: middleware does not cover /api (see require-staff.ts).
+  const denied = await requireStaff();
+  if (denied) return denied;
+
+  const supabase = createServiceSupabase();
   const { data, error } = await supabase
     .from("owner_access_tokens")
     .select(`
@@ -41,6 +44,10 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  // Staff-only: middleware does not cover /api (see require-staff.ts).
+  const denied = await requireStaff();
+  if (denied) return denied;
+
   let body: CreateBody;
   try {
     body = await req.json();
@@ -52,10 +59,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "property_ids required (non-empty array)" }, { status: 400 });
   }
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  const supabase = createServiceSupabase();
 
   const days = Math.max(1, Math.min(365, body.expires_in_days || DEFAULT_EXPIRY_DAYS));
   const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();

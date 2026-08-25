@@ -38,8 +38,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { ORG_ID, anonymizeLead, isoDate, startOfWeek, endOfWeek } from "@/lib/owner-dashboard";
+import { createServiceSupabase } from "@/lib/supabase/service";
 
 export const dynamic = "force-dynamic";
 
@@ -66,10 +66,7 @@ const WEEKS_TO_RETURN = 8;
 
 export async function GET(req: NextRequest, { params }: { params: { token: string } }) {
   const origin = req.headers.get("origin");
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  const supabase = createServiceSupabase();
 
   // ── Validate token ──
   const { data: tokenRow } = await supabase

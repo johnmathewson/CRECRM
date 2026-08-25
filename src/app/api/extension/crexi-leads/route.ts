@@ -26,9 +26,9 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { ORG_ID, hashSecret } from "@/lib/owner-dashboard";
 import { nameSimilar } from "@/lib/cre-os/find-or-create-contact";
+import { createServiceSupabase } from "@/lib/supabase/service";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -167,10 +167,7 @@ function nameParts(n: string): { first: string; last: string } {
 // ── Main handler ──────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  const supabase = createServiceSupabase();
 
   const auth = await authKey(supabase, req.headers.get("x-extension-key"));
   if (!auth.ok) {

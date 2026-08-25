@@ -8,9 +8,9 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { ORG_ID } from "@/lib/owner-dashboard";
 import { computeSellerNet, type SellerNetInputs } from "@/lib/seller-net";
+import { createServiceSupabase } from "@/lib/supabase/service";
 
 export const dynamic = "force-dynamic";
 
@@ -30,10 +30,7 @@ function corsHeaders(origin: string | null): Record<string, string> {
 }
 
 function svc() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  return createServiceSupabase();
 }
 
 export async function OPTIONS(req: NextRequest) {

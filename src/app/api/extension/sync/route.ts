@@ -27,8 +27,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { ORG_ID, hashSecret, isoDate, startOfWeek, endOfWeek } from "@/lib/owner-dashboard";
+import { createServiceSupabase } from "@/lib/supabase/service";
 
 export const dynamic = "force-dynamic";
 
@@ -90,10 +90,7 @@ async function authenticateKey(supabase: any, key: string | null): Promise<{ ok:
 
 export async function POST(req: NextRequest) {
   const origin = req.headers.get("origin");
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  const supabase = createServiceSupabase();
 
   // ── Auth ──
   const auth = await authenticateKey(supabase, req.headers.get("x-extension-key"));

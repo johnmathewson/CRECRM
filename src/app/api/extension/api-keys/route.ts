@@ -4,16 +4,18 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { ORG_ID, generateToken, hashSecret } from "@/lib/owner-dashboard";
+import { createServiceSupabase } from "@/lib/supabase/service";
+import { requireStaff } from "@/lib/auth/require-staff";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  // Staff-only: middleware does not cover /api (see require-staff.ts).
+  const denied = await requireStaff();
+  if (denied) return denied;
+
+  const supabase = createServiceSupabase();
   const { data, error } = await supabase
     .from("extension_api_keys")
     .select("id, label, created_at, last_used_at, revoked_at")
@@ -24,13 +26,14 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  // Staff-only: middleware does not cover /api (see require-staff.ts).
+  const denied = await requireStaff();
+  if (denied) return denied;
+
   let body: { label?: string } = {};
   try { body = await req.json(); } catch { /* empty body OK */ }
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  const supabase = createServiceSupabase();
   const plaintext = generateToken(32);
   const keyHash = hashSecret(plaintext);
 

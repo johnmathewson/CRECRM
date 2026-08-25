@@ -7,9 +7,9 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { exchangeCodeForTokens, GMAIL_SCOPES } from "@/lib/google-oauth";
 import { getProfile } from "@/lib/gmail";
+import { createServiceSupabase } from "@/lib/supabase/service";
 
 export const dynamic = "force-dynamic";
 
@@ -65,10 +65,7 @@ export async function GET(req: NextRequest) {
   }
 
   // ── Persist ──
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  const supabase = createServiceSupabase();
 
   const { error: dbErr } = await supabase
     .from("gmail_oauth_tokens")

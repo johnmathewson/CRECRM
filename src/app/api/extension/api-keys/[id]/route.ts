@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { ORG_ID } from "@/lib/owner-dashboard";
+import { createServiceSupabase } from "@/lib/supabase/service";
+import { requireStaff } from "@/lib/auth/require-staff";
 
 export const dynamic = "force-dynamic";
 
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  // Staff-only: middleware does not cover /api (see require-staff.ts).
+  const denied = await requireStaff();
+  if (denied) return denied;
+
+  const supabase = createServiceSupabase();
   const { error } = await supabase
     .from("extension_api_keys")
     .update({ revoked_at: new Date().toISOString() })
