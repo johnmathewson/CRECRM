@@ -92,7 +92,11 @@ export function LeadsTab({
 }) {
   const { activity, leads, totals } = snapshot;
   const { openLead } = useContactDrawer();
-  const [filter, setFilter] = useState<FilterTab>("hot");
+  // Default to "All", newest-first: the day-to-day question is "did we get new
+  // leads?", and most CREXi leads arrive Cold (just viewed / opened flyer). A
+  // "Hot" default hid every new Cold lead one tab over, which read as "no new
+  // leads" even while intake was healthy. Hot is still one click away.
+  const [filter, setFilter] = useState<FilterTab>("all");
   const [viewMode, setViewMode] = useState<"rows" | "call">("rows");
   const [callPanelLeadId, setCallPanelLeadId] = useState<string | null>(null);
   const [searchQ, setSearchQ] = useState("");
@@ -157,6 +161,16 @@ export function LeadsTab({
           l.company?.toLowerCase().includes(q) ||
           l.role?.toLowerCase().includes(q)
       );
+    }
+    // In "All", override the query's hot-first ordering with strict newest-
+    // first so brand-new leads (usually Cold) surface at the top. Copy before
+    // sorting — never mutate the snapshot's leads array in place.
+    if (filter === "all") {
+      const ts = (l: PropertyLead) =>
+        l.lastActivityAt ? new Date(l.lastActivityAt).getTime()
+        : l.firstSeenAt ? new Date(l.firstSeenAt).getTime()
+        : 0;
+      out = [...out].sort((a, b) => ts(b) - ts(a));
     }
     return out;
   }, [leads, filter, searchQ]);
