@@ -287,6 +287,7 @@ export async function POST(req: NextRequest) {
       //     how abdul basit got Anthony Gutierrez's identity in July)
       let contactId: string | null = null;
       let contactCreated = false;
+      let contactEmail: string | null = null;
 
       if (email) {
         const { data: byEmail } = await supabase
@@ -332,7 +333,16 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      if (!contactId) {
+      if (!contactId && !email) {
+        // NO EMAIL, NO NEW RECORDS. Every CREXi user has a verified email —
+        // when the list-view scrape lacks one, the daily XLSX report will
+        // deliver it within 24h and create the lead properly. Creating
+        // name+phone-only contacts/leads here is what produced 179
+        // email-less lead rows with shifted phones on the call list
+        // (Sep 2026). The crexi_leads_state upsert below still records the
+        // engagement so nothing is lost.
+        stats.skipped += 1;
+      } else if (!contactId) {
         // Create new contact. contact_type must be one of the enum values
         // (no "prospect" — that's relationship_type, not contact_type).
         const insertPayload: Record<string, unknown> = {
@@ -365,7 +375,8 @@ export async function POST(req: NextRequest) {
         // received Anthony Gutierrez's email). The scraped email stays on
         // the crexi_leads_state row where it can be reviewed.
         const { data: existing } = await supabase
-          .from("contacts").select("phone").eq("id", contactId).maybeSingle();
+          .from("contacts").select("phone, email").eq("id", contactId).maybeSingle();
+        if (existing?.email) contactEmail = existing.email;
         if (existing && !existing.phone && lead.phone) {
           await supabase.from("contacts").update({ phone: lead.phone }).eq("id", contactId);
           stats.updated_contacts += 1;
@@ -373,20 +384,31 @@ export async function POST(req: NextRequest) {
       }
 
       // ── 2. Find or create lead for (contact, property) ────────────────
+      // A leads row REQUIRES an email — scraped, or from the matched
+      // contact. CREXi requires verified emails, so an email-less lead is
+      // by definition incomplete data; the daily XLSX report creates it
+      // properly within 24h. (John's rule, restated Sep 2026 after 179
+      // email-less rows polluted the call list.)
+      const leadEmail = email ?? contactEmail;
       let leadId: string | null = null;
       let leadCreated = false;
-      const { data: existingLead } = await supabase
-        .from("leads")
-        .select("id, status")
-        .eq("organization_id", ORG_ID)
-        .eq("contact_id", contactId)
-        .eq("property_id", propertyId)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const { data: existingLead } = contactId
+        ? await supabase
+            .from("leads")
+            .select("id, status")
+            .eq("organization_id", ORG_ID)
+            .eq("contact_id", contactId)
+            .eq("property_id", propertyId)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle()
+        : { data: null };
 
       if (existingLead) {
         leadId = existingLead.id;
+      } else if (!contactId || !leadEmail) {
+        // No identity anchor — record engagement in crexi_leads_state only
+        leadId = null;
       } else {
         // source must be one of the leads_source_check enum values.
         // "crexi" is the canonical source for any CREXi-discovered lead;
@@ -400,7 +422,7 @@ export async function POST(req: NextRequest) {
             source: "crexi",
             status: "new",
             sender_name: lead.name.trim(),
-            sender_email: email,
+            sender_email: leadEmail,
             sender_phone: lead.phone || null,
             property_label: null,
             urgency: rankOf(lead.level_of_interest) >= 7 ? "hot"
