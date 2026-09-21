@@ -100,6 +100,8 @@ export default async function OfferPrintPage({
           replacement_loan_amort_years: Number(offer.xch_loan_amort_years ?? 25),
           replacement_closing_cost_pct: Number(offer.xch_closing_cost_pct ?? 0),
           additional_cash: Number(offer.xch_additional_cash ?? 0),
+          max_ltv: Number(offer.xch_max_ltv ?? 0) || 0.65,
+          min_dscr: Number(offer.xch_min_dscr ?? 0) || 1.25,
         })
       : null;
 

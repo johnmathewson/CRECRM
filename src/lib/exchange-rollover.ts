@@ -50,6 +50,14 @@ export interface ExchangeInputs {
    * gap, replace debt without a loan, or just buy bigger). Default 0.
    */
   additional_cash: number;
+  /**
+   * Lender constraints for the "how much MORE could they borrow" test.
+   * Headroom = (lesser of LTV-max and DSCR-max loan) − loan placed.
+   * Loan proceeds aren't income, so a post-closing cash-out against the
+   * replacement is tax-free cash — the answer to "but I need liquidity".
+   */
+  max_ltv?: number;
+  min_dscr?: number;
 }
 
 export interface ExchangeProjection {
@@ -67,6 +75,30 @@ export interface ExchangeProjection {
   /** cash_flow_after_debt ÷ total cash invested. */
   cash_on_cash: number;
   dscr: number | null;
+  /** Loan placed ÷ replacement price. */
+  ltv: number;
+
+  // ── Leverage headroom (tax-free cash-out path) ──
+  max_loan_by_ltv: number;
+  max_loan_by_dscr: number;
+  /** Lesser of the two — what a lender would actually extend. */
+  max_supportable_loan: number;
+  /** max_supportable_loan − loan placed. 0 when already at/over the limit. */
+  additional_borrowing_capacity: number;
+  /** Which constraint binds: "ltv" | "dscr". */
+  binding_constraint: "ltv" | "dscr";
+  /** Debt service, cash flow, CoC, and DSCR if levered to the max. */
+  fully_levered: {
+    loan: number;
+    ltv: number;
+    annual_debt_service: number;
+    cash_flow_after_debt: number;
+    cash_in_deal: number;
+    cash_on_cash: number;
+    dscr: number | null;
+    /** Cash back in the seller's pocket = capacity pulled out (tax-free). */
+    cash_out: number;
+  };
 
   // ── Deferral test ──
   value_shortfall: number;
@@ -126,6 +158,31 @@ export function computeExchangeProjection(inputs: ExchangeInputs): ExchangeProje
   const cashInvested = Math.max(cashRequired, 0);
   const coc = cashInvested > 0 ? cfads / cashInvested : 0;
   const dscr = ds > 0 ? noi / ds : null;
+  const ltv = price > 0 ? loan / price : 0;
+
+  // ── Leverage headroom ──
+  const maxLtv = inputs.max_ltv ?? 0.65;
+  const minDscr = inputs.min_dscr ?? 1.25;
+  const constant = annualDebtService(1, rate, amort); // debt service per $1 of loan
+  const maxByLtv = price * maxLtv;
+  const maxByDscr = constant > 0 && minDscr > 0 ? noi / minDscr / constant : maxByLtv;
+  const maxLoan = Math.max(0, Math.min(maxByLtv, maxByDscr));
+  const headroom = Math.max(0, maxLoan - loan);
+  const binding: "ltv" | "dscr" = maxByLtv <= maxByDscr ? "ltv" : "dscr";
+  const flDs = annualDebtService(maxLoan, rate, amort);
+  const flCf = noi - flDs;
+  // Cash left in the deal after pulling the headroom out
+  const flCashIn = Math.max(0, cashInvested - headroom);
+  const fullyLevered = {
+    loan: maxLoan,
+    ltv: price > 0 ? maxLoan / price : 0,
+    annual_debt_service: flDs,
+    cash_flow_after_debt: flCf,
+    cash_in_deal: flCashIn,
+    cash_on_cash: flCashIn > 0 ? flCf / flCashIn : 0,
+    dscr: flDs > 0 ? noi / flDs : null,
+    cash_out: headroom,
+  };
 
   // ── Deferral test ──
   const valueShortfall = Math.max(0, netSale - price);
@@ -148,6 +205,13 @@ export function computeExchangeProjection(inputs: ExchangeInputs): ExchangeProje
     cash_flow_after_debt: cfads,
     cash_on_cash: coc,
     dscr,
+    ltv,
+    max_loan_by_ltv: maxByLtv,
+    max_loan_by_dscr: maxByDscr,
+    max_supportable_loan: maxLoan,
+    additional_borrowing_capacity: headroom,
+    binding_constraint: binding,
+    fully_levered: fullyLevered,
     value_shortfall: valueShortfall,
     debt_shortfall: debtShortfall,
     debt_shortfall_after_cash: debtShortfallAfterCash,
@@ -172,6 +236,8 @@ export function defaultReplacementInputs(netSale: number, debtOff: number) {
     replacement_loan_amort_years: 25,
     replacement_closing_cost_pct: 0.02,
     additional_cash: 0,
+    max_ltv: 0.65,
+    min_dscr: 1.25,
   };
 }
 
@@ -185,6 +251,8 @@ export const XCH_INPUT_COLUMNS = [
   "xch_loan_amort_years",
   "xch_closing_cost_pct",
   "xch_additional_cash",
+  "xch_max_ltv",
+  "xch_min_dscr",
 ] as const;
 
 /**
@@ -221,6 +289,8 @@ export function exchangeSnapshotColumn(
     xch_loan_amort_years?: number | string | null;
     xch_closing_cost_pct?: number | string | null;
     xch_additional_cash?: number | string | null;
+    xch_max_ltv?: number | string | null;
+    xch_min_dscr?: number | string | null;
   },
   relinquished: { net_sale_price: number; debt_paid_off: number; equity_available: number },
   taxDeferred: number,
@@ -239,6 +309,8 @@ export function exchangeSnapshotColumn(
       replacement_loan_amort_years: num(row.xch_loan_amort_years) || 25,
       replacement_closing_cost_pct: num(row.xch_closing_cost_pct),
       additional_cash: num(row.xch_additional_cash),
+      max_ltv: num(row.xch_max_ltv) || 0.65,
+      min_dscr: num(row.xch_min_dscr) || 1.25,
     }),
   };
 }

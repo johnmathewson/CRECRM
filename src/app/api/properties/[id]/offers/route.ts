@@ -34,7 +34,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   const { data, error } = await sb
     .from("seller_net_offers")
     .select(
-      "id, property_id, title, buyer_name, offer_date, offer_price, commission_pct, commission_amount, line_items, partners, computed_commission, computed_adjustments, computed_net_proceeds, computed_partners_due, computed_net_after_partners, notes, published_at, created_at, updated_at, created_via_token_id, tax_original_purchase_price, tax_purchase_date, tax_capital_improvements, tax_accumulated_depreciation, tax_intends_1031, computed_estimated_tax, computed_tax_deferred_1031, computed_after_tax_proceeds, computed_tax_breakdown, xch_replacement_price, xch_cap_rate, xch_loan_amount, xch_loan_rate, xch_loan_amort_years, xch_closing_cost_pct, xch_additional_cash, computed_exchange"
+      "id, property_id, title, buyer_name, offer_date, offer_price, commission_pct, commission_amount, line_items, partners, computed_commission, computed_adjustments, computed_net_proceeds, computed_partners_due, computed_net_after_partners, notes, published_at, created_at, updated_at, created_via_token_id, tax_original_purchase_price, tax_purchase_date, tax_capital_improvements, tax_accumulated_depreciation, tax_intends_1031, computed_estimated_tax, computed_tax_deferred_1031, computed_after_tax_proceeds, computed_tax_breakdown, xch_replacement_price, xch_cap_rate, xch_loan_amount, xch_loan_rate, xch_loan_amort_years, xch_closing_cost_pct, xch_additional_cash, xch_max_ltv, xch_min_dscr, computed_exchange"
     )
     .eq("organization_id", ORG_ID)
     .eq("property_id", params.id)

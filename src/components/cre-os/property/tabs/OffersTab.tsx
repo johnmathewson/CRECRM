@@ -75,6 +75,8 @@ interface AdminOffer {
   xch_loan_amort_years?: number | null;
   xch_closing_cost_pct?: number | null;
   xch_additional_cash?: number | null;
+  xch_max_ltv?: number | null;
+  xch_min_dscr?: number | null;
 }
 
 interface OfferAttachment {
@@ -136,6 +138,11 @@ type EditorState = {
   xch_amort: string;
   xch_cost_pct: string;
   xch_add_cash: string;
+  /** Loan entry mode: type a dollar amount, or an LTV % and let it size the loan. */
+  xch_loan_mode: "amount" | "ltv";
+  xch_ltv_pct: string;
+  xch_max_ltv_pct: string;
+  xch_min_dscr: string;
 };
 
 function emptyEditor(askingPrice: number | null, taxSeed?: { price: number | null; date: string | null }): EditorState {
@@ -165,6 +172,10 @@ function emptyEditor(askingPrice: number | null, taxSeed?: { price: number | nul
     xch_amort: "25",
     xch_cost_pct: "2",
     xch_add_cash: "",
+    xch_loan_mode: "amount",
+    xch_ltv_pct: "",
+    xch_max_ltv_pct: "65",
+    xch_min_dscr: "1.25",
   };
 }
 
@@ -194,6 +205,10 @@ function offerToEditor(o: AdminOffer): EditorState {
     xch_amort: o.xch_loan_amort_years != null ? String(o.xch_loan_amort_years) : "25",
     xch_cost_pct: o.xch_closing_cost_pct != null ? String(+(o.xch_closing_cost_pct * 100).toFixed(2)) : "2",
     xch_add_cash: o.xch_additional_cash ? String(o.xch_additional_cash) : "",
+    xch_loan_mode: "amount",
+    xch_ltv_pct: "",
+    xch_max_ltv_pct: o.xch_max_ltv != null ? String(+(o.xch_max_ltv * 100).toFixed(1)) : "65",
+    xch_min_dscr: o.xch_min_dscr != null ? String(o.xch_min_dscr) : "1.25",
   };
 }
 
@@ -285,15 +300,23 @@ function SaleOffersView({ p }: { p: PropertyDetail }) {
     const seed = defaultReplacementInputs(relinquished.net_sale_price, relinquished.debt_paid_off);
     const n = (v: string) => parseFloat(v.replace(/[$,%]/g, ""));
     const price = n(editor.xch_price);
-    const loan = n(editor.xch_loan);
+    const resolvedPrice = Number.isFinite(price) && price > 0 ? price : seed.replacement_price;
+    const loanAmt = n(editor.xch_loan);
+    const ltvPct = n(editor.xch_ltv_pct);
+    const resolvedLoan =
+      editor.xch_loan_mode === "ltv"
+        ? (Number.isFinite(ltvPct) ? (ltvPct / 100) * resolvedPrice : seed.replacement_loan_amount)
+        : (Number.isFinite(loanAmt) ? loanAmt : seed.replacement_loan_amount);
     return {
-      replacement_price: Number.isFinite(price) && price > 0 ? price : seed.replacement_price,
+      replacement_price: resolvedPrice,
       replacement_cap_rate: (Number.isFinite(n(editor.xch_cap_pct)) ? n(editor.xch_cap_pct) : 7.5) / 100,
-      replacement_loan_amount: Number.isFinite(loan) ? loan : seed.replacement_loan_amount,
+      replacement_loan_amount: resolvedLoan,
       replacement_loan_rate: (Number.isFinite(n(editor.xch_rate_pct)) ? n(editor.xch_rate_pct) : 6.75) / 100,
       replacement_loan_amort_years: Number.isFinite(n(editor.xch_amort)) ? n(editor.xch_amort) : 25,
       replacement_closing_cost_pct: (Number.isFinite(n(editor.xch_cost_pct)) ? n(editor.xch_cost_pct) : 2) / 100,
       additional_cash: Number.isFinite(n(editor.xch_add_cash)) ? n(editor.xch_add_cash) : 0,
+      max_ltv: (Number.isFinite(n(editor.xch_max_ltv_pct)) ? n(editor.xch_max_ltv_pct) : 65) / 100,
+      min_dscr: Number.isFinite(n(editor.xch_min_dscr)) ? n(editor.xch_min_dscr) : 1.25,
     };
   }, [editor, relinquished]);
   const exchange: ExchangeProjection | null = useMemo(() => {
@@ -363,6 +386,8 @@ function SaleOffersView({ p }: { p: PropertyDetail }) {
       xch_loan_amort_years: xchInputs?.replacement_loan_amort_years ?? null,
       xch_closing_cost_pct: xchInputs?.replacement_closing_cost_pct ?? null,
       xch_additional_cash: xchInputs?.additional_cash ?? null,
+      xch_max_ltv: xchInputs?.max_ltv ?? null,
+      xch_min_dscr: xchInputs?.min_dscr ?? null,
     };
 
     let savedId: string;
@@ -777,10 +802,27 @@ function SaleOffersView({ p }: { p: PropertyDetail }) {
                           onChange={(e) => setEditor({ ...editor, xch_cap_pct: e.target.value })}
                           placeholder="7.5" className={inputCls} />
                       </Field>
-                      <Field label="New loan amount">
-                        <input type="text" inputMode="numeric" value={editor.xch_loan}
-                          onChange={(e) => setEditor({ ...editor, xch_loan: e.target.value })}
-                          placeholder={fmtMoneyExact(xchInputs.replacement_loan_amount)} className={inputCls} />
+                      <Field label={editor.xch_loan_mode === "ltv" ? "New loan — LTV (%)" : "New loan amount"}>
+                        <div className="flex gap-2">
+                          {editor.xch_loan_mode === "ltv" ? (
+                            <input type="text" inputMode="decimal" value={editor.xch_ltv_pct}
+                              onChange={(e) => setEditor({ ...editor, xch_ltv_pct: e.target.value })}
+                              placeholder={(xchInputs.replacement_price > 0 ? (xchInputs.replacement_loan_amount / xchInputs.replacement_price) * 100 : 0).toFixed(0)}
+                              className={inputCls} />
+                          ) : (
+                            <input type="text" inputMode="numeric" value={editor.xch_loan}
+                              onChange={(e) => setEditor({ ...editor, xch_loan: e.target.value })}
+                              placeholder={fmtMoneyExact(xchInputs.replacement_loan_amount)} className={inputCls} />
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setEditor({ ...editor, xch_loan_mode: editor.xch_loan_mode === "ltv" ? "amount" : "ltv" })}
+                            className="shrink-0 px-2 rounded border border-white/[0.10] bg-white/[0.03] font-mono text-[9px] uppercase tracking-eyebrow text-cream-dim hover:text-cream"
+                            title="Toggle between entering a dollar amount and an LTV percentage"
+                          >
+                            {editor.xch_loan_mode === "ltv" ? "$" : "LTV"}
+                          </button>
+                        </div>
                       </Field>
                       <Field label="Loan rate (%) / amortization (yrs)">
                         <div className="flex gap-2">
@@ -802,7 +844,20 @@ function SaleOffersView({ p }: { p: PropertyDetail }) {
                           onChange={(e) => setEditor({ ...editor, xch_add_cash: e.target.value })}
                           placeholder="0" className={inputCls} />
                       </Field>
+                      <Field label="Lender max LTV (%) / min DSCR">
+                        <div className="flex gap-2">
+                          <input type="text" inputMode="decimal" value={editor.xch_max_ltv_pct}
+                            onChange={(e) => setEditor({ ...editor, xch_max_ltv_pct: e.target.value })}
+                            placeholder="65" className={inputCls} />
+                          <input type="text" inputMode="decimal" value={editor.xch_min_dscr}
+                            onChange={(e) => setEditor({ ...editor, xch_min_dscr: e.target.value })}
+                            placeholder="1.25" className={`${inputCls} max-w-[80px]`} />
+                        </div>
+                      </Field>
                     </div>
+                    <p className="mt-2 font-body text-[10px] text-cream-subtle italic">
+                      Lender limits size the cash-out headroom below — how much more they could borrow against the replacement, tax-free.
+                    </p>
                   </div>
                 )}
               </Section>
@@ -1250,6 +1305,7 @@ function LiveTotals({
           )}
           <Row label="Annual cash flow" value={fmtMoneyExact(exchange.cash_flow_after_debt)} emphasize />
           <Row label="Cash-on-cash" value={`${(exchange.cash_on_cash * 100).toFixed(1)}%`} emphasize />
+          <Row label="LTV" value={`${(exchange.ltv * 100).toFixed(1)}%`} muted />
           {exchange.dscr !== null && <Row label="DSCR" value={`${exchange.dscr.toFixed(2)}x`} muted />}
           <div className="my-2 border-t border-white/[0.06]" />
           <Row label="Cash required at closing" value={fmtMoneyExact(exchange.cash_required)} muted />
@@ -1278,9 +1334,39 @@ function LiveTotals({
               </p>
             </>
           )}
+          {exchange.additional_borrowing_capacity > 0 && (
+            <>
+              <div className="my-2 border-t border-white/[0.06]" />
+              <div className="font-mono text-[9px] uppercase tracking-eyebrow text-cream-subtle mb-1">
+                Tax-free cash-out headroom
+              </div>
+              <Row
+                label={`Max loan (${exchange.binding_constraint === "ltv" ? `${(exchange.fully_levered.ltv * 100).toFixed(0)}% LTV` : "DSCR-limited"})`}
+                value={fmtMoneyExact(exchange.max_supportable_loan)}
+                muted
+              />
+              <Row label="Could borrow additionally" value={fmtMoneyExact(exchange.additional_borrowing_capacity)} emphasize />
+              <Row label="Cash flow if fully levered" value={fmtMoneyExact(exchange.fully_levered.cash_flow_after_debt)} muted />
+              <Row
+                label="CoC / DSCR if fully levered"
+                value={`${(exchange.fully_levered.cash_on_cash * 100).toFixed(1)}% / ${exchange.fully_levered.dscr?.toFixed(2) ?? "—"}x`}
+                muted
+              />
+              <p className="mt-1 font-body text-[10.5px] text-teal-300">
+                Loan proceeds aren&apos;t income — pulling {fmtMoneyExact(exchange.additional_borrowing_capacity)} out after closing is tax-free cash with the {fmtMoneyExact(exchange.tax_actually_deferred)} still deferred.
+              </p>
+            </>
+          )}
           <div className="my-2 border-t border-white/[0.06]" />
           <Row label="Cash sale, after tax" value={fmtMoneyExact(exchange.cash_sale_after_tax)} muted />
           <Row label="Exchange, equity working" value={fmtMoneyExact(exchange.exchange_equity_working)} emphasize />
+          {exchange.additional_borrowing_capacity > 0 && (
+            <Row
+              label="Exchange + cash-out, in pocket"
+              value={fmtMoneyExact(exchange.additional_borrowing_capacity + Math.max(0, exchange.cash_surplus))}
+              emphasize
+            />
+          )}
         </div>
       )}
 

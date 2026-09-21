@@ -47,7 +47,7 @@ export async function PATCH(
   if (recomputeKeys.some((k) => k in update)) {
     const { data: current } = await sb
       .from("seller_net_offers")
-      .select("offer_price, offer_date, commission_pct, commission_amount, line_items, partners, tax_original_purchase_price, tax_purchase_date, tax_capital_improvements, tax_accumulated_depreciation, tax_intends_1031, xch_replacement_price, xch_cap_rate, xch_loan_amount, xch_loan_rate, xch_loan_amort_years, xch_closing_cost_pct, xch_additional_cash")
+      .select("offer_price, offer_date, commission_pct, commission_amount, line_items, partners, tax_original_purchase_price, tax_purchase_date, tax_capital_improvements, tax_accumulated_depreciation, tax_intends_1031, xch_replacement_price, xch_cap_rate, xch_loan_amount, xch_loan_rate, xch_loan_amort_years, xch_closing_cost_pct, xch_additional_cash, xch_max_ltv, xch_min_dscr")
       .eq("id", params.offerId)
       .eq("property_id", params.id)
       .eq("organization_id", ORG_ID)

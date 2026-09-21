@@ -305,7 +305,7 @@ export function OfferPrintView({
                 <tr><td><b>Projected NOI</b></td><td className="num"><b>{fmtMoneyExact(exchange.replacement_noi)}</b></td></tr>
                 {exchange.annual_debt_service > 0 && (
                   <>
-                    <tr><td>New loan ({(Number(offer.xch_loan_rate) * 100).toFixed(2)}%, {offer.xch_loan_amort_years}-yr)</td><td className="num">{fmtMoneyExact(Number(offer.xch_loan_amount))}</td></tr>
+                    <tr><td>New loan ({(Number(offer.xch_loan_rate) * 100).toFixed(2)}%, {offer.xch_loan_amort_years}-yr) — {(exchange.ltv * 100).toFixed(1)}% LTV</td><td className="num">{fmtMoneyExact(Number(offer.xch_loan_amount))}</td></tr>
                     <tr><td>Annual debt service</td><td className="num debit">-{fmtMoneyExact(exchange.annual_debt_service)}</td></tr>
                     <tr><td>Debt service coverage</td><td className="num">{exchange.dscr?.toFixed(2)}x</td></tr>
                   </>
@@ -328,10 +328,32 @@ export function OfferPrintView({
                 )}
               </tbody>
             </table>
+            {exchange.additional_borrowing_capacity > 0 && (
+              <>
+                <div className="label-line" style={{ marginTop: "10px" }}>Leverage headroom — tax-free liquidity after closing</div>
+                <table className="table">
+                  <tbody>
+                    <tr>
+                      <td>Maximum supportable loan ({exchange.binding_constraint === "ltv" ? `${(exchange.fully_levered.ltv * 100).toFixed(0)}% LTV` : `${Number(offer.xch_min_dscr ?? 1.25).toFixed(2)}x DSCR floor`})</td>
+                      <td className="num">{fmtMoneyExact(exchange.max_supportable_loan)}</td>
+                    </tr>
+                    <tr><td><b>Additional borrowing capacity</b></td><td className="num"><b style={{ color: "var(--coral-500)" }}>{fmtMoneyExact(exchange.additional_borrowing_capacity)}</b></td></tr>
+                    <tr><td>Cash flow if fully levered</td><td className="num">{fmtMoneyExact(exchange.fully_levered.cash_flow_after_debt)}</td></tr>
+                    <tr><td>Cash-on-cash / coverage if fully levered</td><td className="num">{(exchange.fully_levered.cash_on_cash * 100).toFixed(1)}% / {exchange.fully_levered.dscr?.toFixed(2) ?? "—"}x</td></tr>
+                  </tbody>
+                </table>
+                <p style={{ fontSize: "9.5px", lineHeight: 1.4, marginTop: "4px" }}>
+                  Loan proceeds are not taxable income. A cash-out refinance against the replacement property returns liquidity to the seller while the exchange deferral remains intact and the tenant services the debt.
+                </p>
+              </>
+            )}
             <table className="table" style={{ marginTop: "8px" }}>
               <tbody>
                 <tr><td>Sell for cash — equity after tax</td><td className="num">{fmtMoneyExact(exchange.cash_sale_after_tax)}</td></tr>
                 <tr><td><b>Exchange — equity working in the replacement</b></td><td className="num"><b style={{ color: "var(--coral-500)" }}>{fmtMoneyExact(exchange.exchange_equity_working)}</b></td></tr>
+                {exchange.additional_borrowing_capacity > 0 && (
+                  <tr><td><b>Exchange + cash-out refinance — cash in pocket, tax-free</b></td><td className="num"><b style={{ color: "var(--coral-500)" }}>{fmtMoneyExact(exchange.additional_borrowing_capacity + Math.max(0, exchange.cash_surplus))}</b></td></tr>
+                )}
               </tbody>
             </table>
             <p style={{ fontSize: "9px", lineHeight: 1.4, opacity: 0.7, marginTop: "6px", fontStyle: "italic" }}>
