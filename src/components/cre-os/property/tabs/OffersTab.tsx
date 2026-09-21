@@ -33,6 +33,12 @@ import {
   TAX_ESTIMATE_DISCLAIMER,
   type SellerTaxEstimate,
 } from "@/lib/seller-tax-estimate";
+import {
+  computeExchangeProjection,
+  defaultReplacementInputs,
+  relinquishedFromSellerNet,
+  type ExchangeProjection,
+} from "@/lib/exchange-rollover";
 
 interface AdminOffer {
   id: string;
@@ -62,6 +68,13 @@ interface AdminOffer {
   computed_estimated_tax?: number | null;
   computed_tax_deferred_1031?: number | null;
   computed_after_tax_proceeds?: number | null;
+  xch_replacement_price?: number | null;
+  xch_cap_rate?: number | null;
+  xch_loan_amount?: number | null;
+  xch_loan_rate?: number | null;
+  xch_loan_amort_years?: number | null;
+  xch_closing_cost_pct?: number | null;
+  xch_additional_cash?: number | null;
 }
 
 interface OfferAttachment {
@@ -114,6 +127,15 @@ type EditorState = {
   tax_improvements: string;
   tax_accumulated_depreciation: string;
   tax_intends_1031: boolean;
+  // 1031 replacement projection. Percent fields are entered as percents
+  // ("7.75"), converted to fractions at compute/save time.
+  xch_price: string;
+  xch_cap_pct: string;
+  xch_loan: string;
+  xch_rate_pct: string;
+  xch_amort: string;
+  xch_cost_pct: string;
+  xch_add_cash: string;
 };
 
 function emptyEditor(askingPrice: number | null, taxSeed?: { price: number | null; date: string | null }): EditorState {
@@ -136,6 +158,13 @@ function emptyEditor(askingPrice: number | null, taxSeed?: { price: number | nul
     tax_improvements: "",
     tax_accumulated_depreciation: "",
     tax_intends_1031: false,
+    xch_price: "",
+    xch_cap_pct: "7.5",
+    xch_loan: "",
+    xch_rate_pct: "6.75",
+    xch_amort: "25",
+    xch_cost_pct: "2",
+    xch_add_cash: "",
   };
 }
 
@@ -158,6 +187,13 @@ function offerToEditor(o: AdminOffer): EditorState {
     tax_accumulated_depreciation:
       o.tax_accumulated_depreciation != null ? String(o.tax_accumulated_depreciation) : "",
     tax_intends_1031: !!o.tax_intends_1031,
+    xch_price: o.xch_replacement_price != null ? String(o.xch_replacement_price) : "",
+    xch_cap_pct: o.xch_cap_rate != null ? String(+(o.xch_cap_rate * 100).toFixed(3)) : "7.5",
+    xch_loan: o.xch_loan_amount != null ? String(o.xch_loan_amount) : "",
+    xch_rate_pct: o.xch_loan_rate != null ? String(+(o.xch_loan_rate * 100).toFixed(3)) : "6.75",
+    xch_amort: o.xch_loan_amort_years != null ? String(o.xch_loan_amort_years) : "25",
+    xch_cost_pct: o.xch_closing_cost_pct != null ? String(+(o.xch_closing_cost_pct * 100).toFixed(2)) : "2",
+    xch_add_cash: o.xch_additional_cash ? String(o.xch_additional_cash) : "",
   };
 }
 
@@ -231,6 +267,46 @@ function SaleOffersView({ p }: { p: PropertyDetail }) {
     });
   }, [editor, totals]);
 
+  // Relinquished-side figures come from the seller-net inputs; replacement
+  // fields left blank fall back to "buy at net sale price, replace the debt".
+  const relinquished = useMemo(
+    () =>
+      editorInputs && totals
+        ? relinquishedFromSellerNet({
+            offer_price: editorInputs.offer_price,
+            commission: totals.commission,
+            line_items: editorInputs.line_items,
+          })
+        : null,
+    [editorInputs, totals],
+  );
+  const xchInputs = useMemo(() => {
+    if (!editor || !relinquished) return null;
+    const seed = defaultReplacementInputs(relinquished.net_sale_price, relinquished.debt_paid_off);
+    const n = (v: string) => parseFloat(v.replace(/[$,%]/g, ""));
+    const price = n(editor.xch_price);
+    const loan = n(editor.xch_loan);
+    return {
+      replacement_price: Number.isFinite(price) && price > 0 ? price : seed.replacement_price,
+      replacement_cap_rate: (Number.isFinite(n(editor.xch_cap_pct)) ? n(editor.xch_cap_pct) : 7.5) / 100,
+      replacement_loan_amount: Number.isFinite(loan) ? loan : seed.replacement_loan_amount,
+      replacement_loan_rate: (Number.isFinite(n(editor.xch_rate_pct)) ? n(editor.xch_rate_pct) : 6.75) / 100,
+      replacement_loan_amort_years: Number.isFinite(n(editor.xch_amort)) ? n(editor.xch_amort) : 25,
+      replacement_closing_cost_pct: (Number.isFinite(n(editor.xch_cost_pct)) ? n(editor.xch_cost_pct) : 2) / 100,
+      additional_cash: Number.isFinite(n(editor.xch_add_cash)) ? n(editor.xch_add_cash) : 0,
+    };
+  }, [editor, relinquished]);
+  const exchange: ExchangeProjection | null = useMemo(() => {
+    if (!editor?.tax_intends_1031 || !relinquished || !xchInputs || !taxEstimate) return null;
+    return computeExchangeProjection({
+      relinquished_net_sale_price: relinquished.net_sale_price,
+      relinquished_debt_paid_off: relinquished.debt_paid_off,
+      equity_available: relinquished.equity_available,
+      tax_deferred: taxEstimate.tax_deferred_via_1031,
+      ...xchInputs,
+    });
+  }, [editor?.tax_intends_1031, relinquished, xchInputs, taxEstimate]);
+
   function startNew() {
     setEditor(emptyEditor(p.askingPrice, { price: p.lastSalePrice ?? null, date: p.lastSaleDate ?? null }));
     setActionError(null);
@@ -280,6 +356,13 @@ function SaleOffersView({ p }: { p: PropertyDetail }) {
         ? parseFloat(editor.tax_accumulated_depreciation.replace(/[$,]/g, "")) || 0
         : null,
       tax_intends_1031: editor.tax_intends_1031,
+      xch_replacement_price: editor.tax_intends_1031 && xchInputs ? xchInputs.replacement_price : null,
+      xch_cap_rate: xchInputs?.replacement_cap_rate ?? null,
+      xch_loan_amount: xchInputs?.replacement_loan_amount ?? null,
+      xch_loan_rate: xchInputs?.replacement_loan_rate ?? null,
+      xch_loan_amort_years: xchInputs?.replacement_loan_amort_years ?? null,
+      xch_closing_cost_pct: xchInputs?.replacement_closing_cost_pct ?? null,
+      xch_additional_cash: xchInputs?.additional_cash ?? null,
     };
 
     let savedId: string;
@@ -673,6 +756,55 @@ function SaleOffersView({ p }: { p: PropertyDetail }) {
                   </span>
                   <span className="font-body text-[10.5px] text-cream-subtle">— defers the full estimated tax</span>
                 </label>
+
+                {editor.tax_intends_1031 && relinquished && xchInputs && (
+                  <div className="mt-4 rounded border border-teal-400/25 bg-teal-400/[0.04] p-3.5">
+                    <div className="font-mono text-[9px] uppercase tracking-eyebrow text-teal-400 mb-1">
+                      Replacement property — what the rollover looks like
+                    </div>
+                    <p className="font-body text-[10.5px] text-cream-subtle mb-3">
+                      Blank fields default to buying at the net sale price ({fmtMoneyExact(relinquished.net_sale_price)}) and
+                      replacing the {relinquished.debt_paid_off > 0 ? fmtMoneyExact(relinquished.debt_paid_off) + " mortgage" : "debt (none on this sale)"} exactly — the two IRS tests for a fully deferred exchange.
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <Field label="Replacement purchase price">
+                        <input type="text" inputMode="numeric" value={editor.xch_price}
+                          onChange={(e) => setEditor({ ...editor, xch_price: e.target.value })}
+                          placeholder={fmtMoneyExact(xchInputs.replacement_price)} className={inputCls} />
+                      </Field>
+                      <Field label="Going-in cap rate (%)">
+                        <input type="text" inputMode="decimal" value={editor.xch_cap_pct}
+                          onChange={(e) => setEditor({ ...editor, xch_cap_pct: e.target.value })}
+                          placeholder="7.5" className={inputCls} />
+                      </Field>
+                      <Field label="New loan amount">
+                        <input type="text" inputMode="numeric" value={editor.xch_loan}
+                          onChange={(e) => setEditor({ ...editor, xch_loan: e.target.value })}
+                          placeholder={fmtMoneyExact(xchInputs.replacement_loan_amount)} className={inputCls} />
+                      </Field>
+                      <Field label="Loan rate (%) / amortization (yrs)">
+                        <div className="flex gap-2">
+                          <input type="text" inputMode="decimal" value={editor.xch_rate_pct}
+                            onChange={(e) => setEditor({ ...editor, xch_rate_pct: e.target.value })}
+                            placeholder="6.75" className={inputCls} />
+                          <input type="text" inputMode="numeric" value={editor.xch_amort}
+                            onChange={(e) => setEditor({ ...editor, xch_amort: e.target.value })}
+                            placeholder="25" className={`${inputCls} max-w-[80px]`} />
+                        </div>
+                      </Field>
+                      <Field label="Buyer closing costs (%)">
+                        <input type="text" inputMode="decimal" value={editor.xch_cost_pct}
+                          onChange={(e) => setEditor({ ...editor, xch_cost_pct: e.target.value })}
+                          placeholder="2" className={inputCls} />
+                      </Field>
+                      <Field label="Additional cash seller adds">
+                        <input type="text" inputMode="numeric" value={editor.xch_add_cash}
+                          onChange={(e) => setEditor({ ...editor, xch_add_cash: e.target.value })}
+                          placeholder="0" className={inputCls} />
+                      </Field>
+                    </div>
+                  </div>
+                )}
               </Section>
 
               <Section label="Notes">
@@ -722,7 +854,9 @@ function SaleOffersView({ p }: { p: PropertyDetail }) {
             </div>
 
             {/* Live totals column */}
-            {totals && editorInputs && <LiveTotals inputs={editorInputs} totals={totals} tax={taxEstimate} />}
+            {totals && editorInputs && (
+              <LiveTotals inputs={editorInputs} totals={totals} tax={taxEstimate} exchange={exchange} />
+            )}
           </div>
         </Panel>
       )}
@@ -1017,10 +1151,12 @@ function LiveTotals({
   inputs,
   totals,
   tax,
+  exchange,
 }: {
   inputs: SellerNetInputs;
   totals: SellerNetTotals;
   tax: SellerTaxEstimate | null;
+  exchange: ExchangeProjection | null;
 }) {
   const offerPrice = inputs.offer_price;
   const commissionLabel =
@@ -1099,6 +1235,52 @@ function LiveTotals({
               : "Uses owner-supplied depreciation. "}
             {TAX_ESTIMATE_DISCLAIMER}
           </p>
+        </div>
+      )}
+
+      {/* 1031 rollover projection — the "what do I get if I roll it" answer */}
+      {exchange && (
+        <div className="mt-3 pt-3 border-t border-teal-400/25">
+          <div className="font-mono text-[9px] uppercase tracking-eyebrow text-teal-400 mb-2">
+            If rolled into the replacement
+          </div>
+          <Row label="Replacement NOI" value={fmtMoneyExact(exchange.replacement_noi)} muted />
+          {exchange.annual_debt_service > 0 && (
+            <Row label="Annual debt service" value={"-" + fmtMoneyExact(exchange.annual_debt_service)} muted />
+          )}
+          <Row label="Annual cash flow" value={fmtMoneyExact(exchange.cash_flow_after_debt)} emphasize />
+          <Row label="Cash-on-cash" value={`${(exchange.cash_on_cash * 100).toFixed(1)}%`} emphasize />
+          {exchange.dscr !== null && <Row label="DSCR" value={`${exchange.dscr.toFixed(2)}x`} muted />}
+          <div className="my-2 border-t border-white/[0.06]" />
+          <Row label="Cash required at closing" value={fmtMoneyExact(exchange.cash_required)} muted />
+          <Row label="Exchange equity + added cash" value={fmtMoneyExact(exchange.cash_available)} muted />
+          <Row
+            label={exchange.cash_surplus >= 0 ? "Cash left over" : "Additional cash needed"}
+            value={fmtMoneyExact(Math.abs(exchange.cash_surplus))}
+            muted
+          />
+          <div className="my-2 border-t border-white/[0.06]" />
+          {exchange.fully_deferred ? (
+            <p className="font-body text-[10.5px] text-teal-300">
+              Fully deferred — replacement value and debt both meet the relinquished figures.
+            </p>
+          ) : (
+            <>
+              {exchange.value_shortfall > 0 && (
+                <Row label="Value shortfall (boot)" value={fmtMoneyExact(exchange.value_shortfall)} muted />
+              )}
+              {exchange.debt_shortfall_after_cash > 0 && (
+                <Row label="Debt not replaced (boot)" value={fmtMoneyExact(exchange.debt_shortfall_after_cash)} muted />
+              )}
+              <Row label="Est. tax on boot" value={"-" + fmtMoneyExact(exchange.estimated_tax_on_boot)} emphasize />
+              <p className="mt-1 font-body text-[10.5px] text-amber-300">
+                Partial deferral — buy at or above {fmtMoneyExact(exchange.cash_available + exchange.taxable_boot)} or add cash to defer fully.
+              </p>
+            </>
+          )}
+          <div className="my-2 border-t border-white/[0.06]" />
+          <Row label="Cash sale, after tax" value={fmtMoneyExact(exchange.cash_sale_after_tax)} muted />
+          <Row label="Exchange, equity working" value={fmtMoneyExact(exchange.exchange_equity_working)} emphasize />
         </div>
       )}
 

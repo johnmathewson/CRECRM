@@ -2,6 +2,7 @@
 
 import type { SellerNetInputs, SellerNetTotals } from "@/lib/seller-net";
 import { TAX_ESTIMATE_DISCLAIMER, type SellerTaxEstimate } from "@/lib/seller-tax-estimate";
+import type { ExchangeProjection } from "@/lib/exchange-rollover";
 
 /**
  * OfferPrintView — branded seller-net summary, styled for both an on-screen
@@ -25,12 +26,14 @@ export function OfferPrintView({
   inputs,
   totals,
   tax = null,
+  exchange = null,
 }: {
   property: any;
   offer: any;
   inputs: SellerNetInputs;
   totals: SellerNetTotals;
   tax?: SellerTaxEstimate | null;
+  exchange?: ExchangeProjection | null;
 }) {
   const fullAddress = [property.address, property.city, property.state, property.zip].filter(Boolean).join(", ");
   const offerPrice = inputs.offer_price;
@@ -287,6 +290,54 @@ export function OfferPrintView({
             </table>
             <p style={{ fontSize: "9px", lineHeight: 1.4, opacity: 0.7, marginTop: "6px", fontStyle: "italic" }}>
               {TAX_ESTIMATE_DISCLAIMER}
+            </p>
+          </div>
+        )}
+
+        {/* 1031 rollover — hypothetical replacement property */}
+        {exchange && (
+          <div className="section">
+            <div className="label-line">Illustrative rollover — replacement property</div>
+            <table className="table">
+              <tbody>
+                <tr><td>Replacement purchase price</td><td className="num">{fmtMoneyExact(Number(offer.xch_replacement_price))}</td></tr>
+                <tr><td>Going-in cap rate</td><td className="num">{(Number(offer.xch_cap_rate) * 100).toFixed(2)}%</td></tr>
+                <tr><td><b>Projected NOI</b></td><td className="num"><b>{fmtMoneyExact(exchange.replacement_noi)}</b></td></tr>
+                {exchange.annual_debt_service > 0 && (
+                  <>
+                    <tr><td>New loan ({(Number(offer.xch_loan_rate) * 100).toFixed(2)}%, {offer.xch_loan_amort_years}-yr)</td><td className="num">{fmtMoneyExact(Number(offer.xch_loan_amount))}</td></tr>
+                    <tr><td>Annual debt service</td><td className="num debit">-{fmtMoneyExact(exchange.annual_debt_service)}</td></tr>
+                    <tr><td>Debt service coverage</td><td className="num">{exchange.dscr?.toFixed(2)}x</td></tr>
+                  </>
+                )}
+                <tr><td><b>Projected annual cash flow</b></td><td className="num"><b style={{ color: "var(--coral-500)" }}>{fmtMoneyExact(exchange.cash_flow_after_debt)}</b></td></tr>
+                <tr><td><b>Cash-on-cash return</b></td><td className="num"><b style={{ color: "var(--coral-500)" }}>{(exchange.cash_on_cash * 100).toFixed(1)}%</b></td></tr>
+                <tr><td>Cash required at closing (incl. {(Number(offer.xch_closing_cost_pct) * 100).toFixed(1)}% costs)</td><td className="num">{fmtMoneyExact(exchange.cash_required)}</td></tr>
+                <tr><td>Exchange equity{Number(offer.xch_additional_cash) > 0 ? " + additional cash" : ""}</td><td className="num">{fmtMoneyExact(exchange.cash_available)}</td></tr>
+                <tr>
+                  <td>{exchange.cash_surplus >= 0 ? "Cash remaining" : "Additional cash required"}</td>
+                  <td className="num">{fmtMoneyExact(Math.abs(exchange.cash_surplus))}</td>
+                </tr>
+                {exchange.fully_deferred ? (
+                  <tr><td colSpan={2} style={{ color: "var(--coral-500)" }}><b>Fully deferred</b> — replacement value and debt meet the relinquished property's figures.</td></tr>
+                ) : (
+                  <>
+                    <tr><td>Taxable boot (value / debt shortfall)</td><td className="num debit">{fmtMoneyExact(exchange.taxable_boot)}</td></tr>
+                    <tr><td><b>Estimated tax on boot</b></td><td className="num debit"><b>-{fmtMoneyExact(exchange.estimated_tax_on_boot)}</b></td></tr>
+                  </>
+                )}
+              </tbody>
+            </table>
+            <table className="table" style={{ marginTop: "8px" }}>
+              <tbody>
+                <tr><td>Sell for cash — equity after tax</td><td className="num">{fmtMoneyExact(exchange.cash_sale_after_tax)}</td></tr>
+                <tr><td><b>Exchange — equity working in the replacement</b></td><td className="num"><b style={{ color: "var(--coral-500)" }}>{fmtMoneyExact(exchange.exchange_equity_working)}</b></td></tr>
+              </tbody>
+            </table>
+            <p style={{ fontSize: "9px", lineHeight: 1.4, opacity: 0.7, marginTop: "6px", fontStyle: "italic" }}>
+              Illustrative only. Replacement property, cap rate, and financing are hypothetical inputs, not an identified
+              asset. A qualified intermediary must hold proceeds; identification and closing deadlines (45 / 180 days) apply.
+              Not tax or legal advice.
             </p>
           </div>
         )}

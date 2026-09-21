@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { computeSellerNet, type SellerNetInputs } from "@/lib/seller-net";
 import { taxSnapshotColumns, TAX_INPUT_COLUMNS } from "@/lib/seller-tax-estimate";
+import { exchangeSnapshotColumn, relinquishedFromSellerNet, XCH_INPUT_COLUMNS } from "@/lib/exchange-rollover";
 
 export const dynamic = "force-dynamic";
 
@@ -35,18 +36,18 @@ export async function PATCH(
   const update: Record<string, any> = { updated_at: new Date().toISOString() };
   for (const f of ["title", "buyer_name", "offer_date", "offer_price",
                    "commission_pct", "commission_amount", "line_items",
-                   "partners", "notes", ...TAX_INPUT_COLUMNS]) {
+                   "partners", "notes", ...TAX_INPUT_COLUMNS, ...XCH_INPUT_COLUMNS]) {
     if (body[f] !== undefined) update[f] = body[f];
   }
 
   // Recompute when inputs change. Tax inputs recompute too, and any
   // net-proceeds change re-snapshots the tax (it's downstream of net).
   const recomputeKeys = ["offer_price", "commission_pct", "commission_amount", "line_items", "partners",
-                         "offer_date", ...TAX_INPUT_COLUMNS];
+                         "offer_date", ...TAX_INPUT_COLUMNS, ...XCH_INPUT_COLUMNS];
   if (recomputeKeys.some((k) => k in update)) {
     const { data: current } = await sb
       .from("seller_net_offers")
-      .select("offer_price, offer_date, commission_pct, commission_amount, line_items, partners, tax_original_purchase_price, tax_purchase_date, tax_capital_improvements, tax_accumulated_depreciation, tax_intends_1031")
+      .select("offer_price, offer_date, commission_pct, commission_amount, line_items, partners, tax_original_purchase_price, tax_purchase_date, tax_capital_improvements, tax_accumulated_depreciation, tax_intends_1031, xch_replacement_price, xch_cap_rate, xch_loan_amount, xch_loan_rate, xch_loan_amort_years, xch_closing_cost_pct, xch_additional_cash")
       .eq("id", params.offerId)
       .eq("property_id", params.id)
       .eq("organization_id", ORG_ID)
@@ -68,6 +69,14 @@ export async function PATCH(
 
     const mergedTax = { ...current, ...update };
     Object.assign(update, taxSnapshotColumns(mergedTax, totals.net_proceeds));
+    Object.assign(
+      update,
+      exchangeSnapshotColumn(
+        mergedTax,
+        relinquishedFromSellerNet({ offer_price: merged.offer_price, commission: totals.commission, line_items: merged.line_items }),
+        Number(update.computed_tax_deferred_1031 ?? 0),
+      ),
+    );
   }
 
   const { data, error } = await sb

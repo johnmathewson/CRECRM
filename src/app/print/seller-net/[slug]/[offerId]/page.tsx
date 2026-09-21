@@ -3,6 +3,7 @@ import { unstable_noStore as noStore } from "next/cache";
 import { createClient } from "@supabase/supabase-js";
 import { computeSellerNet, type SellerNetInputs } from "@/lib/seller-net";
 import { computeSellerTaxEstimate, type SellerTaxEstimate } from "@/lib/seller-tax-estimate";
+import { computeExchangeProjection, relinquishedFromSellerNet, type ExchangeProjection } from "@/lib/exchange-rollover";
 import { OfferPrintView } from "./OfferPrintView";
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
@@ -80,5 +81,27 @@ export default async function OfferPrintPage({
       })
     : null;
 
-  return <OfferPrintView property={property} offer={offer} inputs={inputs} totals={totals} tax={tax} />;
+  const relinquished = relinquishedFromSellerNet({
+    offer_price: inputs.offer_price,
+    commission: totals.commission,
+    line_items: inputs.line_items,
+  });
+  const exchange: ExchangeProjection | null =
+    tax && offer.tax_intends_1031 && offer.xch_replacement_price
+      ? computeExchangeProjection({
+          relinquished_net_sale_price: relinquished.net_sale_price,
+          relinquished_debt_paid_off: relinquished.debt_paid_off,
+          equity_available: relinquished.equity_available,
+          tax_deferred: tax.tax_deferred_via_1031,
+          replacement_price: Number(offer.xch_replacement_price),
+          replacement_cap_rate: Number(offer.xch_cap_rate ?? 0),
+          replacement_loan_amount: Number(offer.xch_loan_amount ?? 0),
+          replacement_loan_rate: Number(offer.xch_loan_rate ?? 0),
+          replacement_loan_amort_years: Number(offer.xch_loan_amort_years ?? 25),
+          replacement_closing_cost_pct: Number(offer.xch_closing_cost_pct ?? 0),
+          additional_cash: Number(offer.xch_additional_cash ?? 0),
+        })
+      : null;
+
+  return <OfferPrintView property={property} offer={offer} inputs={inputs} totals={totals} tax={tax} exchange={exchange} />;
 }
