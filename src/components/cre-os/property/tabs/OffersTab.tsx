@@ -28,6 +28,11 @@ import {
   type SellerNetTotals,
 } from "@/lib/seller-net";
 import type { PropertyDetail } from "@/lib/cre-os/property-queries";
+import {
+  computeSellerTaxEstimate,
+  TAX_ESTIMATE_DISCLAIMER,
+  type SellerTaxEstimate,
+} from "@/lib/seller-tax-estimate";
 
 interface AdminOffer {
   id: string;
@@ -49,6 +54,14 @@ interface AdminOffer {
   published_at: string | null;
   created_at: string;
   updated_at: string;
+  tax_original_purchase_price?: number | null;
+  tax_purchase_date?: string | null;
+  tax_capital_improvements?: number | null;
+  tax_accumulated_depreciation?: number | null;
+  tax_intends_1031?: boolean | null;
+  computed_estimated_tax?: number | null;
+  computed_tax_deferred_1031?: number | null;
+  computed_after_tax_proceeds?: number | null;
 }
 
 interface OfferAttachment {
@@ -94,9 +107,16 @@ type EditorState = {
   line_items: SellerNetLineItem[];
   partners: SellerNetPartner[];
   notes: string;
+  // Tier-1 seller tax estimate. Strings because they're bound to inputs;
+  // blank purchase price = no estimate shown.
+  tax_purchase_price: string;
+  tax_purchase_date: string;
+  tax_improvements: string;
+  tax_accumulated_depreciation: string;
+  tax_intends_1031: boolean;
 };
 
-function emptyEditor(askingPrice: number | null): EditorState {
+function emptyEditor(askingPrice: number | null, taxSeed?: { price: number | null; date: string | null }): EditorState {
   return {
     id: null,
     title: "",
@@ -109,6 +129,13 @@ function emptyEditor(askingPrice: number | null): EditorState {
     line_items: DEFAULT_LINE_ITEMS,
     partners: [],
     notes: "",
+    // Pre-fill from the property record's last sale so the estimate
+    // usually appears with zero extra typing.
+    tax_purchase_price: taxSeed?.price ? String(taxSeed.price) : "",
+    tax_purchase_date: taxSeed?.date ?? "",
+    tax_improvements: "",
+    tax_accumulated_depreciation: "",
+    tax_intends_1031: false,
   };
 }
 
@@ -125,6 +152,12 @@ function offerToEditor(o: AdminOffer): EditorState {
     line_items: o.line_items.length > 0 ? o.line_items : DEFAULT_LINE_ITEMS,
     partners: o.partners,
     notes: o.notes ?? "",
+    tax_purchase_price: o.tax_original_purchase_price != null ? String(o.tax_original_purchase_price) : "",
+    tax_purchase_date: o.tax_purchase_date ?? "",
+    tax_improvements: o.tax_capital_improvements ? String(o.tax_capital_improvements) : "",
+    tax_accumulated_depreciation:
+      o.tax_accumulated_depreciation != null ? String(o.tax_accumulated_depreciation) : "",
+    tax_intends_1031: !!o.tax_intends_1031,
   };
 }
 
@@ -182,9 +215,24 @@ function SaleOffersView({ p }: { p: PropertyDetail }) {
     () => (editorInputs ? computeSellerNet(editorInputs) : null),
     [editorInputs],
   );
+  const taxEstimate: SellerTaxEstimate | null = useMemo(() => {
+    if (!editor || !totals) return null;
+    const pp = parseFloat(editor.tax_purchase_price.replace(/[$,]/g, "")) || 0;
+    if (!pp) return null;
+    const dep = editor.tax_accumulated_depreciation.replace(/[$,]/g, "").trim();
+    return computeSellerTaxEstimate({
+      net_proceeds: totals.net_proceeds,
+      original_purchase_price: pp,
+      purchase_date: editor.tax_purchase_date || null,
+      capital_improvements: parseFloat(editor.tax_improvements.replace(/[$,]/g, "")) || 0,
+      accumulated_depreciation: dep ? parseFloat(dep) || 0 : null,
+      sale_date: editor.offer_date || null,
+      intends_1031: editor.tax_intends_1031,
+    });
+  }, [editor, totals]);
 
   function startNew() {
-    setEditor(emptyEditor(p.askingPrice));
+    setEditor(emptyEditor(p.askingPrice, { price: p.lastSalePrice ?? null, date: p.lastSaleDate ?? null }));
     setActionError(null);
   }
   function startEdit(o: AdminOffer) {
@@ -225,6 +273,13 @@ function SaleOffersView({ p }: { p: PropertyDetail }) {
       line_items: editor.line_items,
       partners: editor.partners,
       notes: editor.notes.trim() || null,
+      tax_original_purchase_price: parseFloat(editor.tax_purchase_price.replace(/[$,]/g, "")) || null,
+      tax_purchase_date: editor.tax_purchase_date || null,
+      tax_capital_improvements: parseFloat(editor.tax_improvements.replace(/[$,]/g, "")) || 0,
+      tax_accumulated_depreciation: editor.tax_accumulated_depreciation.replace(/[$,]/g, "").trim()
+        ? parseFloat(editor.tax_accumulated_depreciation.replace(/[$,]/g, "")) || 0
+        : null,
+      tax_intends_1031: editor.tax_intends_1031,
     };
 
     let savedId: string;
@@ -557,6 +612,69 @@ function SaleOffersView({ p }: { p: PropertyDetail }) {
                 )}
               </Section>
 
+              <Section label="Seller tax estimate">
+                <p className="font-body text-[11px] text-cream-subtle mb-3">
+                  Three inputs get a close estimate of capital gains, depreciation recapture, NIIT, and Indiana tax.
+                  Pre-filled from the property&apos;s last recorded sale where we have it.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Field label="Original purchase price">
+                    
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={editor.tax_purchase_price}
+                      onChange={(e) => setEditor({ ...editor, tax_purchase_price: e.target.value })}
+                      placeholder="Leave blank to skip the estimate"
+                      className={inputCls}
+                    />
+                  </Field>
+                  <Field label="Purchase date">
+                    
+                    <input
+                      type="date"
+                      value={editor.tax_purchase_date}
+                      onChange={(e) => setEditor({ ...editor, tax_purchase_date: e.target.value })}
+                      className={inputCls}
+                    />
+                  </Field>
+                  <Field label="Capital improvements since purchase">
+                    
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={editor.tax_improvements}
+                      onChange={(e) => setEditor({ ...editor, tax_improvements: e.target.value })}
+                      placeholder="0"
+                      className={inputCls}
+                    />
+                  </Field>
+                  <Field label="Depreciation taken (optional override)">
+                    
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={editor.tax_accumulated_depreciation}
+                      onChange={(e) => setEditor({ ...editor, tax_accumulated_depreciation: e.target.value })}
+                      placeholder="Blank = estimate straight-line"
+                      className={inputCls}
+                    />
+                  </Field>
+                </div>
+                <label className="mt-3 flex items-center gap-2.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={editor.tax_intends_1031}
+                    onChange={(e) => setEditor({ ...editor, tax_intends_1031: e.target.checked })}
+                    className="h-4 w-4 rounded border-white/[0.2] bg-white/[0.04] accent-teal-400"
+                  />
+                  <span className="font-heading text-[12px] text-cream">
+                    Seller intends a 1031 exchange
+                  </span>
+                  <span className="font-body text-[10.5px] text-cream-subtle">— defers the full estimated tax</span>
+                </label>
+              </Section>
+
               <Section label="Notes">
                 <textarea
                   value={editor.notes}
@@ -604,7 +722,7 @@ function SaleOffersView({ p }: { p: PropertyDetail }) {
             </div>
 
             {/* Live totals column */}
-            {totals && editorInputs && <LiveTotals inputs={editorInputs} totals={totals} />}
+            {totals && editorInputs && <LiveTotals inputs={editorInputs} totals={totals} tax={taxEstimate} />}
           </div>
         </Panel>
       )}
@@ -895,7 +1013,15 @@ function PartnerRow({
  * capital but 0% ownership received their take in lines 4–5; they don't
  * also appear in the distribution section (would double-count).
  */
-function LiveTotals({ inputs, totals }: { inputs: SellerNetInputs; totals: SellerNetTotals }) {
+function LiveTotals({
+  inputs,
+  totals,
+  tax,
+}: {
+  inputs: SellerNetInputs;
+  totals: SellerNetTotals;
+  tax: SellerTaxEstimate | null;
+}) {
   const offerPrice = inputs.offer_price;
   const commissionLabel =
     inputs.commission_pct !== null && inputs.commission_pct !== undefined && inputs.commission_pct !== 0
@@ -941,6 +1067,40 @@ function LiveTotals({ inputs, totals }: { inputs: SellerNetInputs; totals: Selle
 
       <div className="my-3 border-t border-white/[0.08]" />
       <Row label="Net proceeds" value={fmtMoneyExact(totals.net_after_partners)} emphasize />
+
+      {/* Tier-1 seller tax estimate. Sits directly under net proceeds —
+          before the partner waterfall — because it's the seller's tax on
+          the sale, not the partners'. */}
+      {tax && (
+        <div className="mt-3 pt-3 border-t border-white/[0.08]">
+          <div className="font-mono text-[9px] uppercase tracking-eyebrow text-cream-subtle mb-2">
+            Seller tax estimate
+          </div>
+          <Row label="Adjusted basis" value={fmtMoneyExact(tax.adjusted_basis)} muted />
+          <Row label="Taxable gain" value={fmtMoneyExact(tax.total_gain)} muted />
+          <Row label={`Depreciation recapture (${(tax.rates.recapture_rate * 100).toFixed(0)}%)`} value={"-" + fmtMoneyExact(tax.federal_recapture_tax)} muted />
+          <Row label={`Capital gains (${(tax.rates.ltcg_rate * 100).toFixed(0)}%)`} value={"-" + fmtMoneyExact(tax.federal_ltcg_tax)} muted />
+          <Row label={`NIIT (${(tax.rates.niit_rate * 100).toFixed(1)}%)`} value={"-" + fmtMoneyExact(tax.niit_tax)} muted />
+          <Row label={`Indiana (${(tax.rates.state_rate * 100).toFixed(1)}%)`} value={"-" + fmtMoneyExact(tax.state_tax)} muted />
+          {tax.tax_deferred_via_1031 > 0 ? (
+            <>
+              <Row label="Estimated tax — deferred via 1031" value={fmtMoneyExact(tax.tax_deferred_via_1031)} emphasize />
+              <p className="mt-1 font-body text-[10.5px] text-teal-300">
+                Exchange keeps {fmtMoneyExact(tax.tax_deferred_via_1031)} working instead of paying it now.
+              </p>
+            </>
+          ) : (
+            <Row label="Estimated tax" value={"-" + fmtMoneyExact(tax.estimated_tax)} emphasize />
+          )}
+          <Row label="After-tax proceeds" value={fmtMoneyExact(tax.after_tax_proceeds)} emphasize />
+          <p className="mt-2 font-body text-[9.5px] text-cream-subtle italic leading-snug">
+            {tax.depreciation_is_estimated
+              ? `Depreciation estimated straight-line over ${tax.rates.recovery_years} yrs on ${(100 - tax.rates.land_pct * 100).toFixed(0)}% of purchase price (${tax.years_held.toFixed(1)} yrs held). `
+              : "Uses owner-supplied depreciation. "}
+            {TAX_ESTIMATE_DISCLAIMER}
+          </p>
+        </div>
+      )}
 
       {/* Distribution of the residual */}
       {showDistribution && (

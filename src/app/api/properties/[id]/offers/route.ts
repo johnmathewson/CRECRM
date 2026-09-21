@@ -15,6 +15,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { computeSellerNet, type SellerNetInputs } from "@/lib/seller-net";
+import { taxSnapshotColumns, TAX_INPUT_COLUMNS } from "@/lib/seller-tax-estimate";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +33,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   const { data, error } = await sb
     .from("seller_net_offers")
     .select(
-      "id, property_id, title, buyer_name, offer_date, offer_price, commission_pct, commission_amount, line_items, partners, computed_commission, computed_adjustments, computed_net_proceeds, computed_partners_due, computed_net_after_partners, notes, published_at, created_at, updated_at, created_via_token_id"
+      "id, property_id, title, buyer_name, offer_date, offer_price, commission_pct, commission_amount, line_items, partners, computed_commission, computed_adjustments, computed_net_proceeds, computed_partners_due, computed_net_after_partners, notes, published_at, created_at, updated_at, created_via_token_id, tax_original_purchase_price, tax_purchase_date, tax_capital_improvements, tax_accumulated_depreciation, tax_intends_1031, computed_estimated_tax, computed_tax_deferred_1031, computed_after_tax_proceeds, computed_tax_breakdown"
     )
     .eq("organization_id", ORG_ID)
     .eq("property_id", params.id)
@@ -96,6 +97,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     computed_net_after_partners: totals.net_after_partners,
     notes: body.notes?.trim() || null,
   };
+
+  // Tier-1 seller tax estimate — inputs are optional; snapshot only when a
+  // purchase price is present.
+  for (const col of TAX_INPUT_COLUMNS) {
+    if (body[col] !== undefined) insertPayload[col] = body[col];
+  }
+  Object.assign(insertPayload, taxSnapshotColumns(insertPayload, totals.net_proceeds));
 
   const { data, error } = await sb
     .from("seller_net_offers")

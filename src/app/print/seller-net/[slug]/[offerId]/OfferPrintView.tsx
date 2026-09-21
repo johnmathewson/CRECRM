@@ -1,6 +1,7 @@
 "use client";
 
 import type { SellerNetInputs, SellerNetTotals } from "@/lib/seller-net";
+import { TAX_ESTIMATE_DISCLAIMER, type SellerTaxEstimate } from "@/lib/seller-tax-estimate";
 
 /**
  * OfferPrintView — branded seller-net summary, styled for both an on-screen
@@ -23,11 +24,13 @@ export function OfferPrintView({
   offer,
   inputs,
   totals,
+  tax = null,
 }: {
   property: any;
   offer: any;
   inputs: SellerNetInputs;
   totals: SellerNetTotals;
+  tax?: SellerTaxEstimate | null;
 }) {
   const fullAddress = [property.address, property.city, property.state, property.zip].filter(Boolean).join(", ");
   const offerPrice = inputs.offer_price;
@@ -232,6 +235,61 @@ export function OfferPrintView({
             </tbody>
           </table>
         </div>
+
+        {/* Seller tax estimate — Tier 1. Shown only when the broker entered
+            a purchase price. The 1031 path shows the deferred figure as
+            the headline: that contrast is the point of the section. */}
+        {tax && (
+          <div className="section">
+            <div className="label-line">
+              {tax.tax_deferred_via_1031 > 0 ? "Estimated tax — deferred via 1031 exchange" : "Estimated tax on sale"}
+            </div>
+            <table className="table">
+              <tbody>
+                <tr><td>Original purchase price</td><td className="num">{fmtMoneyExact(Number(offer.tax_original_purchase_price))}</td></tr>
+                {Number(offer.tax_capital_improvements) > 0 && (
+                  <tr><td>Capital improvements</td><td className="num">+{fmtMoneyExact(Number(offer.tax_capital_improvements))}</td></tr>
+                )}
+                <tr>
+                  <td>Depreciation taken{tax.depreciation_is_estimated ? ` (est., ${tax.years_held.toFixed(1)} yrs)` : ""}</td>
+                  <td className="num debit">-{fmtMoneyExact(tax.accumulated_depreciation)}</td>
+                </tr>
+                <tr><td><b>Adjusted basis</b></td><td className="num"><b>{fmtMoneyExact(tax.adjusted_basis)}</b></td></tr>
+                <tr><td><b>Taxable gain</b></td><td className="num"><b>{fmtMoneyExact(tax.total_gain)}</b></td></tr>
+                <tr><td>Depreciation recapture ({(tax.rates.recapture_rate * 100).toFixed(0)}%)</td><td className="num debit">-{fmtMoneyExact(tax.federal_recapture_tax)}</td></tr>
+                <tr><td>Federal capital gains ({(tax.rates.ltcg_rate * 100).toFixed(0)}%)</td><td className="num debit">-{fmtMoneyExact(tax.federal_ltcg_tax)}</td></tr>
+                <tr><td>Net Investment Income Tax ({(tax.rates.niit_rate * 100).toFixed(1)}%)</td><td className="num debit">-{fmtMoneyExact(tax.niit_tax)}</td></tr>
+                <tr><td>Indiana state tax ({(tax.rates.state_rate * 100).toFixed(1)}%)</td><td className="num debit">-{fmtMoneyExact(tax.state_tax)}</td></tr>
+                {tax.tax_deferred_via_1031 > 0 ? (
+                  <>
+                    <tr>
+                      <td><b>Tax deferred through exchange</b></td>
+                      <td className="num"><b style={{ color: "var(--coral-500)" }}>{fmtMoneyExact(tax.tax_deferred_via_1031)}</b></td>
+                    </tr>
+                    <tr>
+                      <td><b>Proceeds available to reinvest</b></td>
+                      <td className="num"><b style={{ color: "var(--coral-500)" }}>{fmtMoneyExact(tax.after_tax_proceeds)}</b></td>
+                    </tr>
+                  </>
+                ) : (
+                  <>
+                    <tr>
+                      <td><b>Estimated total tax</b> ({(tax.effective_rate_on_gain * 100).toFixed(1)}% of gain)</td>
+                      <td className="num debit"><b>-{fmtMoneyExact(tax.estimated_tax)}</b></td>
+                    </tr>
+                    <tr>
+                      <td><b>After-tax proceeds</b></td>
+                      <td className="num"><b style={{ color: "var(--coral-500)" }}>{fmtMoneyExact(tax.after_tax_proceeds)}</b></td>
+                    </tr>
+                  </>
+                )}
+              </tbody>
+            </table>
+            <p style={{ fontSize: "9px", lineHeight: 1.4, opacity: 0.7, marginTop: "6px", fontStyle: "italic" }}>
+              {TAX_ESTIMATE_DISCLAIMER}
+            </p>
+          </div>
+        )}
 
         {/* Distribution of net proceeds — only ownership-% recipients +
             sponsor. Capital-only partners (0% ownership) get their take in

@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { unstable_noStore as noStore } from "next/cache";
 import { createClient } from "@supabase/supabase-js";
 import { computeSellerNet, type SellerNetInputs } from "@/lib/seller-net";
+import { computeSellerTaxEstimate, type SellerTaxEstimate } from "@/lib/seller-tax-estimate";
 import { OfferPrintView } from "./OfferPrintView";
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
@@ -64,5 +65,20 @@ export default async function OfferPrintPage({
   };
   const totals = computeSellerNet(inputs);
 
-  return <OfferPrintView property={property} offer={offer} inputs={inputs} totals={totals} />;
+  // Tier-1 seller tax estimate — recomputed live from the stored inputs so
+  // the PDF always reflects current rate assumptions, not a stale snapshot.
+  const tax: SellerTaxEstimate | null = offer.tax_original_purchase_price
+    ? computeSellerTaxEstimate({
+        net_proceeds: totals.net_proceeds,
+        original_purchase_price: Number(offer.tax_original_purchase_price),
+        purchase_date: offer.tax_purchase_date ?? null,
+        capital_improvements: Number(offer.tax_capital_improvements ?? 0),
+        accumulated_depreciation:
+          offer.tax_accumulated_depreciation == null ? null : Number(offer.tax_accumulated_depreciation),
+        sale_date: offer.offer_date ?? null,
+        intends_1031: !!offer.tax_intends_1031,
+      })
+    : null;
+
+  return <OfferPrintView property={property} offer={offer} inputs={inputs} totals={totals} tax={tax} />;
 }
