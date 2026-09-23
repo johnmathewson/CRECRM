@@ -130,6 +130,7 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
   {
     label: "Intelligence",
     items: [
+      { label: "Buyers",     href: "/cre-os/buyers",     icon: ICON.users },
       { label: "Prospector", href: "/cre-os/prospector", icon: ICON.radar },
       { label: "Listings",   href: "/cre-os/listings",   icon: ICON.trending },
       { label: "Market",     href: "/cre-os/market",     icon: ICON.globe,    legacyHref: "/comps" },
