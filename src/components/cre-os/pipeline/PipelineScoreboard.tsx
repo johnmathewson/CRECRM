@@ -174,8 +174,8 @@ export function PipelineScoreboard({ data }: { data: Scoreboard }) {
         <div className="flex items-baseline justify-between gap-4 flex-wrap border-b-2 border-cream pb-2">
           <h2 className="font-heading text-[11px] font-bold uppercase tracking-eyebrow text-cream">When the money lands · next 18 months</h2>
           <span className="font-body text-[12px] text-cream-muted">
-            Weighted commission by month. <span className="inline-block w-2.5 h-2.5 bg-copper-600 mx-1 align-[-1px]" />dated
-            <span className="inline-block w-2.5 h-2.5 bg-copper-300 ml-3 mr-1 align-[-1px]" />projected from stage
+            Weighted commission by month. <span className="inline-block w-2.5 h-2.5 bg-copper-600 mx-1 align-[-1px]" /> dated
+            <span className="inline-block w-2.5 h-2.5 bg-copper-300 ml-3 mr-1 align-[-1px]" /> projected from stage
           </span>
         </div>
         <div className="mt-3 h-56">

@@ -111,8 +111,10 @@ export async function loadScoreboard(now = new Date()): Promise<Scoreboard> {
   const yearStart = new Date(year, 0, 1);
 
   // ── Closed this year ────────────────────────────────────────────────────
+  // A closed deal counts even if its property was archived afterwards —
+  // selling it and archiving it is the normal sequence, and the fee was earned.
   const closedDeals = deals
-    .filter((d) => d.is_closed && !(d.property && d.property.is_dead))
+    .filter((d) => d.is_closed)
     .map((d) => {
       const closedStage = (d.deal_stages ?? []).find((s: { stage: string }) => normalizeStage(s.stage) === "Closed");
       const closedOn: string | null = d.actual_close ?? closedStage?.entered_at ?? null;
