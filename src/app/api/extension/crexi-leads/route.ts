@@ -166,7 +166,20 @@ function nameParts(n: string): { first: string; last: string } {
 
 // ── Main handler ──────────────────────────────────────────────────────────
 
-export async function POST(req: NextRequest) {
+export async function POST() {
+  return NextResponse.json(
+    {
+      ok: false,
+      error:
+        "This endpoint is retired. The Chrome extension's CREXi lead scrape was turned off on 2026-10-13: it wrote raw (non-E.164) phones and no message rows, and a CREXi UI change in Aug 2026 shifted table columns and attached contact info to the wrong people. CREXi leads now come ONLY from the daily Lead Report XLSX via POST /api/leads/crexi-report — CREXi's own structured export.",
+    },
+    { status: 410, headers: corsHeaders() }, // Gone
+  );
+}
+
+// Legacy implementation kept below for reference but unreachable.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function _legacyImpl_unused(req: NextRequest) {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!

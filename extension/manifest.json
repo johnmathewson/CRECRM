@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Stewardship CRE — Listing Sync",
-  "version": "0.4.0",
-  "description": "Pulls listing performance metrics + named lead engagement from CREXi/LoopNet into the Stewardship CRM.",
+  "version": "0.5.0",
+  "description": "Pulls listing performance metrics from CREXi/LoopNet into the Stewardship CRM. Lead scraping was retired 2026-10-13; CREXi leads come from the daily Lead Report.",
   "permissions": ["storage", "alarms", "activeTab", "tabs", "scripting"],
   "host_permissions": [
     "https://*.crexi.com/*",
@@ -23,19 +23,9 @@
   "content_scripts": [
     {
       "matches": [
-        "https://*.crexi.com/property/*/dashboard/leads*"
-      ],
-      "js": ["content-crexi-leads.js"],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": [
         "https://*.crexi.com/properties/*",
         "https://*.crexi.com/property/*",
         "https://*.crexi.com/dashboard/*"
-      ],
-      "exclude_matches": [
-        "https://*.crexi.com/property/*/dashboard/leads*"
       ],
       "js": ["content-crexi.js"],
       "run_at": "document_idle"
