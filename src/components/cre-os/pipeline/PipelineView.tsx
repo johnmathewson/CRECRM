@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/cre-os/AppShell";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { Panel } from "@/components/cre-os/Panel";
-import { KpiTile } from "@/components/cre-os/KpiTile";
 import type { RailSection } from "@/components/cre-os/InsightsRail";
+import { PipelineScoreboard } from "./PipelineScoreboard";
+import type { Scoreboard } from "@/lib/cre-os/scoreboard-queries";
 import { KanbanBoard } from "./KanbanBoard";
 import { CreateDealDialog } from "./CreateDealDialog";
 import { PropertyPeekPanel } from "@/components/cre-os/property/PropertyPeekPanel";
@@ -31,10 +32,12 @@ export function PipelineView({
   listings,
   pursuits,
   candidates,
+  scoreboard,
 }: {
   listings: PipelineBoard;
   pursuits: PipelineBoard;
   candidates: { properties: PortalCandidate[]; contacts: PortalContactCandidate[] };
+  scoreboard: Scoreboard;
 }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -229,46 +232,33 @@ export function PipelineView({
     <AppShell rail={rail}>
       <div className="space-y-6">
         {/* Page header */}
-        <div className="flex items-start justify-between gap-6">
+        <div className="flex items-end justify-between gap-6 flex-wrap">
           <div className="min-w-0 flex-1">
             <Eyebrow tone="coral">Pipeline</Eyebrow>
-            <h1 className="mt-1 font-display font-medium text-3xl text-cream tracking-tight">Deal flow</h1>
-            <p className="mt-1 font-body text-[13px] text-cream-dim">
-              Two parallel ladders. Listings tracks sell-side / lease-side mandates. Pursuits tracks buy-side acquisitions.
+            <h1 className="mt-1 font-display text-[30px] font-extrabold text-cream leading-none">The year</h1>
+            <p className="mt-2 font-body text-[14px] text-cream-muted">
+              These deals run six to eighteen months. This is where they are, when they land, and what they're worth.
             </p>
           </div>
           <button
             onClick={() => setCreateOpen(true)}
-            className="shrink-0 px-4 py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] hover:bg-coral-400/[0.18] font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-coral-300 transition-colors"
+            className="shrink-0 px-4 py-2.5 bg-copper-600 hover:bg-copper-700 font-heading text-[12px] font-semibold text-white transition-colors"
           >
             + Add deal
           </button>
         </div>
 
-        {/* Side toggle + KPIs */}
-        <div className="flex items-end justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-2 border border-white/[0.06] rounded-md p-1 bg-white/[0.02]">
+        <PipelineScoreboard data={scoreboard} />
+
+        {/* Side toggle */}
+        <div className="flex items-end justify-between gap-4 flex-wrap pt-2">
+          <div className="flex items-center gap-1 border-2 border-white/[0.10] p-1">
             <SideTab label={`Listings · ${listings.totals.activeDeals}`} active={side === "listings"} onClick={() => setSide("listings")} />
             <SideTab label={`Pursuits · ${pursuits.totals.activeDeals}`} active={side === "pursuits"} onClick={() => setSide("pursuits")} />
           </div>
-        </div>
-
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-          <KpiTile
-            label="Active deals"
-            value={board.totals.activeDeals.toString()}
-            caption={side === "listings" ? "Sell + lease side" : "Buy side"}
-          />
-          <KpiTile
-            label="Pipeline value"
-            value={fmtMoney(board.totals.pipelineValue)}
-            caption={`Weighted ${fmtMoney(board.totals.weightedValue)}`}
-          />
-          <KpiTile
-            label="Est. commission"
-            value={fmtMoney(board.totals.pipelineCommission)}
-            caption={`Weighted ${fmtMoney(board.totals.weightedCommission)}`}
-          />
+          <span className="font-body text-[13px] text-cream-muted">
+            {fmtMoney(board.totals.pipelineValue)} in play · {fmtMoney(board.totals.pipelineCommission)} fees · {fmtMoney(board.totals.weightedCommission)} weighted
+          </span>
         </div>
 
         {/* Kanban */}
@@ -325,8 +315,8 @@ function SideTab({ label, active, onClick }: { label: string; active: boolean; o
   return (
     <button
       onClick={onClick}
-      className={`px-4 py-1.5 rounded font-heading text-[11px] uppercase tracking-eyebrow font-semibold transition-colors ${
-        active ? "bg-coral-400 text-steward-base" : "text-cream-dim hover:text-cream"
+      className={`px-4 py-1.5 font-heading text-[11px] uppercase tracking-eyebrow font-bold transition-colors ${
+        active ? "bg-cream text-steward-base" : "text-cream-dim hover:text-cream"
       }`}
     >
       {label}
