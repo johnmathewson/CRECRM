@@ -229,12 +229,14 @@ export function ThreadPanel({
   const who = data?.who ?? "…";
 
   return (
-    <div className="fixed inset-0 z-40" role="dialog" aria-modal="true">
+    // z-[70]: above the mobile BottomNav (z-40) and the nav drawers (z-50) —
+    // at z-40 the nav painted over the reply bar and hid Send on phones.
+    <div className="fixed inset-0 z-[70]" role="dialog" aria-modal="true">
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" onClick={onClose} />
 
       {/* Sheet — bottom on mobile, right-side on desktop */}
-      <div className="absolute inset-x-0 bottom-0 top-14 lg:inset-y-0 lg:left-auto lg:right-0 lg:w-[480px] flex flex-col bg-steward-base border-t lg:border-t-0 lg:border-l border-white/10 rounded-t-xl lg:rounded-none shadow-2xl">
+      <div className="canvas-light absolute inset-x-0 bottom-0 top-14 lg:inset-y-0 lg:left-auto lg:right-0 lg:w-[480px] flex flex-col bg-steward-base border-t-2 lg:border-t-0 lg:border-l-2 border-cream">
         {/* Header */}
         <div className="flex items-start justify-between gap-3 px-4 py-3 border-b border-white/[0.06]">
           <div className="min-w-0">

@@ -240,7 +240,7 @@ export function BrokerVoiceEditView({ voice: initial }: { voice: BrokerVoice | n
           </div>
         </Panel>
 
-        <div className="sticky bottom-0 -mx-4 lg:-mx-6 px-4 lg:px-6 py-3 bg-steward-base/95 backdrop-blur-md border-t border-white/[0.08] flex items-center justify-between gap-3 flex-wrap">
+        <div className="sticky bottom-[var(--bottom-nav-h)] -mx-4 lg:-mx-6 px-4 lg:px-6 py-3 bg-steward-base border-t-2 border-cream flex items-center justify-between gap-3 flex-wrap">
           <div className="font-mono text-[10px] uppercase tracking-eyebrow text-cream-subtle">
             {saveResult?.ok && <span className="text-teal-300">Saved · live on next draft</span>}
             {saveResult && !saveResult.ok && (

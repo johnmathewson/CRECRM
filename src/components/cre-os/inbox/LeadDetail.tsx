@@ -423,7 +423,9 @@ export function LeadDetail({ lead }: { lead: LeadDetailData }) {
 
       {/* Sticky action bar — fixed, thumb-zone friendly */}
       {!isArchived && (
-        <div className="fixed bottom-0 left-0 right-0 lg:left-56 lg:right-[300px] bg-steward-base/95 backdrop-blur-md border-t border-coral-400/20 px-4 lg:px-8 py-3 z-30 [padding-bottom:max(0.75rem,env(safe-area-inset-bottom))]">
+        // Sits ABOVE the mobile BottomNav (--bottom-nav-h = 56px + home
+        // indicator; 0 on lg). bottom-0 put Send behind the nav on phones.
+        <div className="fixed bottom-[var(--bottom-nav-h)] left-0 right-0 lg:left-56 lg:right-[300px] bg-steward-base border-t-2 border-cream px-4 lg:px-8 py-3 z-30 lg:[padding-bottom:max(0.75rem,env(safe-area-inset-bottom))]">
           {actionState.error && (
             <div className="mb-2 px-3 py-1.5 rounded bg-coral-400/[0.08] border border-coral-400/30 font-body text-[12px] text-coral-300">
               {actionState.error}
