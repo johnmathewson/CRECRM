@@ -454,7 +454,16 @@ When someone proposes a new agent skill / instruction document:
 
 ---
 
-## STATE OF THE WORLD — 2026-07-28 (pick up here)
+## STATE OF THE WORLD — 2026-10-13 (pick up here; the 7/28 block below is history)
+
+**Record-integrity rollout SHIPPED (b1a16ec → 4ba5445 → integrity commit), under `OUTBOUND_FREEZE=true`.**
+- Repairs done in prod (snapshot schema `repair_20261013`): 300 comms + 70 contacts moved to archive tables, nothing deleted. Scoreboard reads ZERO on all 12 checks (`select integrity_scorecard()`).
+- One way in: `src/lib/cre-os/record-touch.ts` (see "Record integrity" section above). Migration 0035 constraints + normalize triggers live. Migration 0036 scorecard live.
+- **Brand UI live:** Stewardship Brand Guide v1.0 — Archivo, Ink `#191D21` / Copper `#B4552F` / Bone `#F0EDE7`, zero radius, no shadows. Legacy token names (coral/teal/amber/cream) still exist in `tailwind.config.ts` but resolve to brand values — use `copper-*` / `ink-*` for new work. Nav is 7 + "More". **`/cre-os/today` is the home** (Waiting on you → Next up, rows open ThreadPanel); `/cre-os` redirects there; full Steward brief at `/cre-os/today/brief`. Settings → Integrity is the health page; `integrity-nightly` texts John at 06:00 CT only when something is non-zero.
+- **FREEZE STILL ON.** Lift = delete `OUTBOUND_FREEZE` on Netlify site `9c934339-1657-4c9c-a09d-4833b266ffc0` + redeploy. Nothing else needed: stale acks self-skip (>60 min), the drain pauses under the freeze. John says when.
+- Open: R11 same-name contact merges (92 groups, needs John's judgment / a merge tool) · John's decisions: keep/kill `/api/extension/sync` listing-metrics scrape, remove the Chrome extension, eXp vs Stewardship name on buyer collateral · marketing-site /contact form is still a stub · June perf fixes (pg_trgm, (org,state) index) unapplied · visual QA of the brand pass on every screen (the theme was applied globally through tokens; screens with hard-coded colors may need touch-ups — grep `#0D0D0D`, `rgba(224,122,95`).
+
+## STATE OF THE WORLD — 2026-07-28 (history)
 
 **A2P 10DLC: APPROVED + LIVE.** Campaign `CM80f43e0659fb3e4801d6f1078cffdb44` (Low Volume Mixed, TCR ID CWHCUNR) on brand `BNbe70570…` ("Stewardship Commercial Real Estate"). We deleted 11 duplicate/failed campaigns and registered one clean one — never stack campaigns again; ONE campaign, edit via its fields. Messaging Service `MG433c934afdf170850586d136c6317058` ("Stewardship CRE (A2P approved)") has the number +13178041980 and the inbound webhook. `TWILIO_TEST_MODE=false` since 7/28 (~18:15Z) — **sends are REAL now**. First production SMS sent to Rahul (Super 8) 7/28.
 
