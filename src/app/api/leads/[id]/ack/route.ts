@@ -40,6 +40,9 @@ function buildAckBody(senderName: string | null, propertyLabel: string): string 
 — John`;
 }
 
+/** Past this, a "within the hour" receipt is a lie — never send it. */
+const ACK_MAX_AGE_MIN = 60;
+
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   // Cron auth
   const cronSecret = process.env.CRON_SECRET;
@@ -57,7 +60,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     .from("leads")
     .select(`
       id, sender_email, sender_name, raw_subject, auto_ack_sent_at, status,
-      property_id, contact_id,
+      property_id, contact_id, created_at,
       property:properties(name, headline)
     `)
     .eq("id", params.id)
@@ -76,6 +79,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   }
   if (lead.status === "spam" || lead.status === "archived") {
     return NextResponse.json({ ok: true, skipped: lead.status });
+  }
+  // The receipt promises a personal follow-up "within the hour". Sending it
+  // later than that (a send freeze, a stuck queue, a redeploy) would be a
+  // broken promise on arrival — the lead stays in the Unanswered queue for
+  // a real reply instead.
+  const ageMin = (Date.now() - new Date(lead.created_at as string).getTime()) / 60_000;
+  if (ageMin > ACK_MAX_AGE_MIN) {
+    return NextResponse.json({ ok: true, skipped: "stale", age_minutes: Math.round(ageMin) });
   }
 
   const property = (lead as any).property;

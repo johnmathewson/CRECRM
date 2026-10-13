@@ -14,6 +14,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendMessage } from "@/lib/gmail";
+import { resolveParty, recordTouch, type TouchKind } from "./record-touch";
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 
@@ -21,6 +22,12 @@ const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 function extractEmail(addr: string): string {
   const m = addr.match(/<([^>]+)>/);
   return m ? m[1].trim() : addr.trim();
+}
+
+/** The display-name half of "Display Name <email@host>", if any. */
+function extractName(addr: string): string | null {
+  const m = addr.match(/^"?([^"<]+?)"?\s*<[^>]+>$/);
+  return m ? m[1].trim() || null : null;
 }
 
 export interface SendCrmEmailParams {
@@ -84,7 +91,7 @@ export interface SendCrmEmailResult {
  * campaign or AI touch. If a new send path needs its own bucket, add the
  * case here rather than letting it land in manual silently.
  */
-function touchKindForSource(source: string | undefined): string {
+function touchKindForSource(source: string | undefined): TouchKind {
   switch (source) {
     case "bulk_ai":
     case "bulk-ai-followup":
@@ -126,27 +133,36 @@ export async function sendCrmEmail(
   });
 
   const sentAt = new Date().toISOString();
+  const touchKind = touchKindForSource(params.source);
 
   // ── 2. Write the communications row with all foreign keys populated ─────────
-  await supabase.from("communications").insert({
-    organization_id: ORG_ID,
-    lead_id: params.leadId,
-    property_id: params.propertyId,
-    contact_id: params.contactId,
+  // The recipient is a person unless this is system mail to ourselves. A
+  // caller that doesn't know the contact gets it resolved from the address
+  // (found or created) — the email already went out; the record must match.
+  let contactId = params.contactId;
+  if (!contactId && touchKind !== "internal") {
+    contactId = (
+      await resolveParty(supabase, { email: extractEmail(params.to), name: extractName(params.to), source: params.source ?? "send_crm_email" })
+    ).contactId;
+  }
+  await recordTouch(supabase, {
     channel: "email",
     direction: "outbound",
-    external_id: sent.id,
+    contactId,
+    leadId: params.leadId,
+    propertyId: params.propertyId,
+    externalId: sent.id,
     subject: params.subject,
-    body_preview: params.bodyText.slice(0, 500),
-    from_address: extractEmail(params.from),
-    to_addresses: [extractEmail(params.to)],
-    occurred_at: sentAt,
-    touch_kind: touchKindForSource(params.source),
-    raw_payload: {
+    body: params.bodyText,
+    fromAddress: extractEmail(params.from),
+    toAddresses: [extractEmail(params.to)],
+    occurredAt: sentAt,
+    touchKind,
+    source: params.source ?? "unknown",
+    rawPayload: {
       gmail_message_id: sent.id,
       gmail_thread_id: sent.threadId,
       label_ids: sent.labelIds,
-      source: params.source ?? "unknown",
       ...(params.rawPayloadExtra ?? {}),
     },
   });
@@ -208,13 +224,16 @@ export async function findOrCreateLeadForSend(
   if (existing?.id) return existing.id;
 
   // 2. No existing lead — create a minimal one so the send is anchored and
-  //    visible in the ContactDrawer thread.
+  //    visible in the ContactDrawer thread. A lead needs its person.
+  const resolvedContactId =
+    contactId ??
+    (await resolveParty(supabase, { email: emailLower, name: senderName, source })).contactId;
   const { data: created } = await supabase
     .from("leads")
     .insert({
       organization_id: ORG_ID,
       property_id: propertyId,
-      contact_id: contactId,
+      contact_id: resolvedContactId,
       sender_email: emailLower,
       sender_name: senderName ?? null,
       source,

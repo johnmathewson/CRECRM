@@ -21,6 +21,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { classifyReply, type ReplyClassification } from "./classify-reply";
 import { linkOrphanedComms } from "./send-crm-email";
+import { resolveParty, recordTouch } from "./record-touch";
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 
@@ -201,16 +202,18 @@ export async function maybeRouteAsReply(
   // parent's contact. Inheriting the parent's contact unconditionally (the
   // old order) filed CC'd colleagues, reply-alls and CREXi's notification
   // bot under the original recipient's name.
+  // resolveParty finds the sender by email or creates them — a reply from
+  // someone the CRM has never seen (a colleague answering for the
+  // recipient) is still a person, and gets filed under their own name.
   let resolvedContactId: string | null = null;
   if (msg.fromEmail) {
-    const { data: contactRow } = await supabase
-      .from("contacts")
-      .select("id")
-      .eq("organization_id", ORG_ID)
-      .ilike("email", msg.fromEmail.trim().replace(/[%_]/g, (c) => "\\" + c))
-      .limit(1)
-      .maybeSingle();
-    if (contactRow) resolvedContactId = contactRow.id as string;
+    try {
+      resolvedContactId = (
+        await resolveParty(supabase, { email: msg.fromEmail, name: msg.fromName, source: "reply_match" })
+      ).contactId;
+    } catch (err) {
+      console.error("[reply-match] resolveParty failed:", err instanceof Error ? err.message : err);
+    }
   }
   if (!resolvedContactId) resolvedContactId = parent.contactId ?? null;
 
@@ -323,7 +326,7 @@ export async function maybeRouteAsReply(
         .eq("organization_id", ORG_ID)
         .eq("contact_id", lookupContactId)
         .eq("property_id", parent.propertyId)
-        .neq("status", "archived")
+        .not("status", "in", '("archived","spam","converted","promoted","dead")')
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -340,7 +343,10 @@ export async function maybeRouteAsReply(
             organization_id: ORG_ID,
             contact_id: lookupContactId,
             property_id: parent.propertyId,
-            source: "cadence_reply",
+            // 'email' — the old 'cadence_reply' is not in leads_source_check,
+            // so this insert had been failing silently and the reply never
+            // reached the inbox.
+            source: "email",
             status: "new",
             urgency: "warm",
             sender_email: msg.fromEmail,
@@ -372,38 +378,29 @@ export async function maybeRouteAsReply(
   // "handled" and it vanished (Henry Menn's Aug 7 Liberty Square reply).
   {
     // Write the inbound reply to communications so it appears in the
-    // ContactDrawer thread alongside John's outbound messages.
-    // Guard with external_id dedup so a retry doesn't double-insert.
-    const { data: alreadyLogged } = await supabase
-      .from("communications")
-      .select("id")
-      .eq("organization_id", ORG_ID)
-      .eq("external_id", msg.gmailMessageId)
-      .maybeSingle();
-
-    if (!alreadyLogged) {
-      await supabase.from("communications").insert({
-        organization_id: ORG_ID,
-        lead_id: resolvedLeadId,
-        contact_id: resolvedContactId,
-        property_id: parent.propertyId ?? null,
-        channel: "email",
-        direction: "inbound",
-        external_id: msg.gmailMessageId,
-        subject: msg.subject,
-        body_preview: msg.bodyText.slice(0, 500),
-        from_address: msg.fromEmail,
-        occurred_at: msg.receivedAt,
-        attachments: msg.attachments ?? [],
-        raw_payload: {
-          gmail_message_id: msg.gmailMessageId,
-          gmail_thread_id: msg.gmailThreadId,
-          from_name: msg.fromName,
-          classification,
-          source: parent.sourceTable === "lane_touches" ? "cadence_reply" : "direct_reply",
-        },
-      });
-    }
+    // ContactDrawer thread alongside John's outbound messages. recordTouch
+    // is idempotent on external_id, so a retry can't double-insert; a
+    // failure THROWS so the poller does not mark the message handled.
+    await recordTouch(supabase, {
+      channel: "email",
+      direction: "inbound",
+      contactId: resolvedContactId,
+      leadId: resolvedLeadId,
+      propertyId: parent.propertyId ?? null,
+      externalId: msg.gmailMessageId,
+      subject: msg.subject,
+      body: msg.bodyText,
+      fromAddress: msg.fromEmail,
+      occurredAt: msg.receivedAt,
+      attachments: msg.attachments ?? [],
+      source: parent.sourceTable === "lane_touches" ? "cadence_reply" : "direct_reply",
+      rawPayload: {
+        gmail_message_id: msg.gmailMessageId,
+        gmail_thread_id: msg.gmailThreadId,
+        from_name: msg.fromName,
+        classification,
+      },
+    });
 
     // Re-open the lead so it surfaces in "Do This Now" and the AI can draft
     // a response. Only re-open if it was in 'sent' status or 'new' (just
@@ -542,17 +539,17 @@ export async function routeAsReplyByEmail(
     classification = { intent: "unclear", confidence: 0, summary: "(Classifier error)", suggestedReply: "", classifiedAt: new Date().toISOString(), model: "n/a" };
   }
 
-  // Resolve contact_id
-  let resolvedContactId = row.contact_id;
-  if (!resolvedContactId) {
-    const { data: ct } = await supabase
-      .from("contacts")
-      .select("id")
-      .eq("organization_id", ORG_ID)
-      .ilike("email", msg.fromEmail.trim())
-      .maybeSingle();
-    if (ct) resolvedContactId = (ct as { id: string }).id;
+  // The counterparty is whoever SENT this (found or created by email); the
+  // thread's contact is only a fallback when the sender address is unusable.
+  let resolvedContactId: string | null = null;
+  try {
+    resolvedContactId = (
+      await resolveParty(supabase, { email: msg.fromEmail, name: msg.fromName, source: "reply_match" })
+    ).contactId;
+  } catch (err) {
+    console.error("[reply-match] resolveParty failed:", err instanceof Error ? err.message : err);
   }
+  if (!resolvedContactId) resolvedContactId = row.contact_id;
 
   // Re-open / create lead
   let resolvedLeadId = row.lead_id;
@@ -570,26 +567,26 @@ export async function routeAsReplyByEmail(
     resolvedLeadId = (existingLead as { id: string } | null)?.id ?? null;
   }
 
-  // Write inbound communications row
-  await supabase.from("communications").insert({
-    organization_id: ORG_ID,
-    lead_id: resolvedLeadId,
-    contact_id: resolvedContactId,
-    property_id: row.property_id,
+  // Write inbound communications row (throws on failure — the poller must
+  // not mark the message handled if it never reached the record).
+  await recordTouch(supabase, {
     channel: "email",
     direction: "inbound",
-    external_id: msg.gmailMessageId,
+    contactId: resolvedContactId,
+    leadId: resolvedLeadId,
+    propertyId: row.property_id,
+    externalId: msg.gmailMessageId,
     subject: msg.subject,
-    body_preview: msg.bodyText.slice(0, 500),
-    from_address: msg.fromEmail,
-    occurred_at: msg.receivedAt,
+    body: msg.bodyText,
+    fromAddress: msg.fromEmail,
+    occurredAt: msg.receivedAt,
     attachments: msg.attachments ?? [],
-    raw_payload: {
+    source: "cadence_reply_email_fallback",
+    rawPayload: {
       gmail_message_id: msg.gmailMessageId,
       gmail_thread_id: msg.gmailThreadId,
       from_name: msg.fromName,
       classification,
-      source: "cadence_reply_email_fallback",
     },
   });
 

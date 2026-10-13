@@ -90,7 +90,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     propertyId: inbound.property_id as string,
     contactId: inbound.contact_id as string | null,
     senderName: toName ?? null,
-    source: "cadence_reply",
+    // 'email' — 'cadence_reply' is not in leads_source_check, so the lead
+    // insert had been failing silently and this reply never threaded.
+    source: "email",
   });
 
   // Send

@@ -25,6 +25,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { getActiveGmailToken } from "@/lib/gmail-auth";
 import { sendMessage } from "@/lib/gmail";
 import { sendSms, toE164, getTwilioConfig } from "@/lib/twilio";
+import { recordTouch } from "@/lib/cre-os/record-touch";
 import {
   personalizeTouch,
   archetypeFromContext,
@@ -436,49 +437,40 @@ export async function runCadence(options: CadenceRunOptions = {}): Promise<Caden
           .maybeSingle();
         const leadId = (leadRow as { id: string } | null)?.id ?? null;
 
-        // Dedup: skip if this Gmail message was already logged (e.g. by poll-gmail)
-        const { data: alreadyLogged } = await supabase
-          .from("communications")
-          .select("id")
-          .eq("organization_id", ORG_ID)
-          .eq("external_id", gmailMessageId)
-          .maybeSingle();
+        // recordTouch is idempotent on external_id (poll-gmail may have
+        // logged the same Gmail message already).
+        await recordTouch(supabase, {
+          channel: "email",
+          direction: "outbound",
+          contactId: contact.id,
+          leadId,                              // null if no lead yet — healed on reply
+          propertyId: property.id,
+          externalId: gmailMessageId,
+          subject,
+          body,
+          fromAddress: gmailToken!.email,
+          toAddresses: [contact.email],
+          occurredAt: sentAt ?? nowIso,
+          isRead: true,
+          // Cadence sends ARE the campaign motion. Without this the row
+          // lands with touch_kind=null on an outbound record and shows as
+          // "unclassified" in the comms dashboard.
+          touchKind: "campaign",
+          source: "cadence",
+          rawPayload: {
+            gmail_message_id: gmailMessageId,
+            gmail_thread_id: gmailThreadId,
+            lane_touch_id: newTouchId,
+            enrollment_id: enr.id,
+            lane_id: lane.id,
+            step_index: enr.current_step,
+          },
+        });
 
-        if (!alreadyLogged) {
-          await supabase.from("communications").insert({
-            organization_id: ORG_ID,
-            channel: "email",
-            direction: "outbound",
-            external_id: gmailMessageId,
-            subject,
-            body_preview: body.slice(0, 500),
-            from_address: gmailToken!.email,
-            to_addresses: [contact.email],
-            occurred_at: sentAt ?? nowIso,
-            is_read: true,
-            contact_id: contact.id,
-            lead_id: leadId,                     // null if no lead yet — healed on reply
-            property_id: property.id,
-            // Cadence sends ARE the campaign motion. Without this the row
-            // lands with touch_kind=null on an outbound record and shows as
-            // "unclassified" in the comms dashboard.
-            touch_kind: "campaign",
-            raw_payload: {
-              gmail_message_id: gmailMessageId,
-              gmail_thread_id: gmailThreadId,
-              source: "cadence",
-              lane_touch_id: newTouchId,
-              enrollment_id: enr.id,
-              lane_id: lane.id,
-              step_index: enr.current_step,
-            },
-          });
-
-          // If lead_id is null (no lead exists for this contact+property yet),
-          // this row is an orphan. It will be healed automatically when a lead
-          // is created for this contact — linkOrphanedComms fires in both
-          // maybeRouteAsReply (when they reply) and crexi-report (on import).
-        }
+        // If lead_id is null (no lead exists for this contact+property yet),
+        // this row is an orphan. It will be healed automatically when a lead
+        // is created for this contact — linkOrphanedComms fires in both
+        // maybeRouteAsReply (when they reply) and crexi-report (on import).
       }
     }
 

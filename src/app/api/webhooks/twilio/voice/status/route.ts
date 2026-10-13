@@ -23,7 +23,7 @@ import { parseTwilioWebhook } from "@/lib/twilio-webhook";
 import {
   getCallRow,
   updateCallRow,
-  findContactByPhone,
+  resolveCaller,
   ensureLeadForCall,
   notifyJohn,
 } from "@/lib/twilio-voice";
@@ -64,12 +64,12 @@ export async function POST(req: NextRequest) {
 
     if (stage === "ringing") {
       const normalizedFrom = toE164(from) ?? from;
-      const contact = await findContactByPhone(supabase, normalizedFrom, from);
+      const contact = await resolveCaller(supabase, normalizedFrom);
       const lead = await ensureLeadForCall(supabase, {
         phoneE164: normalizedFrom,
         phoneRaw: from,
-        contactId: contact?.id ?? null,
-        contactName: contact?.full_name ?? null,
+        contactId: contact.id,
+        contactName: contact.full_name,
       });
 
       await updateCallRow(
@@ -78,15 +78,13 @@ export async function POST(req: NextRequest) {
         {
           body_preview: "Missed call — caller hung up while ringing",
           ...(lead?.id ? { lead_id: lead.id } : {}),
-          ...(contact?.id ?? lead?.contact_id
-            ? { contact_id: (contact?.id ?? lead?.contact_id) as string }
-            : {}),
+          contact_id: contact.id,
           ...(lead?.property_id ? { property_id: lead.property_id } : {}),
         },
         { status: "hung_up_ringing", call_status: callStatus }
       );
 
-      const who = contact?.full_name ?? normalizedFrom;
+      const who = contact.full_name ?? normalizedFrom;
       const origin = req.nextUrl.origin;
       await notifyJohn(
         lead

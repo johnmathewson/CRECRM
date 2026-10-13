@@ -228,6 +228,29 @@ Dashboard | Intake | Comps | Valuation | Properties | Contacts | Deals | Reports
 
 ---
 
+## Record integrity — ONE way in (locked 2026-10-13)
+
+> After the Oct 2026 audit (15 write paths, each resolving identity its own way; messages filed under nobody; phones in five formats; sibling leads per person+property) the record now enforces itself. **Migration 0035** + `src/lib/cre-os/record-touch.ts`.
+
+**Rules the DB enforces (don't fight them — write through the module):**
+- `communications.contact_id` NOT NULL unless `touch_kind='internal'`; `external_id` NOT NULL (synthesized `synth:<md5>` when the channel gives none).
+- `leads.contact_id` NOT NULL unless status ∈ spam/archived/unmatched. **One open lead per (contact, property)** — `uq_leads_open_contact_property`; writers look up first, thread repeats, and catch the 23505 race by threading.
+- Phones E.164 (`^\+[1-9]\d{9,14}$`), emails lowercase — BEFORE triggers normalize on the way in; an unparseable phone goes to `notes` as `[unparsed phone: …]`, never rejected, never silently dropped.
+- Channel vocab: email · calendar · sms · phone · voice · website. Engagement signals (CREXi views/downloads) are NOT communications — they live in `activities` / `crexi_leads_state`.
+
+**How to write a person or a message:**
+```ts
+import { resolveParty, recordTouch, alarm } from "@/lib/cre-os/record-touch";
+const party = await resolveParty(sb, { email, phone, name, source: "my_writer" }); // throws if nobody identifiable
+await recordTouch(sb, { channel, direction, contactId: party.contactId, externalId, body, source: "my_writer", ... }); // throws; idempotent on external_id
+```
+- `resolveParty`: email is identity → phone+matching name → phone alone ONLY for an anonymous caller/texter → create. Fill-only on match (second phone → `contact_phones`, never overwrites).
+- `recordTouch` throws. Webhooks that must return TwiML catch and call `alarm()` (SMS to John + `email_ingest_log` row, disposition `alarm`). Never `console.error` and move on.
+- Never hand-roll `.from("communications").insert` / `.from("contacts").insert` in a server path. `find-or-create-contact.ts` (CREXi report) is the one other resolver and stays CREXi-specific.
+- Auto-ack: `scheduled_acks` drained by poll-gmail Job 2; the ack route refuses leads older than 60 min (`skipped:stale`) — a "within the hour" receipt is never sent late. Drain pauses under `OUTBOUND_FREEZE`. Give-up after 3 attempts alarms.
+- Shared read predicate `src/lib/cre-os/is-conversation.ts` (isSignal / isConversation / splitThread) — the Stream and both thread endpoints use it; add new readers there, not with a private filter.
+- Repair snapshot from the Oct 2026 cleanup lives in schema `repair_20261013` (`communications_archived`, `contacts_archived`, full table copies). Relabel/move, never delete.
+
 ## Reusable patterns already in the codebase
 
 These are solved muscles. Don't reinvent.

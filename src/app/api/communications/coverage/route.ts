@@ -30,6 +30,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { getActiveGmailToken, getActiveGmailTokens, PRIMARY_MAILBOX } from "@/lib/gmail-auth";
+import { resolveParty, recordTouch } from "@/lib/cre-os/record-touch";
 import {
   getMessage,
   getHeader,
@@ -576,35 +577,42 @@ export async function POST(req: NextRequest) {
 
       if (dryRun) continue;
 
-      const { error: insErr } = await supabase.from("communications").insert({
-        organization_id: ORG_ID,
-        lead_id: leadId,
-        contact_id: contactId,
-        property_id: propertyId,
+      // Primary mailbox, unknown counterparty: they become a contact (the
+      // business address only talks to people the CRM should know). A
+      // message with no counterparty address at all can't be filed.
+      if (!contactId) {
+        if (!counterparty) throw new Error("no counterparty address on message");
+        const counterpartyName = item.direction === "outbound" ? toParsed.name : fromParsed.name;
+        contactId = (
+          await resolveParty(supabase, { email: counterparty, name: counterpartyName, source: "coverage_backfill" })
+        ).contactId;
+      }
+
+      await recordTouch(supabase, {
         channel: "email",
-        direction: item.direction,
-        external_id: item.id,
+        direction: item.direction as "inbound" | "outbound",
+        contactId,
+        leadId,
+        propertyId,
+        externalId: item.id,
         subject,
-        body_preview: (text || "").slice(0, 500),
-        from_address: fromParsed.email,
-        ...(item.direction === "outbound" && toParsed.email
-          ? { to_addresses: [toParsed.email] }
-          : {}),
-        occurred_at: occurredAt,
+        body: text || "",
+        fromAddress: fromParsed.email,
+        toAddresses: item.direction === "outbound" && toParsed.email ? [toParsed.email] : null,
+        occurredAt,
         // Backfilled outbound defaults to 'manual' — the safest bucket; the
         // real kind is unknowable after the fact. Inbound has no touch_kind.
-        ...(item.direction === "outbound" ? { touch_kind: "manual" } : {}),
+        touchKind: item.direction === "outbound" ? "manual" : null,
         attachments: extractAttachments(msg.payload),
-        raw_payload: {
+        source: "coverage_backfill",
+        rawPayload: {
           gmail_message_id: msg.id,
           gmail_thread_id: msg.threadId,
           label_ids: msg.labelIds,
-          source: "coverage_backfill",
           mailbox: token.email,
           to_header: toHeader,
         },
       });
-      if (insErr) throw new Error(insErr.message);
       results.backfilled += 1;
     } catch (err) {
       results.errors.push({

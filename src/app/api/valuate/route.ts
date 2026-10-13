@@ -307,7 +307,6 @@ function sanitizeResult(result: ValuationResult) {
     reconciledValue: result.reconciledValue,
     narrative: result.narrative,
     disclaimers: result.disclaimers,
-    leadId: result.leadId,
   };
 }
 

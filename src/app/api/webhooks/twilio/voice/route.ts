@@ -17,7 +17,8 @@ import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { toE164 } from "@/lib/twilio";
 import { parseTwilioWebhook, twiml, escapeXml } from "@/lib/twilio-webhook";
-import { ORG_ID, forwardToNumber, findContactByPhone } from "@/lib/twilio-voice";
+import { ORG_ID, forwardToNumber, resolveCaller } from "@/lib/twilio-voice";
+import { recordTouch, alarm } from "@/lib/cre-os/record-touch";
 
 export const dynamic = "force-dynamic";
 
@@ -58,7 +59,8 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     if (!already) {
-      const contact = await findContactByPhone(supabase, normalizedFrom, from);
+      // Every call has a person behind it — a new number becomes a contact.
+      const contact = await resolveCaller(supabase, normalizedFrom);
 
       // Thread continuation: attach to an open lead for this phone if one
       // exists. Lead CREATION waits for the missed-call branch — an answered
@@ -75,33 +77,28 @@ export async function POST(req: NextRequest) {
         .limit(1);
       const lead = (openLeads ?? [])[0] ?? null;
 
-      const { error } = await supabase.from("communications").insert({
-        organization_id: ORG_ID,
-        contact_id: contact?.id ?? lead?.contact_id ?? null,
-        lead_id: lead?.id ?? null,
-        property_id: lead?.property_id ?? null,
+      await recordTouch(supabase, {
         channel: "phone",
         direction: "inbound",
-        external_id: callSid,
-        subject: `Call from ${contact?.full_name ?? normalizedFrom}`,
-        body_preview: "Incoming call — ringing",
-        from_address: normalizedFrom,
-        occurred_at: new Date().toISOString(),
-        raw_payload: {
-          source: "twilio_voice",
-          call_sid: callSid,
-          to_phone: params["To"] ?? null,
-          status: "ringing",
-        },
+        contactId: contact.id,
+        leadId: lead?.id ?? null,
+        propertyId: lead?.property_id ?? null,
+        externalId: callSid,
+        subject: `Call from ${contact.full_name ?? normalizedFrom}`,
+        body: "Incoming call — ringing",
+        fromAddress: normalizedFrom,
+        source: "twilio_voice",
+        rawPayload: { call_sid: callSid, to_phone: params["To"] ?? null, status: "ringing" },
       });
-      if (error) {
-        console.error("[twilio-voice] call mirror insert failed:", error.message);
-      }
     }
   } catch (err) {
-    console.error(
-      "[twilio-voice] DB error on inbound call (forwarding anyway):",
-      err instanceof Error ? err.message : err
+    // The phone must still ring — but a call that never reached the record
+    // is exactly what John asked never to happen silently.
+    await alarm(
+      createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!),
+      "call_inbound_not_recorded",
+      `Call from ${normalizedFrom} could not be recorded: ${err instanceof Error ? err.message : String(err)}`,
+      { call_sid: callSid }
     );
   }
 

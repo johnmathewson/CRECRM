@@ -111,7 +111,6 @@ export interface ValuationResult {
   } | null;
   narrative: string;
   disclaimers: string[];
-  leadId?: string;
 }
 
 // ── Cap Rate Tables (NWI Market) ───────────────────────────
@@ -449,21 +448,11 @@ export async function runValuation(
   // 7. Build disclaimers
   const disclaimers = buildDisclaimers(methodology, compsWithPrice.length, assetType);
 
-  // 8. Capture lead if contact info provided
-  let leadId: string | undefined;
-  if (request.contactEmail || request.contactPhone) {
-    const { data } = await supabase
-      .from("leads")
-      .insert({
-        organization_id: "a0000000-0000-0000-0000-000000000001",
-        source: "valuation_agent",
-        status: "new",
-        notes: `Valuation request: ${request.address} (${assetType})${request.contactName ? ` — ${request.contactName}` : ""}${request.contactEmail ? ` — ${request.contactEmail}` : ""}${request.contactPhone ? ` — ${request.contactPhone}` : ""}`,
-      })
-      .select("id")
-      .single();
-    leadId = data?.id;
-  }
+  // (Lead capture removed Oct 2026: it wrote a status='new' lead with no
+  // contact and no message, which the record now rejects. If the public
+  // valuation form should create leads again, POST to /api/leads/intake
+  // with source='website' so the person and the message are resolved the
+  // same way as every other inbound.)
 
   return {
     subject: {
@@ -485,7 +474,6 @@ export async function runValuation(
     reconciledValue,
     narrative,
     disclaimers,
-    leadId,
   };
 }
 

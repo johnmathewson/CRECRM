@@ -20,6 +20,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { verifyTwilioSignature, classifyInboundSms, toE164 } from "@/lib/twilio";
 import { notifyJohn } from "@/lib/twilio-voice";
+import { resolveParty, recordTouch, alarm } from "@/lib/cre-os/record-touch";
 
 export const dynamic = "force-dynamic";
 
@@ -130,39 +131,35 @@ export async function POST(req: NextRequest) {
   // branching — the universal log must not depend on which branch runs or
   // whether it succeeds. The reply-matched branch enriches this row with
   // property/lead context afterwards.
-  const { data: phoneContact } = await supabase
-    .from("contacts")
-    .select("id, full_name")
-    .eq("organization_id", ORG_ID)
-    .or(`phone.eq.${normalizedFrom},phone.eq.${from}`)
-    // One row: two contacts on the same number used to make maybeSingle()
-    // error → null → the text and its lead were created with no person.
-    .limit(1)
-    .maybeSingle();
-
-  const { data: mirrorRow, error: mirrorErr } = await supabase
-    .from("communications")
-    .insert({
-      organization_id: ORG_ID,
-      contact_id: phoneContact?.id ?? null,
+  //
+  // Every text has a person behind it. A number we've never seen becomes a
+  // contact (named by its number until we learn better) — a text filed
+  // under nobody was how replies went missing.
+  let phoneContact: { id: string; full_name: string | null } | null = null;
+  let mirrorRow: { id: string } | null = null;
+  try {
+    const party = await resolveParty(supabase, { phone: normalizedFrom, source: "twilio_sms" });
+    phoneContact = { id: party.contactId, full_name: party.name };
+    const touch = await recordTouch(supabase, {
       channel: "sms",
       direction: "inbound",
-      external_id: messageSid,
-      subject: null,
-      body_preview: body.slice(0, 500),
-      from_address: normalizedFrom,
-      occurred_at: receivedAt,
-      raw_payload: {
-        source: "twilio_webhook",
-        twilio_message_sid: messageSid,
-        to_phone: to,
-        intent,
-      },
-    })
-    .select("id")
-    .single();
-  if (mirrorErr) {
-    console.error("[twilio-webhook] comm mirror insert failed:", mirrorErr.message);
+      contactId: party.contactId,
+      externalId: messageSid,
+      body,
+      fromAddress: normalizedFrom,
+      occurredAt: receivedAt,
+      source: "twilio_webhook",
+      rawPayload: { twilio_message_sid: messageSid, to_phone: to, intent },
+    });
+    mirrorRow = { id: touch.id };
+    if (touch.duplicate) return twiml(); // retry raced the idempotency check
+  } catch (err) {
+    // Twilio still gets a 200 (it would retry forever otherwise) — but John
+    // hears about the dropped text immediately instead of never.
+    await alarm(supabase, "sms_inbound_not_recorded", `Text from ${normalizedFrom} could not be recorded: ${err instanceof Error ? err.message : String(err)}`, {
+      message_sid: messageSid,
+      body: snippet(body),
+    });
   }
 
   // ── 1. Handle STOP ───────────────────────────────────────────────────
@@ -338,22 +335,27 @@ export async function POST(req: NextRequest) {
       (existingLeads ?? [])[0] ?? null;
 
     // 3. Otherwise create a new lead so it lands in the inbox as "new".
-    if (!lead) {
-      const { data: created } = await supabase
+    // Only when the person resolved — a lead with no contact can't exist
+    // (and if 0b failed, John was already alarmed).
+    if (!lead && contact) {
+      const { data: created, error: leadErr } = await supabase
         .from("leads")
         .insert({
           organization_id: ORG_ID,
           source: "sms",
           status: "new",
-          contact_id: contact?.id ?? null,
-          sender_name: contact?.full_name ?? null,
+          contact_id: contact.id,
+          sender_name: contact.full_name ?? null,
           sender_phone: normalizedFrom,
-          raw_subject: `Text from ${contact?.full_name ?? normalizedFrom}`,
+          raw_subject: `Text from ${contact.full_name ?? normalizedFrom}`,
           raw_body: body,
           urgency: "warm",
         })
         .select("id, status, contact_id, property_id")
         .maybeSingle();
+      if (leadErr) {
+        await alarm(supabase, "sms_lead_insert", leadErr.message, { from: normalizedFrom, message_sid: messageSid });
+      }
       lead = created ?? null;
     }
 
@@ -391,7 +393,7 @@ export async function POST(req: NextRequest) {
       activity_type: "text",
       subject: lead
         ? `SMS from ${contact?.full_name ?? normalizedFrom}`
-        : `Unmatched SMS from ${normalizedFrom} (lead insert failed)`,
+        : `SMS from ${normalizedFrom} (no lead row — see alarm)`,
       body,
       occurred_at: receivedAt,
       contact_id: contact?.id ?? null,

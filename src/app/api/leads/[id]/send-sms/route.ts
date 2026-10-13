@@ -16,6 +16,7 @@ import { createClient } from "@supabase/supabase-js";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { sendSms, toE164 } from "@/lib/twilio";
 import { captureVoiceExample } from "@/lib/cre-os/voice-examples";
+import { resolveParty, recordTouch, alarm } from "@/lib/cre-os/record-touch";
 
 export const dynamic = "force-dynamic";
 
@@ -98,28 +99,38 @@ export async function POST(
   const now = new Date().toISOString();
 
   // Thread into communications (the lead detail's conversation thread).
-  await supabase.from("communications").insert({
-    organization_id: ORG_ID,
-    channel: "sms",
-    direction: "outbound",
-    external_id: result.messageSid,
-    subject: null,
-    body_preview: body,
-    from_address: process.env.TWILIO_FROM_NUMBER ?? null,
-    to_addresses: [to],
-    occurred_at: now,
-    lead_id: lead.id,
-    contact_id: lead.contact_id ?? null,
-    property_id: lead.property_id ?? null,
-    touch_kind: "manual",
-    raw_payload: {
+  // The text is already out the door — the record must land regardless, so
+  // a lead that somehow lacks its person gets one resolved from the number.
+  try {
+    const contactId =
+      lead.contact_id ??
+      (await resolveParty(supabase, { phone: to, name: lead.sender_name, source: "send_sms" })).contactId;
+    await recordTouch(supabase, {
+      channel: "sms",
+      direction: "outbound",
+      contactId,
+      leadId: lead.id,
+      propertyId: lead.property_id ?? null,
+      externalId: result.messageSid,
+      body,
+      fromAddress: process.env.TWILIO_FROM_NUMBER ?? null,
+      toAddresses: [to],
+      occurredAt: now,
+      touchKind: "manual",
       source: "manual",
-      via: "inbox-sms-composer",
-      twilio_message_sid: result.messageSid,
-      twilio_status: result.status,
-      test_mode_rerouted: result.rerouted,
-    },
-  });
+      rawPayload: {
+        via: "inbox-sms-composer",
+        twilio_message_sid: result.messageSid,
+        twilio_status: result.status,
+        test_mode_rerouted: result.rerouted,
+      },
+    });
+  } catch (err) {
+    await alarm(supabase, "sms_outbound_not_recorded", `Sent text to ${to} but could not record it: ${err instanceof Error ? err.message : String(err)}`, {
+      lead_id: lead.id,
+      message_sid: result.messageSid,
+    });
+  }
 
   // Feed the voice-learning loop — John's real texts teach the SMS drafts.
   // Best-effort: never blocks the send (already out the door anyway).
@@ -131,13 +142,14 @@ export async function POST(
     sentAt: now,
   });
 
-  // A texted reply counts as acknowledging the lead. Don't downgrade
-  // later states (sent/archived/spam).
+  // A texted reply counts as contacting the lead. Don't downgrade later
+  // states (sent/archived/spam). NB: 'contacted' — the old 'acknowledged'
+  // is not in leads_status_check, so that update had been failing silently.
   const status = (lead.status ?? "").toLowerCase();
   if (status === "new") {
     await supabase
       .from("leads")
-      .update({ status: "acknowledged", updated_at: now })
+      .update({ status: "contacted", updated_at: now })
       .eq("id", lead.id);
   }
 

@@ -14,6 +14,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendSms } from "@/lib/twilio";
+import { resolveParty } from "@/lib/cre-os/record-touch";
 
 export const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 
@@ -70,18 +71,15 @@ export async function updateCallRow(
   }
 }
 
-export async function findContactByPhone(
+/** The person behind a call. A number we've never seen becomes a contact
+ *  named by its number — every call row has a person. Throws when the
+ *  number can't even be normalized (callers catch + alarm). */
+export async function resolveCaller(
   sb: SupabaseClient,
-  phoneE164: string,
-  phoneRaw: string
-): Promise<{ id: string; full_name: string | null } | null> {
-  const { data } = await sb
-    .from("contacts")
-    .select("id, full_name")
-    .eq("organization_id", ORG_ID)
-    .or(`phone.eq.${phoneE164},phone.eq.${phoneRaw}`)
-    .maybeSingle();
-  return data ?? null;
+  phoneE164: string
+): Promise<{ id: string; full_name: string | null }> {
+  const party = await resolveParty(sb, { phone: phoneE164, source: "twilio_voice" });
+  return { id: party.contactId, full_name: party.name };
 }
 
 /** Same threading rule as the SMS webhook: an open lead for this phone
@@ -92,7 +90,7 @@ export async function ensureLeadForCall(
   opts: {
     phoneE164: string;
     phoneRaw: string;
-    contactId: string | null;
+    contactId: string;
     contactName: string | null;
   }
 ): Promise<{ id: string; contact_id: string | null; property_id: string | null } | null> {

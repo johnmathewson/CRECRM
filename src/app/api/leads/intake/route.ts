@@ -30,6 +30,7 @@ import { matchProperty, MATCH_CONFIDENCE_THRESHOLD } from "@/lib/property-match"
 import { draftLeadReply } from "@/lib/draft-lead-reply";
 import { linkOrphanedComms } from "@/lib/cre-os/send-crm-email";
 import { toE164 } from "@/lib/twilio";
+import { resolveParty, recordTouch, alarm, type TouchChannel } from "@/lib/cre-os/record-touch";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // Netlify Pro: up to 60s. Two Claude calls can run long.
@@ -118,7 +119,7 @@ function svc() {
  * silently and 231 CREXi leads ended up with no inbound communications
  * row. Never pass a raw source through as channel.
  */
-function channelForSource(source: string): string {
+function channelForSource(source: string): TouchChannel {
   switch (source) {
     case "email":
       return "email";
@@ -154,96 +155,32 @@ async function recordEvent(
   });
 }
 
+/**
+ * The person behind the inbound. Identity rules live in resolveParty (email
+ * first; phone only with a matching name or for a truly anonymous sender).
+ * Throws when nobody can be identified — the caller turns that into a 500
+ * so the sender (Apps Script, Twilio) retries instead of the message
+ * landing with no person attached.
+ */
 async function upsertContact(
   supabase: any,
   q: QualificationResult,
+  source: string,
   fallbackName: string | null,
   fallbackEmail: string | null,
   fallbackPhone: string | null
-): Promise<string | null> {
-  const email = q.sender_email_clean || fallbackEmail || null;
-  const phone = q.sender_phone_clean || fallbackPhone || null;
-  const name = q.sender_name_clean || fallbackName || email || phone || "Unknown lead";
-
-  if (!email && !phone) {
-    // Anonymous — create a fresh contact
-    const { data, error } = await supabase
-      .from("contacts")
-      .insert({
-        organization_id: ORG_ID,
-        full_name: name,
-        contact_type: "prospect",
-        warmth: q.urgency === "hot" ? "hot" : q.urgency === "cold" ? "cold" : "warm",
-        last_conversation: new Date().toISOString().slice(0, 10),
-      })
-      .select("id")
-      .single();
-    if (error) {
-      console.error("Anonymous contact create failed:", error);
-      return null;
-    }
-    return data?.id || null;
+): Promise<string> {
+  const party = await resolveParty(supabase, {
+    email: q.sender_email_clean || fallbackEmail || null,
+    phone: q.sender_phone_clean || fallbackPhone || null,
+    name: q.sender_name_clean || fallbackName || null,
+    source: `intake:${source}`,
+    warmth: q.urgency === "hot" ? "hot" : q.urgency === "cold" ? "cold" : "warm",
+  });
+  if (q.urgency === "hot" && !party.created) {
+    await supabase.from("contacts").update({ warmth: "hot" }).eq("id", party.contactId).neq("warmth", "hot");
   }
-
-  // Look up by email first, then phone
-  let existing: any = null;
-  if (email) {
-    const { data } = await supabase
-      .from("contacts")
-      .select("id, warmth")
-      .eq("organization_id", ORG_ID)
-      // Case-insensitive exact match. Escape % and _ (ilike wildcards — an
-      // address with "_" used to match other people) and cap at one row so
-      // a pre-existing duplicate can't error the lookup into creating a third.
-      .ilike("email", email.trim().replace(/[%_]/g, (c) => "\\" + c))
-      .limit(1)
-      .maybeSingle();
-    if (data) existing = data;
-  }
-  // Phone is identity ONLY when there is no email. With an email present
-  // that didn't match, this is a new person — merging them into whoever
-  // shares an office line (the old behavior) filed their leads and messages
-  // under the wrong contact and silently dropped their email.
-  if (!existing && phone && !email) {
-    const { data } = await supabase
-      .from("contacts")
-      .select("id, warmth")
-      .eq("organization_id", ORG_ID)
-      .eq("phone", phone)
-      .maybeSingle();
-    if (data) existing = data;
-  }
-
-  if (existing) {
-    // Update last_conversation; bump warmth if hot
-    const updates: Record<string, any> = {
-      last_conversation: new Date().toISOString().slice(0, 10),
-    };
-    if (q.urgency === "hot" && existing.warmth !== "hot") updates.warmth = "hot";
-    await supabase.from("contacts").update(updates).eq("id", existing.id);
-    return existing.id;
-  }
-
-  // Create new
-  const { data: created, error } = await supabase
-    .from("contacts")
-    .insert({
-      organization_id: ORG_ID,
-      full_name: name,
-      email,
-      phone,
-      contact_type: "other",
-      relationship_type: "prospect",
-      warmth: q.urgency === "hot" ? "hot" : q.urgency === "cold" ? "cold" : "warm",
-      last_conversation: new Date().toISOString().slice(0, 10),
-    })
-    .select("id")
-    .single();
-  if (error) {
-    console.error("Contact create failed:", error);
-    return null;
-  }
-  return created?.id || null;
+  return party.contactId;
 }
 
 // ── Handler ─────────────────────────────────────────────────────────────────
@@ -342,27 +279,16 @@ export async function POST(req: NextRequest) {
       })
       .select("id")
       .single();
+    // The spam lead row (raw_subject + raw_body above) IS the record. No
+    // communications row and no contact: a message is filed under a person,
+    // and a spammer is not a person we keep. Nothing is lost — the full
+    // body sits on the lead for audit.
     if (lead) {
       await recordEvent(supabase, lead.id, "spam_flagged", "agent", spamCheck.reasons.join("; "), {
         verdict: "spam",
         reasons: spamCheck.reasons,
+        source_message_id: body.source_message_id ?? null,
       });
-      const { error: commErr } = await supabase.from("communications").insert({
-        organization_id: ORG_ID,
-        lead_id: lead.id,
-        channel: channelForSource(body.source),
-        direction: "inbound",
-        external_id: body.source_message_id || null,
-        subject: body.raw_subject || null,
-        body_preview: (body.raw_body || "").slice(0, 500),
-        from_address: body.sender_email || body.sender_phone || null,
-        occurred_at: new Date().toISOString(),
-        attachments: body.attachments ?? [],
-        raw_payload: { ...(body.raw_payload || {}), lead_source: body.source },
-      });
-      if (commErr) {
-        console.error("[leads/intake] spam comm insert failed:", commErr.message);
-      }
     }
     return NextResponse.json({
       lead_id: lead?.id || null,
@@ -419,38 +345,53 @@ ${body.raw_body || "(empty)"}`;
   const matched = matchResult.confidence >= MATCH_CONFIDENCE_THRESHOLD ? matchResult.property : null;
 
   // ── 4. Contact upsert ────────────────────────────────────────────────────
-  const contactId = await upsertContact(
-    supabase,
-    qualification,
-    body.sender_name || null,
-    body.sender_email || null,
-    body.sender_phone || null
-  );
+  let contactId: string;
+  try {
+    contactId = await upsertContact(
+      supabase,
+      qualification,
+      body.source,
+      body.sender_name || null,
+      body.sender_email || null,
+      body.sender_phone || null
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await alarm(supabase, "intake_no_party", `Inbound ${body.source} could not be tied to a person: ${message}`, {
+      source: body.source,
+      source_message_id: body.source_message_id ?? null,
+      subject: body.raw_subject ?? null,
+    });
+    // 500 → the sender retries; the message stays in the mailbox/Twilio log.
+    return NextResponse.json({ error: `Could not identify the sender: ${message}` }, { status: 500 });
+  }
 
   // ── 4b. Thread repeat inquiries into the existing open lead ──────────────
-  // Same person + same property (or both property-less) within 30 days is a
-  // continuation of ONE conversation, not a new lead. Without this, every
-  // repeat submission minted a sibling lead (Kamini Patel accumulated five)
-  // and the person's thread got scattered across lead files. Same 30-day
-  // window rule as the SMS webhook.
-  const threadEmail = qualification.sender_email_clean || body.sender_email || null;
-  if (threadEmail && !isLikelySpam) {
-    let threadQuery = supabase
+  // Same person + same property (or both property-less) is a continuation
+  // of ONE conversation, not a new lead. Without this, every repeat
+  // submission minted a sibling lead (Kamini Patel accumulated five) and
+  // the person's thread got scattered across lead files.
+  // ONE open lead per person per property — enforced by the DB (migration
+  // 0035, uq_leads_open_contact_property). No time window: a person who
+  // comes back about the same property six months later continues the same
+  // conversation. Matched on the resolved contact, not the typed email.
+  const findOpenLead = async () => {
+    let q = supabase
       .from("leads")
       .select("id, raw_body, status")
       .eq("organization_id", ORG_ID)
-      .ilike("sender_email", threadEmail.trim())
-      .not("status", "in", '("archived","spam")')
-      .gte("created_at", new Date(Date.now() - 30 * 86_400_000).toISOString())
+      .eq("contact_id", contactId)
+      .not("status", "in", '("archived","spam","converted","promoted","dead")')
       .order("created_at", { ascending: false })
       .limit(1);
-    threadQuery = matched
-      ? threadQuery.eq("property_id", matched.id)
-      : threadQuery.is("property_id", null);
-    const { data: openLeads } = await threadQuery;
-    const openLead = (openLeads ?? [])[0] ?? null;
+    q = matched ? q.eq("property_id", matched.id) : q.is("property_id", null);
+    const { data } = await q;
+    return ((data ?? [])[0] ?? null) as { id: string; raw_body: string | null; status: string | null } | null;
+  };
 
-    if (openLead) {
+  // Two webhooks for the same person can race past findOpenLead(); the
+  // unique index then rejects the second insert and we thread it instead.
+  const threadInto = async (openLead: { id: string; raw_body: string | null; status: string | null }) => {
       const stamp = new Date().toISOString().slice(0, 16).replace("T", " ") + "Z";
       const entry = `[repeat inquiry ${stamp}] ${body.raw_subject || ""}\n${body.raw_body || ""}`.trim();
       await supabase
@@ -467,22 +408,27 @@ ${body.raw_body || "(empty)"}`;
         })
         .eq("id", openLead.id);
 
-      const { error: threadCommErr } = await supabase.from("communications").insert({
-        organization_id: ORG_ID,
-        lead_id: openLead.id,
-        contact_id: contactId,
-        channel: channelForSource(body.source),
-        direction: "inbound",
-        external_id: body.source_message_id || null,
-        subject: body.raw_subject || null,
-        body_preview: (body.raw_body || "").slice(0, 500),
-        from_address: body.sender_email || body.sender_phone || null,
-        occurred_at: new Date().toISOString(),
-        attachments: body.attachments ?? [],
-        raw_payload: { ...(body.raw_payload || {}), lead_source: body.source, repeat_inquiry: true },
-      });
-      if (threadCommErr) {
-        console.error("[leads/intake] threaded comm insert failed:", threadCommErr.message);
+      try {
+        await recordTouch(supabase, {
+          channel: channelForSource(body.source),
+          direction: "inbound",
+          contactId,
+          leadId: openLead.id,
+          propertyId: matched?.id ?? null,
+          externalId: body.source_message_id || null,
+          subject: body.raw_subject || null,
+          body: body.raw_body || "",
+          fromAddress: body.sender_email || body.sender_phone || null,
+          attachments: body.attachments ?? [],
+          source: `intake:${body.source}`,
+          rawPayload: { ...(body.raw_payload || {}), lead_source: body.source, repeat_inquiry: true },
+        });
+      } catch (err) {
+        // The lead's raw_body already holds the text; the row is what's missing.
+        await alarm(supabase, "intake_comm_insert", err instanceof Error ? err.message : String(err), {
+          lead_id: openLead.id,
+          source_message_id: body.source_message_id ?? null,
+        });
       }
 
       await recordEvent(
@@ -505,7 +451,11 @@ ${body.raw_body || "(empty)"}`;
           ? { id: matched.id, name: matched.name, slug: matched.slug }
           : null,
       });
-    }
+  };
+
+  if (!isLikelySpam) {
+    const openLead = await findOpenLead();
+    if (openLead) return threadInto(openLead);
   }
 
   // ── 5. Insert lead row ────────────────────────────────────────────────────
@@ -533,8 +483,17 @@ ${body.raw_body || "(empty)"}`;
     .select("id")
     .single();
 
+  if (leadErr?.code === "23505" && !isLikelySpam) {
+    // Lost the race to a concurrent intake for the same person+property.
+    const openLead = await findOpenLead();
+    if (openLead) return threadInto(openLead);
+  }
   if (leadErr || !leadInsert) {
-    console.error("Lead insert failed:", leadErr);
+    await alarm(supabase, "intake_lead_insert", leadErr?.message ?? "no row returned", {
+      source: body.source,
+      source_message_id: body.source_message_id ?? null,
+      contact_id: contactId,
+    });
     return NextResponse.json(
       { error: `Lead persist failed: ${leadErr?.message}` },
       { status: 500 }
@@ -551,24 +510,28 @@ ${body.raw_body || "(empty)"}`;
   await linkOrphanedComms(supabase, leadId, resolvedSenderEmail, matched?.id ?? null);
 
   // ── 6. Inbound communication ─────────────────────────────────────────────
-  const { error: commErr } = await supabase.from("communications").insert({
-    organization_id: ORG_ID,
-    lead_id: leadId,
-    contact_id: contactId,
-    channel: channelForSource(body.source),
-    direction: "inbound",
-    external_id: body.source_message_id || null,
-    subject: body.raw_subject || null,
-    body_preview: (body.raw_body || "").slice(0, 500),
-    from_address: body.sender_email || body.sender_phone || null,
-    occurred_at: new Date().toISOString(),
-    attachments: body.attachments ?? [],
-    raw_payload: { ...(body.raw_payload || {}), lead_source: body.source },
-  });
-  if (commErr) {
-    // Loud, not silent — a missing comm row is exactly the kind of gap the
-    // coverage check exists to catch.
-    console.error("[leads/intake] comm insert failed:", commErr.message);
+  try {
+    await recordTouch(supabase, {
+      channel: channelForSource(body.source),
+      direction: "inbound",
+      contactId,
+      leadId,
+      propertyId: matched?.id ?? null,
+      externalId: body.source_message_id || null,
+      subject: body.raw_subject || null,
+      body: body.raw_body || "",
+      fromAddress: body.sender_email || body.sender_phone || null,
+      attachments: body.attachments ?? [],
+      source: `intake:${body.source}`,
+      rawPayload: { ...(body.raw_payload || {}), lead_source: body.source },
+    });
+  } catch (err) {
+    // Loud, not silent — the lead row exists (raw_body intact); the thread
+    // row is what's missing, and John hears about it.
+    await alarm(supabase, "intake_comm_insert", err instanceof Error ? err.message : String(err), {
+      lead_id: leadId,
+      source_message_id: body.source_message_id ?? null,
+    });
   }
 
   // ── 7. Events: received + qualified + match outcome ──────────────────────

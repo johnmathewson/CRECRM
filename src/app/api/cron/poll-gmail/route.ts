@@ -31,6 +31,10 @@ import {
 } from "@/lib/gmail";
 import { maybeRouteAsReply, routeAsReplyByEmail } from "@/lib/cre-os/match-reply-to-touch";
 import { captureVoiceExample } from "@/lib/cre-os/voice-examples";
+import { resolveParty, recordTouch, alarm } from "@/lib/cre-os/record-touch";
+
+/** Auto-ack retries before giving up (and alarming). */
+const ACK_MAX_ATTEMPTS = 3;
 import {
   classifyInboundEmail,
   collectAttachmentFilenames,
@@ -599,15 +603,20 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
   }
 
   // ── Job 2: Drain scheduled_acks ──────────────────────────────────────────
+  // A send freeze (OUTBOUND_FREEZE) leaves the queue untouched: attempts
+  // aren't burned, and when the freeze lifts the ack route itself refuses
+  // anything older than an hour (skipped:'stale'), so nothing goes out late.
   try {
-    const { data: due } = await supabase
-      .from("scheduled_acks")
-      .select("id, lead_id, attempts")
-      .lte("send_after", new Date().toISOString())
-      .is("sent_at", null)
-      .lt("attempts", 3)
-      .order("send_after", { ascending: true })
-      .limit(20);
+    const { data: due } = process.env.OUTBOUND_FREEZE === "true"
+      ? { data: [] as { id: string; lead_id: string; attempts: number | null }[] }
+      : await supabase
+          .from("scheduled_acks")
+          .select("id, lead_id, attempts")
+          .lte("send_after", new Date().toISOString())
+          .is("sent_at", null)
+          .lt("attempts", ACK_MAX_ATTEMPTS)
+          .order("send_after", { ascending: true })
+          .limit(20);
 
     let drained = 0;
     let failed = 0;
@@ -615,11 +624,13 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
 
     for (const ack of due || []) {
       // Increment attempts before sending so a crash mid-send doesn't loop forever
+      const attempt = (ack.attempts || 0) + 1;
       await supabase
         .from("scheduled_acks")
-        .update({ attempts: (ack.attempts || 0) + 1 })
+        .update({ attempts: attempt })
         .eq("id", ack.id);
 
+      let errorText: string | null = null;
       try {
         const res = await fetch(`${origin}/api/leads/${ack.lead_id}/ack`, {
           method: "POST",
@@ -632,22 +643,31 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
         if (res.ok && (body.ok || body.already_sent || body.skipped)) {
           await supabase
             .from("scheduled_acks")
-            .update({ sent_at: new Date().toISOString(), error: null })
+            .update({
+              sent_at: new Date().toISOString(),
+              // A skip is not a send — keep the reason so the ledger is honest.
+              error: body.skipped ? `skipped:${body.skipped}` : null,
+            })
             .eq("id", ack.id);
           drained += 1;
         } else {
-          await supabase
-            .from("scheduled_acks")
-            .update({ error: body.error || `HTTP ${res.status}` })
-            .eq("id", ack.id);
-          failed += 1;
+          errorText = body.error || `HTTP ${res.status}`;
         }
       } catch (err: any) {
-        await supabase
-          .from("scheduled_acks")
-          .update({ error: err.message || "unknown" })
-          .eq("id", ack.id);
+        errorText = err.message || "unknown";
+      }
+
+      if (errorText) {
+        await supabase.from("scheduled_acks").update({ error: errorText }).eq("id", ack.id);
         failed += 1;
+        // Last attempt just failed: this lead will never be acknowledged
+        // automatically. That used to be silent — John finds out now.
+        if (attempt >= ACK_MAX_ATTEMPTS) {
+          await alarm(supabase, "ack_gave_up", `Auto-ack for lead ${ack.lead_id} failed ${attempt}× (${errorText}) — reply by hand.`, {
+            lead_id: ack.lead_id,
+            scheduled_ack_id: ack.id,
+          });
+        }
       }
     }
 
@@ -709,7 +729,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
           const msg = await getMessage(acct.accessToken, ref.id);
           const toHeader = getHeader(msg.payload, "To");
           const subject = getHeader(msg.payload, "Subject");
-          const { email: toEmail } = parseAddress(toHeader);
+          const { email: toEmail, name: toName } = parseAddress(toHeader);
 
           // Skip messages without a real recipient, or sent between our own
           // mailboxes (inquiries@ ↔ john@ is internal plumbing, not a touch)
@@ -764,33 +784,39 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
             skipped++;
             continue;
           }
+          // Primary mailbox: someone John wrote to from the business address
+          // is a person the CRM should know. Create the contact.
+          if (!resolvedContactId) {
+            resolvedContactId = (
+              await resolveParty(supabase, { email: toEmail, name: toName, source: "gmail_sent_sync" })
+            ).contactId;
+          }
 
           const { text: bodyText } = extractBody(msg.payload);
-          await supabase.from("communications").insert({
-            organization_id: ORG_ID,
-            lead_id: (matchedLead?.id as string | null) ?? null,
+          await recordTouch(supabase, {
+            channel: "email",
+            direction: "outbound",
             // For outbound mail WE are the sender, so the counterparty is the
             // recipient — from the matched lead's contact, or the direct
             // address lookup above.
-            contact_id: resolvedContactId,
-            property_id: (matchedLead?.property_id as string | null) ?? null,
-            channel: "email",
-            direction: "outbound",
-            external_id: ref.id,
+            contactId: resolvedContactId,
+            leadId: (matchedLead?.id as string | null) ?? null,
+            propertyId: (matchedLead?.property_id as string | null) ?? null,
+            externalId: ref.id,
             subject,
-            body_preview: bodyText.slice(0, 500),
-            from_address: acct.email,
-            to_addresses: [toEmail],
-            occurred_at: sentAt,
+            body: bodyText,
+            fromAddress: acct.email,
+            toAddresses: [toEmail],
+            occurredAt: sentAt,
             // Sent by hand from Gmail, outside the CRM — that's the "manual"
             // motion regardless of whether it happened to match a lead.
-            touch_kind: "manual",
+            touchKind: "manual",
             attachments: extractAttachments(msg.payload),
-            raw_payload: {
+            source: "gmail_sent_sync",
+            rawPayload: {
               gmail_message_id: ref.id,
               gmail_thread_id: msg.threadId,
               label_ids: msg.labelIds,
-              source: "gmail_sent_sync",
               mailbox: acct.email,
               matched_lead: !!matchedLead,
             },

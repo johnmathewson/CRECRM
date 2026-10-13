@@ -18,7 +18,7 @@ import { parseTwilioWebhook, twiml, escapeXml } from "@/lib/twilio-webhook";
 import {
   getCallRow,
   updateCallRow,
-  findContactByPhone,
+  resolveCaller,
   ensureLeadForCall,
   notifyJohn,
 } from "@/lib/twilio-voice";
@@ -81,12 +81,12 @@ export async function POST(req: NextRequest) {
 
     // ── Missed → ensure inbox lead + notify, then voicemail prompt ──────
     const normalizedFrom = toE164(from) ?? from;
-    const contact = await findContactByPhone(supabase, normalizedFrom, from);
+    const contact = await resolveCaller(supabase, normalizedFrom);
     const lead = await ensureLeadForCall(supabase, {
       phoneE164: normalizedFrom,
       phoneRaw: from,
-      contactId: contact?.id ?? null,
-      contactName: contact?.full_name ?? null,
+      contactId: contact.id,
+      contactName: contact.full_name,
     });
 
     if (row) {
@@ -96,16 +96,14 @@ export async function POST(req: NextRequest) {
         {
           body_preview: "Missed call — sent to voicemail",
           ...(lead?.id ? { lead_id: lead.id } : {}),
-          ...(contact?.id ?? lead?.contact_id
-            ? { contact_id: (contact?.id ?? lead?.contact_id) as string }
-            : {}),
+          contact_id: contact.id,
           ...(lead?.property_id ? { property_id: lead.property_id } : {}),
         },
         { status: "voicemail_prompt", dial_status: dialStatus }
       );
     }
 
-    const who = contact?.full_name ?? normalizedFrom;
+    const who = contact.full_name ?? normalizedFrom;
     await notifyJohn(
       lead
         ? `Missed call on the business line from ${who}. Voicemail + transcript will land here: ${origin}/cre-os/inbox/${lead.id}`

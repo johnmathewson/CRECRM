@@ -26,6 +26,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { resolveParty, recordTouch } from "@/lib/cre-os/record-touch";
 
 export const dynamic = "force-dynamic";
 
@@ -84,7 +85,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   // Load lead → we need contact_id + property_id + current notes to append.
   const { data: lead, error: leadErr } = await sb
     .from("leads")
-    .select("id, contact_id, property_id, notes, sender_phone")
+    .select("id, contact_id, property_id, notes, sender_phone, sender_name")
     .eq("id", params.id)
     .eq("organization_id", ORG_ID)
     .maybeSingle();
@@ -121,29 +122,35 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   // duration); this row makes the touch filterable alongside email/SMS.
   // external_id call_log:<id> keeps it idempotent if this ever re-runs.
   const isInboundText = channel === "text" && body.outcome === "reply_received";
-  const { error: commErr } = await sb.from("communications").insert({
-    organization_id: ORG_ID,
-    lead_id: lead.id,
-    contact_id: lead.contact_id,
-    property_id: lead.property_id,
-    channel: channel === "text" ? "sms" : "phone",
-    direction: isInboundText ? "inbound" : "outbound",
-    external_id: `call_log:${log.id}`,
-    subject: null,
-    body_preview: notes ?? `${channel === "text" ? "Text" : "Call"}: ${body.outcome}`,
-    from_address: isInboundText ? lead.sender_phone ?? null : null,
-    ...(isInboundText ? {} : lead.sender_phone ? { to_addresses: [lead.sender_phone] } : {}),
-    occurred_at: calledAt,
-    ...(isInboundText ? {} : { touch_kind: "manual" }),
-    raw_payload: {
+  try {
+    const contactId =
+      lead.contact_id ??
+      (await resolveParty(sb, { phone: lead.sender_phone, name: lead.sender_name, source: "call_log" })).contactId;
+    await recordTouch(sb, {
+      channel: channel === "text" ? "sms" : "phone",
+      direction: isInboundText ? "inbound" : "outbound",
+      contactId,
+      leadId: lead.id,
+      propertyId: lead.property_id,
+      externalId: `call_log:${log.id}`,
+      body: notes ?? `${channel === "text" ? "Text" : "Call"}: ${body.outcome}`,
+      fromAddress: isInboundText ? lead.sender_phone ?? null : null,
+      toAddresses: !isInboundText && lead.sender_phone ? [lead.sender_phone] : null,
+      occurredAt: calledAt,
+      touchKind: isInboundText ? null : "manual",
       source: "call_log",
-      call_log_id: log.id,
-      outcome: body.outcome,
-      duration_seconds: body.duration_seconds ?? null,
-    },
-  });
-  if (commErr) {
-    console.error("[log-call] comm mirror insert failed:", commErr.message);
+      rawPayload: {
+        call_log_id: log.id,
+        outcome: body.outcome,
+        duration_seconds: body.duration_seconds ?? null,
+      },
+    });
+  } catch (err) {
+    // call_logs already holds the touch; surface the gap to the broker.
+    return NextResponse.json(
+      { error: `Call saved but not threaded: ${err instanceof Error ? err.message : String(err)}` },
+      { status: 500 }
+    );
   }
 
   // Append the touch to lead.notes so it's visible on the existing

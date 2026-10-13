@@ -132,7 +132,10 @@ export async function findOrCreateContact(
       .from("contacts")
       .select("id")
       .eq("organization_id", ORG_ID)
-      .ilike("email", email)
+      // Wildcards escaped + one row: an address with "_" matched other
+      // people, and a pre-existing dupe errored maybeSingle() into a third.
+      .ilike("email", email.replace(/[%_\\]/g, (c) => "\\" + c))
+      .limit(1)
       .maybeSingle();
     if (byEmail) {
       // Backfill anything missing on the existing contact
@@ -144,7 +147,7 @@ export async function findOrCreateContact(
         .maybeSingle();
       if (existing) {
         if (!existing.full_name && name) updates.full_name = name;
-        if (!existing.phone && lead.phone) updates.phone = lead.phone;
+        if (!existing.phone && phone) updates.phone = phone;
         if (!existing.role && lead.role) updates.role = lead.role;
         // contacts.company doesn't exist on every schema variant — only set
         // it via the notes field via COALESCE to be safe.
@@ -195,7 +198,7 @@ export async function findOrCreateContact(
     organization_id: ORG_ID,
     full_name: name || "(unknown)",
     role: lead.role || null,
-    phone: lead.phone || null,
+    phone, // E.164 or null — never the raw CREXi string
     email,
     contact_type: inferContactType(lead.role),
     relationship_type: "prospect",

@@ -15,6 +15,7 @@ import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "@/lib/cors";
 import { draftLeadReply } from "@/lib/draft-lead-reply";
 import { toE164 } from "@/lib/twilio";
+import { resolveParty, recordTouch, alarm } from "@/lib/cre-os/record-touch";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // Sonnet drafting can be slow
@@ -88,66 +89,47 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ── Upsert contact by email ─────────────────────────────────────────────
-  let contactId: string | null = null;
-  const { data: existingContact } = await supabase
-    .from("contacts")
-    .select("id, full_name, phone, relationship_type")
-    .eq("organization_id", ORG_ID)
-    // Case-insensitive, wildcard-escaped, one row: the exact-case .eq()
-    // missed mixed-case stored emails and minted duplicates.
-    .ilike("email", body.email.trim().replace(/[%_]/g, (c) => "\\" + c))
-    .limit(1)
-    .maybeSingle();
-
-  if (existingContact) {
-    contactId = existingContact.id;
-    // FILL BLANKS ONLY. This is an unauthenticated public form: it may add a
-    // missing phone or name, but it must never overwrite curated data —
-    // anyone who knew a client's email could rewrite that client's record.
-    const fill: Record<string, unknown> = {
-      last_conversation: new Date().toISOString().slice(0, 10),
-    };
-    if (!existingContact.full_name && body.full_name?.trim()) fill.full_name = body.full_name.trim();
-    if (!existingContact.phone && body.phone) fill.phone = body.phone;
-    if (!existingContact.relationship_type) fill.relationship_type = "prospect";
-    await supabase.from("contacts").update(fill).eq("id", contactId);
-  } else {
-    const { data: newContact } = await supabase
-      .from("contacts")
-      .insert({
-        organization_id: ORG_ID,
-        full_name: body.full_name.trim(),
-        email: body.email.toLowerCase(),
+  // ── Resolve the person by email ─────────────────────────────────────────
+  // resolveParty is FILL-ONLY on a match. This is an unauthenticated public
+  // form: it may add a missing phone or name, but it must never overwrite
+  // curated data — anyone who knew a client's email could rewrite that
+  // client's record.
+  let contactId: string;
+  try {
+    contactId = (
+      await resolveParty(supabase, {
+        email: body.email,
         phone: body.phone || null,
-        contact_type: "other",
-        relationship_type: "prospect",
-        warmth: "warm",
-        last_conversation: new Date().toISOString().slice(0, 10),
+        name: body.full_name,
+        company: body.company || null,
+        source: "questionnaire",
       })
-      .select("id")
-      .single();
-    contactId = newContact?.id || null;
+    ).contactId;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await alarm(supabase, "questionnaire_no_party", message, { email: body.email, property: body.property_slug });
+    return NextResponse.json({ error: "Could not save your details — please try again." }, { status: 500, headers: corsHeaders(origin) });
   }
 
   // ── Thread repeat submissions into the existing open lead ───────────────
-  // A returning person re-submitting the form for the SAME property must
-  // never mint a sibling lead (Kamini Patel accumulated five this way —
-  // her conversation got scattered across lead files). 30-day window,
-  // same rule as email intake + the SMS webhook. A different property
+  // ONE open lead per person per property (DB-enforced, migration 0035).
+  // A returning person re-submitting the form for the SAME property never
+  // mints a sibling lead (Kamini Patel accumulated five this way — her
+  // conversation got scattered across lead files). A different property
   // still gets its own lead.
-  const threadCutoff = new Date(Date.now() - 30 * 86_400_000).toISOString();
-  const { data: openLeads } = await supabase
-    .from("leads")
-    .select("id, raw_body, status")
-    .eq("organization_id", ORG_ID)
-    .ilike("sender_email", body.email.trim())
-    .eq("property_id", property.id)
-    .not("status", "in", '("archived","spam")')
-    .gte("created_at", threadCutoff)
-    .order("created_at", { ascending: false })
-    .limit(1);
-  const openLead = (openLeads ?? [])[0] ?? null;
+  const findOpenLead = async () => {
+    const { data } = await supabase
+      .from("leads")
+      .select("id, raw_body, status")
+      .eq("organization_id", ORG_ID)
+      .eq("contact_id", contactId)
+      .eq("property_id", property.id)
+      .not("status", "in", '("archived","spam","converted","promoted","dead")')
+      .order("created_at", { ascending: false })
+      .limit(1);
+    return ((data ?? [])[0] ?? null) as { id: string; raw_body: string | null; status: string | null } | null;
+  };
+  let openLead = await findOpenLead();
 
   if (openLead) {
     const stamp = new Date().toISOString().slice(0, 16).replace("T", " ") + "Z";
@@ -158,16 +140,16 @@ export async function POST(req: NextRequest) {
       .update({
         raw_body: openLead.raw_body ? `${openLead.raw_body}\n\n${entry}` : entry,
         status: "new", // they reached out again — back into the queue
-        ...(contactId ? { contact_id: contactId } : {}),
         updated_at: new Date().toISOString(),
       })
       .eq("id", openLead.id);
   }
 
   // ── Create a lead row so this surfaces in /inbox alongside email leads ──
-  const { data: lead } = openLead
-    ? { data: { id: openLead.id } }
-    : await supabase
+  let lead: { id: string } | null = openLead ? { id: openLead.id } : null;
+  let leadErr: { code?: string; message: string } | null = null;
+  if (!lead) {
+    const res = await supabase
     .from("leads")
     .insert({
       organization_id: ORG_ID,
@@ -193,29 +175,64 @@ export async function POST(req: NextRequest) {
     })
     .select("id")
     .single();
+    lead = res.data ?? null;
+    leadErr = res.error ?? null;
+    if (leadErr?.code === "23505") {
+      // Lost a race with a concurrent submission for the same person+property.
+      openLead = await findOpenLead();
+      if (openLead) {
+        lead = { id: openLead.id };
+        leadErr = null;
+      }
+    }
+    if (leadErr || !lead) {
+      await alarm(supabase, "questionnaire_lead_insert", leadErr?.message ?? "no row returned", {
+        email: body.email,
+        property: body.property_slug,
+        contact_id: contactId,
+      });
+      return NextResponse.json({ error: "Could not save your inquiry — please try again." }, { status: 500, headers: corsHeaders(origin) });
+    }
+  }
+  const isNewLead = !openLead;
+
+  // ── Schedule the 60-second auto-receipt (first touch only) ─────────────
+  // Email intake schedules this; the website form never did, so form leads
+  // waited for John's hand-written reply with no receipt at all. Drained by
+  // poll-gmail Job 2 → /api/leads/[id]/ack.
+  if (isNewLead) {
+    const delayMs = (2 + Math.random() * 3) * 60 * 1000;
+    const { error: schedErr } = await supabase.from("scheduled_acks").insert({
+      organization_id: ORG_ID,
+      lead_id: lead.id,
+      send_after: new Date(Date.now() + delayMs).toISOString(),
+    });
+    if (schedErr) {
+      await alarm(supabase, "ack_not_scheduled", `Website lead ${lead.id} has no auto-ack scheduled: ${schedErr.message}`, { lead_id: lead.id });
+    }
+  }
 
   // ── Mirror into communications ──────────────────────────────────────────
   // Every inbound expression of interest gets a communications row — the
   // comms dashboard + coverage check treat that table as the universal log.
   if (lead?.id) {
-    const { error: commErr } = await supabase.from("communications").insert({
-      organization_id: ORG_ID,
-      lead_id: lead.id,
-      contact_id: contactId,
-      property_id: property.id,
-      channel: "website",
-      direction: "inbound",
-      external_id: null,
-      subject: `Inquiry: ${property.headline || property.name}`,
-      body_preview:
-        `${body.lead_type} via questionnaire. ` +
-        `Budget: ${body.budget_range || "—"} · Timeline: ${body.timeline || "—"} · Company: ${body.company || "—"}`,
-      from_address: body.email.toLowerCase(),
-      occurred_at: new Date().toISOString(),
-      raw_payload: { source: "questionnaire", lead_type: body.lead_type },
-    });
-    if (commErr) {
-      console.error("[questionnaire] comm insert failed:", commErr.message);
+    try {
+      await recordTouch(supabase, {
+        channel: "website",
+        direction: "inbound",
+        contactId,
+        leadId: lead.id,
+        propertyId: property.id,
+        subject: `Inquiry: ${property.headline || property.name}`,
+        body:
+          `${body.lead_type} via questionnaire. ` +
+          `Budget: ${body.budget_range || "—"} · Timeline: ${body.timeline || "—"} · Company: ${body.company || "—"}`,
+        fromAddress: body.email.toLowerCase(),
+        source: "questionnaire",
+        rawPayload: { lead_type: body.lead_type },
+      });
+    } catch (err) {
+      await alarm(supabase, "questionnaire_comm_insert", err instanceof Error ? err.message : String(err), { lead_id: lead.id });
     }
   }
 
