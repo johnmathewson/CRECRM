@@ -380,15 +380,26 @@ async function ensureHotLeadRow(
   // ❶ Already have a lead for this contact + property (any source)?
   const { data: existing } = await supabase
     .from("leads")
-    .select("id, sender_email")
+    .select("id, sender_email, status")
     .eq("organization_id", ORG_ID)
     .eq("contact_id", contactId)
     .eq("property_id", propertyId)
-    .neq("status", "archived")
+    // ANY status, including archived. Excluding archived meant a hot signal
+    // after an archive minted a brand-new lead for the same person + property
+    // on every daily report — 67 duplicate open leads by Aug 2026. An
+    // archived lead that re-engages is REOPENED below, never duplicated.
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
   if (existing) {
+    // Re-engagement after an archive: reopen the same lead so the history
+    // (thread, events, drafts) stays on one row.
+    if (existing.status === "archived") {
+      await supabase
+        .from("leads")
+        .update({ status: "new", updated_at: new Date().toISOString() })
+        .eq("id", existing.id);
+    }
     // Heal missing email in-place — older lead rows may have been created
     // without sender_email if the CREXi report omitted it at the time.
     // The drafting cron skips leads with null sender_email, so patch it
