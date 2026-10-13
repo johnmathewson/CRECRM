@@ -192,11 +192,19 @@ async function upsertContact(
       .from("contacts")
       .select("id, warmth")
       .eq("organization_id", ORG_ID)
-      .ilike("email", email.trim())  // case-insensitive — prevents duplicate contacts
+      // Case-insensitive exact match. Escape % and _ (ilike wildcards — an
+      // address with "_" used to match other people) and cap at one row so
+      // a pre-existing duplicate can't error the lookup into creating a third.
+      .ilike("email", email.trim().replace(/[%_]/g, (c) => "\\" + c))
+      .limit(1)
       .maybeSingle();
     if (data) existing = data;
   }
-  if (!existing && phone) {
+  // Phone is identity ONLY when there is no email. With an email present
+  // that didn't match, this is a new person — merging them into whoever
+  // shares an office line (the old behavior) filed their leads and messages
+  // under the wrong contact and silently dropped their email.
+  if (!existing && phone && !email) {
     const { data } = await supabase
       .from("contacts")
       .select("id, warmth")

@@ -139,7 +139,7 @@ export async function POST(req: NextRequest) {
   // Caller passes either a crexi_leads_state.id or a leads.id; we handle both.
   const { data: crexiRows } = await supabase
     .from("crexi_leads_state")
-    .select("id, name, email, phone, company, role, level_of_interest, number_of_visits, last_activity_date")
+    .select("id, name, email, phone, company, role, level_of_interest, number_of_visits, last_activity_date, contact_id")
     .eq("organization_id", ORG_ID)
     .eq("property_id", body.propertyId)
     .in("id", body.leadIds);
@@ -512,11 +512,13 @@ export async function POST(req: NextRequest) {
         const newLeadId = await findOrCreateLeadForSend(supabase, {
           recipientEmail: lead.email!,
           propertyId: prop.id,
-          contactId: null,
+          // Carry the CREXi row's contact so the lead and the sent email are
+          // filed under the person (was hard-coded null: 138 unlinked rows).
+          contactId: (lead as { contact_id?: string | null }).contact_id ?? null,
           senderName: lead.name ?? null,
           source: "bulk_ai",
         });
-        if (newLeadId) leadInfo = { leadId: newLeadId, contactId: null };
+        if (newLeadId) leadInfo = { leadId: newLeadId, contactId: (lead as { contact_id?: string | null }).contact_id ?? null };
       }
 
       const { gmailMessageId: sentMsgId, gmailThreadId: sentThreadId, sentAt } =

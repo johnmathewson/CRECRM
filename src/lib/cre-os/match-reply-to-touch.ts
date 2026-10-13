@@ -196,16 +196,23 @@ export async function maybeRouteAsReply(
   // When the reply matched a communications-source parent (bulk-ai-followup
   // path), parent.contactId is NULL. Look up the contact by from_email so
   // the reply lane_touch links correctly and surfaces on the Leads tab.
-  let resolvedContactId = parent.contactId;
-  if (!resolvedContactId && msg.fromEmail) {
+  // The counterparty is whoever actually SENT this message — resolved from
+  // from_email first. Only if the sender is unknown do we fall back to the
+  // parent's contact. Inheriting the parent's contact unconditionally (the
+  // old order) filed CC'd colleagues, reply-alls and CREXi's notification
+  // bot under the original recipient's name.
+  let resolvedContactId: string | null = null;
+  if (msg.fromEmail) {
     const { data: contactRow } = await supabase
       .from("contacts")
       .select("id")
       .eq("organization_id", ORG_ID)
-      .ilike("email", msg.fromEmail.trim())
+      .ilike("email", msg.fromEmail.trim().replace(/[%_]/g, (c) => "\\" + c))
+      .limit(1)
       .maybeSingle();
     if (contactRow) resolvedContactId = contactRow.id as string;
   }
+  if (!resolvedContactId) resolvedContactId = parent.contactId ?? null;
 
   // ── 3. Insert the inbound lane_touches row — CAMPAIGN REPLIES ONLY ───
   //
@@ -358,7 +365,12 @@ export async function maybeRouteAsReply(
   // Now runs for BOTH communications-source and lane_touches-source replies.
   // This is the fix that makes cadence replies visible in the main inbox and
   // ContactDrawer — previously only communications-source replies triggered this.
-  if (resolvedLeadId) {
+  // ALWAYS record the reply — a human wrote in and that must land in the
+  // record even when no lead resolved (lead_id stays null; contact_id is the
+  // sender's when known). The old `if (resolvedLeadId)` guard dropped the
+  // row while still reporting matched:true, so the poller marked the reply
+  // "handled" and it vanished (Henry Menn's Aug 7 Liberty Square reply).
+  {
     // Write the inbound reply to communications so it appears in the
     // ContactDrawer thread alongside John's outbound messages.
     // Guard with external_id dedup so a retry doesn't double-insert.

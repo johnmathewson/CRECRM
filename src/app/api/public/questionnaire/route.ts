@@ -92,22 +92,26 @@ export async function POST(req: NextRequest) {
   let contactId: string | null = null;
   const { data: existingContact } = await supabase
     .from("contacts")
-    .select("id")
+    .select("id, full_name, phone, relationship_type")
     .eq("organization_id", ORG_ID)
-    .eq("email", body.email.toLowerCase())
+    // Case-insensitive, wildcard-escaped, one row: the exact-case .eq()
+    // missed mixed-case stored emails and minted duplicates.
+    .ilike("email", body.email.trim().replace(/[%_]/g, (c) => "\\" + c))
+    .limit(1)
     .maybeSingle();
 
   if (existingContact) {
     contactId = existingContact.id;
-    await supabase
-      .from("contacts")
-      .update({
-        full_name: body.full_name.trim(),
-        phone: body.phone || undefined,
-        relationship_type: "prospect",
-        last_conversation: new Date().toISOString().slice(0, 10),
-      })
-      .eq("id", contactId);
+    // FILL BLANKS ONLY. This is an unauthenticated public form: it may add a
+    // missing phone or name, but it must never overwrite curated data —
+    // anyone who knew a client's email could rewrite that client's record.
+    const fill: Record<string, unknown> = {
+      last_conversation: new Date().toISOString().slice(0, 10),
+    };
+    if (!existingContact.full_name && body.full_name?.trim()) fill.full_name = body.full_name.trim();
+    if (!existingContact.phone && body.phone) fill.phone = body.phone;
+    if (!existingContact.relationship_type) fill.relationship_type = "prospect";
+    await supabase.from("contacts").update(fill).eq("id", contactId);
   } else {
     const { data: newContact } = await supabase
       .from("contacts")
