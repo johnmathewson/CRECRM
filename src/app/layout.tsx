@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { Archivo } from "next/font/google";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -28,13 +29,24 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
+// Brand face for the whole app (Brand Guide v1.0: Archivo only). Pinned
+// on <body> so every page — login, legacy routes, CRE OS — resolves the
+// --font-archivo variable; before this it was only set inside /cre-os and
+// the font stack fell through to Times everywhere else.
+const archivo = Archivo({
+  subsets: ["latin"],
+  weight: ["400", "600", "700", "800"],
+  variable: "--font-archivo",
+  display: "swap",
+});
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" className={archivo.variable}>
       <body className="font-sans">
         {/* App shell */}
         <div className="relative z-[1]">{children}</div>

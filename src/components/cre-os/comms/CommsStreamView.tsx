@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "@/components/cre-os/AppShell";
-import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import { ThreadPanel } from "./ThreadPanel";
+import { useIsDesktop, isTypingTarget } from "@/lib/cre-os/use-is-desktop";
 import type { StreamData, StreamRow } from "@/lib/cre-os/comms-stream-queries";
 
 /**
@@ -13,16 +13,19 @@ import type { StreamData, StreamRow } from "@/lib/cre-os/comms-stream-queries";
  * a conversation row shows the latest touch with that person and simply
  * updates in place when either side speaks — John's own reply must never
  * spawn a new stream row; it updates the row's preview ("You: …") and
- * clears the red Unanswered state. Tap → ThreadPanel with the full
- * back-and-forth + reply bar. The full touch-by-touch log lives in the
- * Outreach tracker, not here.
+ * clears the red Unanswered state.
+ *
+ * Phone: the list; tapping opens the thread as a bottom sheet.
+ * Desktop (lg+): master–detail — list left, conversation inline right,
+ * ↓/↑ (J/K) walk the list, Enter opens, Esc closes. The full touch-by-
+ * touch log lives in the Outreach tracker, not here.
  */
 
-const CHANNEL_META: Record<string, { label: string; glyph: string }> = {
-  email: { label: "Email", glyph: "✉" },
-  sms: { label: "Text", glyph: "▣" },
-  phone: { label: "Call", glyph: "☎" },
-  website: { label: "Web", glyph: "◆" },
+const CHANNEL_META: Record<string, { label: string; word: string }> = {
+  email: { label: "Email", word: "email" },
+  sms: { label: "Text", word: "text" },
+  phone: { label: "Call", word: "call" },
+  website: { label: "Web", word: "web form" },
 };
 
 interface Conversation {
@@ -37,7 +40,14 @@ interface Conversation {
   unanswered: boolean;
 }
 
+function initials(name: string): string {
+  const parts = name.replace(/[^a-zA-Z ]/g, " ").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "•";
+  return (parts[0][0] + (parts[parts.length - 1]?.[0] ?? "")).toUpperCase();
+}
+
 export function CommsStreamView({ data }: { data: StreamData }) {
+  const desktop = useIsDesktop();
   const [channel, setChannel] = useState<string | null>(null);
   const [propertyId, setPropertyId] = useState<string | null>(null);
   // The QUEUE is the default view (John's call, 7/29): land on the people
@@ -48,7 +58,7 @@ export function CommsStreamView({ data }: { data: StreamData }) {
   const [search, setSearch] = useState("");
   const [showCleared, setShowCleared] = useState(false);
   const [clearedIds, setClearedIds] = useState<Record<string, boolean>>({});
-  const [openThread, setOpenThread] = useState<{ leadId?: string; contactId?: string; channel: string } | null>(null);
+  const [openKey, setOpenKey] = useState<string | null>(null);
 
   async function toggleCleared(id: string, cleared: boolean) {
     setClearedIds((m) => ({ ...m, [id]: cleared }));
@@ -121,33 +131,83 @@ export function CommsStreamView({ data }: { data: StreamData }) {
     return g;
   }, [filtered]);
 
+  const openable = (c: Conversation) => !!(c.leadId || c.contactId);
+  const openConv = filtered.find((c) => c.key === openKey) ?? null;
+
+  // Desktop: first conversation open on landing (once).
+  const autoOpened = useRef(false);
+  useEffect(() => {
+    if (!desktop || openKey || autoOpened.current) return;
+    const first = filtered.find(openable);
+    if (first) {
+      autoOpened.current = true;
+      setOpenKey(first.key);
+    }
+  }, [desktop, openKey, filtered]);
+
+  // Desktop keyboard: ↓/↑ or J/K, Enter, Esc. Ignored while typing.
+  useEffect(() => {
+    if (!desktop) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (isTypingTarget(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+      const list = filtered.filter(openable);
+      if (list.length === 0) return;
+      const idx = openKey ? list.findIndex((c) => c.key === openKey) : -1;
+      if (e.key === "ArrowDown" || e.key === "j") {
+        e.preventDefault();
+        setOpenKey(list[Math.min(idx + 1, list.length - 1)].key);
+      } else if (e.key === "ArrowUp" || e.key === "k") {
+        e.preventDefault();
+        setOpenKey(list[Math.max(idx - 1, 0)].key);
+      } else if (e.key === "Escape") {
+        setOpenKey(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [desktop, filtered, openKey]);
+
   const chip = (active: boolean) =>
-    `px-3 py-1.5 rounded-full font-heading text-[11px] uppercase tracking-eyebrow transition-colors border ${
+    `px-3 py-1.5 font-heading text-[11px] font-bold uppercase tracking-eyebrow transition-colors border-2 ${
       active
-        ? "bg-coral-400 text-steward-base border-coral-400"
-        : "border-white/10 bg-white/[0.03] text-cream-dim hover:bg-white/[0.06]"
+        ? "bg-cream text-steward-base border-cream"
+        : "border-white/[0.10] text-cream-dim hover:border-cream"
     }`;
+
+  const thread = openConv ? (
+    <ThreadPanel
+      key={openConv.key}
+      variant={desktop ? "inline" : "overlay"}
+      leadId={openConv.leadId}
+      contactId={openConv.contactId}
+      initialChannel={openConv.latest.channel}
+      onClose={() => setOpenKey(null)}
+    />
+  ) : null;
 
   return (
     <AppShell>
-      <div className="space-y-4 pb-10">
-        <div>
-          <Eyebrow>Communications · every conversation</Eyebrow>
-          <h1 className="font-heading text-[26px] font-bold text-cream mt-1">One stream</h1>
-          <p className="font-body text-[13px] text-cream-dim mt-1">
-            {unansweredOnly
-              ? "Your queue: people waiting on a reply. Answer someone and they leave this screen."
-              : "Every conversation, newest activity first. Red means they're waiting on you."}
-          </p>
-        </div>
+      <div className="space-y-5">
+        <header className="flex items-end justify-between gap-6 flex-wrap">
+          <div>
+            <div className="font-heading text-[11px] font-bold uppercase tracking-eyebrow text-cream-muted">Communications</div>
+            <h1 className="mt-1 font-display text-[30px] font-extrabold text-cream leading-none">One stream</h1>
+            <p className="mt-2 font-body text-[14px] text-cream-muted">
+              {unansweredOnly
+                ? "People waiting on a reply. Answer someone and they leave this list."
+                : "Every conversation, newest activity first. Copper means they're waiting on you."}
+            </p>
+          </div>
+          {desktop && (
+            <div className="font-mono text-[11px] text-cream-subtle">↓ ↑ move · Enter open · Esc close</div>
+          )}
+        </header>
+
         <div className="flex items-center gap-2 flex-wrap">
           <button className={chip(!channel && !unansweredOnly)} onClick={() => { setChannel(null); setUnansweredOnly(false); }}>
             All
           </button>
-          <button
-            className={`${chip(unansweredOnly)} ${data.unansweredCount > 0 && !unansweredOnly ? "border-coral-400/50 text-coral-300" : ""}`}
-            onClick={() => setUnansweredOnly((v) => !v)}
-          >
+          <button className={chip(unansweredOnly)} onClick={() => setUnansweredOnly((v) => !v)}>
             Unanswered · {data.unansweredCount}
           </button>
           {Object.entries(CHANNEL_META).map(([key, m]) => (
@@ -164,7 +224,7 @@ export function CommsStreamView({ data }: { data: StreamData }) {
           <select
             value={propertyId ?? ""}
             onChange={(e) => setPropertyId(e.target.value || null)}
-            className="ml-auto bg-white/[0.03] border border-white/10 rounded px-2 py-1.5 font-heading text-[11px] uppercase tracking-eyebrow text-cream-dim"
+            className="ml-auto bg-steward-surface border-2 border-white/[0.10] px-2 py-1.5 font-heading text-[11px] font-bold uppercase tracking-eyebrow text-cream-dim"
           >
             <option value="">Property: any</option>
             {data.properties.map((p) => (
@@ -173,115 +233,115 @@ export function CommsStreamView({ data }: { data: StreamData }) {
           </select>
         </div>
 
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search people, subjects, messages, properties…"
-          className="w-full rounded border border-white/10 bg-white/[0.03] px-3 py-2.5 font-body text-[13px] text-cream placeholder:text-cream-subtle focus:border-teal-400/40 focus:outline-none"
-        />
+        <div className="lg:grid lg:grid-cols-[minmax(360px,460px)_minmax(0,1fr)] xl:grid-cols-[520px_minmax(0,1fr)] lg:gap-6 lg:items-start">
+          <div className="min-w-0 space-y-4">
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search people, subjects, messages, properties…"
+              className="w-full border-2 border-white/[0.10] bg-steward-surface px-3 py-2.5 font-body text-[14px] text-cream placeholder:text-cream-subtle focus:border-coral-400 focus:outline-none"
+            />
 
-        {groups.length === 0 && (
-          <p className="font-body text-[13px] text-cream-dim py-8 text-center">
-            {unansweredOnly && !search && !channel && !propertyId
-              ? "All caught up — nobody is waiting on you. Tap All to browse past conversations."
-              : "No conversations match. Clear a filter or include automated sends."}
-          </p>
-        )}
+            {groups.length === 0 && (
+              <p className="font-body text-[15px] text-cream-muted py-8">
+                {unansweredOnly && !search && !channel && !propertyId
+                  ? "All caught up — nobody is waiting on you. Tap All to browse past conversations."
+                  : "No conversations match. Clear a filter or include automated sends."}
+              </p>
+            )}
 
-        {groups.map((g) => (
-          <section key={g.day}>
-            <Eyebrow>{g.day}</Eyebrow>
-            <div className="mt-2 space-y-2">
-              {g.items.map((c) => {
-                const meta = CHANNEL_META[c.latest.channel] ?? { label: c.latest.channel, glyph: "•" };
-                // Lead or contact, the panel opens either way — replying to
-                // a lead-less contact mints the lead on first send. Only
-                // system rows (no person at all) stay inert.
-                const open = c.leadId
-                  ? () => setOpenThread({ leadId: c.leadId!, channel: c.latest.channel })
-                  : c.contactId
-                    ? () => setOpenThread({ contactId: c.contactId!, channel: c.latest.channel })
-                    : null;
-                const youSpokeLast = c.latest.direction === "outbound";
-                return (
-                  <div
-                    key={c.key}
-                    {...(open
-                      ? {
-                          onClick: open,
-                          role: "button",
-                          tabIndex: 0,
-                          onKeyDown: (e: React.KeyboardEvent) => {
-                            if (e.key === "Enter") open();
-                          },
-                        }
-                      : {})}
-                    className={`block p-3 rounded border transition-colors ${open ? "cursor-pointer" : ""} ${
-                      c.unanswered
-                        ? "border-coral-400/40 bg-coral-400/[0.04] hover:bg-coral-400/[0.07]"
-                        : "border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05]"
-                    }`}
-                  >
-                    <div className="flex items-baseline justify-between gap-3">
-                      <span className="font-heading text-[13px] font-semibold text-cream truncate">
-                        {c.who}
-                        {c.latest.automated && (
-                          <span className="ml-2 px-1.5 py-0.5 rounded bg-white/[0.06] font-mono text-[9px] uppercase text-cream-subtle align-middle">
-                            {c.latest.touchKind ?? "auto"}
-                          </span>
-                        )}
-                        {c.touchCount > 1 && (
-                          <span className="ml-2 font-mono text-[10px] text-cream-subtle">· {c.touchCount} touches</span>
-                        )}
-                      </span>
-                      <span className="font-mono text-[10px] text-cream-subtle shrink-0">{c.latest.when}</span>
-                    </div>
-                    <p className="mt-1 font-body text-[12px] text-cream-dim leading-snug truncate">
-                      <span className="font-mono text-[10px] text-cream-subtle mr-1.5" aria-hidden="true">{meta.glyph}</span>
-                      {youSpokeLast && <span className="text-teal-300">You: </span>}
-                      {c.latest.subject ? <span className="text-cream">{c.latest.subject}</span> : null}
-                      {c.latest.subject && c.latest.preview ? " — " : null}
-                      {c.latest.preview}
-                    </p>
-                    <div className="mt-1.5 flex items-center gap-2">
-                      {c.property && (
-                        <span className="px-2 py-0.5 rounded-full bg-teal-400/[0.08] border border-teal-400/25 font-mono text-[10px] text-teal-300">
-                          {c.property.name}
-                        </span>
-                      )}
-                      {c.unanswered && (
-                        <span className="px-2 py-0.5 rounded-full bg-coral-400/[0.10] border border-coral-400/40 font-mono text-[10px] text-coral-300">
-                          Unanswered
-                        </span>
-                      )}
-                      <button
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          toggleCleared(c.latest.id, !showCleared);
-                        }}
-                        className="ml-auto px-2 py-0.5 rounded border border-white/10 bg-white/[0.03] hover:bg-white/[0.08] font-mono text-[10px] uppercase tracking-eyebrow text-cream-dim hover:text-cream transition-colors"
-                        title={showCleared ? "Restore to the stream" : "Clear from the stream (kept in history — reversible)"}
+            {groups.map((g) => (
+              <section key={g.day}>
+                <div className="flex items-baseline justify-between border-b-2 border-cream pb-1.5">
+                  <h2 className="font-heading text-[11px] font-bold uppercase tracking-eyebrow text-cream">{g.day}</h2>
+                  <span className="font-mono text-[12px] font-semibold text-cream-subtle">{g.items.length}</span>
+                </div>
+                <div>
+                  {g.items.map((c) => {
+                    const meta = CHANNEL_META[c.latest.channel] ?? { label: c.latest.channel, word: c.latest.channel };
+                    const can = openable(c);
+                    const selected = openKey === c.key;
+                    const youSpokeLast = c.latest.direction === "outbound";
+                    return (
+                      <div
+                        key={c.key}
+                        className={`flex items-start gap-3 border-b border-white/[0.06] px-3 py-3 border-l-[3px] ${
+                          selected
+                            ? "bg-copper-100 border-l-coral-400"
+                            : c.unanswered
+                              ? "bg-steward-surface border-l-coral-400"
+                              : "bg-steward-surface border-l-transparent"
+                        }`}
+                        aria-current={selected ? "true" : undefined}
                       >
-                        {showCleared ? "Restore" : "Clear"}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
+                        <button
+                          type="button"
+                          disabled={!can}
+                          onClick={() => can && setOpenKey(c.key)}
+                          className="min-w-0 flex-1 flex items-start gap-3 text-left disabled:cursor-default"
+                        >
+                          <span className="w-9 h-9 shrink-0 rounded-full bg-ink-200 text-ink-900 flex items-center justify-center font-heading text-[12px] font-bold">
+                            {initials(c.who)}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="flex items-baseline justify-between gap-3">
+                              <span className="font-heading text-[15px] font-semibold text-cream truncate">
+                                {c.who}
+                                {c.latest.automated && (
+                                  <span className="ml-2 bg-ink-200 px-1.5 py-px font-heading text-[9px] font-bold uppercase tracking-eyebrow text-ink-700 align-middle">
+                                    {c.latest.touchKind ?? "auto"}
+                                  </span>
+                                )}
+                              </span>
+                              <span className="font-mono text-[11px] text-cream-subtle shrink-0">{c.latest.when}</span>
+                            </span>
+                            <span className="mt-0.5 block font-body text-[13px] text-cream-muted truncate">
+                              {youSpokeLast && <span className="text-ink-700 font-semibold">You: </span>}
+                              {c.latest.subject ? <span className="text-cream">{c.latest.subject}</span> : null}
+                              {c.latest.subject && c.latest.preview ? " — " : null}
+                              {c.latest.preview}
+                            </span>
+                            <span className="mt-1 flex items-center gap-2 font-body text-[12px] text-cream-subtle">
+                              {c.property && (
+                                <span className="bg-ink-200 px-1.5 py-px font-heading text-[10px] font-bold uppercase tracking-eyebrow text-ink-700">
+                                  {c.property.name}
+                                </span>
+                              )}
+                              <span>{meta.word}</span>
+                              {c.touchCount > 1 && <span>· {c.touchCount} touches</span>}
+                              {c.unanswered && <span className="font-heading text-[10px] font-bold uppercase tracking-eyebrow text-coral-400">· waiting</span>}
+                            </span>
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleCleared(c.latest.id, !showCleared)}
+                          className="shrink-0 px-2 py-1 border border-white/[0.10] font-heading text-[10px] font-bold uppercase tracking-eyebrow text-cream-subtle hover:border-cream hover:text-cream transition-colors"
+                          title={showCleared ? "Restore to the stream" : "Clear from the stream (kept in history — reversible)"}
+                        >
+                          {showCleared ? "Restore" : "Clear"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
+          </div>
+
+          {desktop && (
+            <div className="min-w-0 lg:sticky lg:top-0 lg:h-[calc(100dvh-14rem)]">
+              {thread ?? (
+                <div className="h-full flex items-center justify-center border-l-2 border-cream bg-steward-surface">
+                  <p className="font-body text-[15px] text-cream-muted">Pick a conversation on the left.</p>
+                </div>
+              )}
             </div>
-          </section>
-        ))}
+          )}
+        </div>
       </div>
 
-      {openThread && (
-        <ThreadPanel
-          leadId={openThread.leadId ?? null}
-          contactId={openThread.contactId ?? null}
-          initialChannel={openThread.channel}
-          onClose={() => setOpenThread(null)}
-        />
-      )}
+      {!desktop && thread}
     </AppShell>
   );
 }

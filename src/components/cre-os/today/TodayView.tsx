@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/cre-os/AppShell";
 import { ThreadPanel } from "@/components/cre-os/comms/ThreadPanel";
+import { useIsDesktop, isTypingTarget } from "@/lib/cre-os/use-is-desktop";
 
 /**
  * TodayView — the kitchen. No dashboard, no rails, no hot/warm badges: a
@@ -50,21 +51,6 @@ function initials(name: string): string {
   return (parts[0][0] + (parts[parts.length - 1]?.[0] ?? "")).toUpperCase();
 }
 
-/** lg breakpoint (1024px) — same line the nav flips on. SSR renders the
- *  phone layout, then the client upgrades; no layout thrash on desktop
- *  because the grid classes are CSS, only the thread's mount mode waits. */
-function useIsDesktop(): boolean {
-  const [desktop, setDesktop] = useState(false);
-  useEffect(() => {
-    const mq = window.matchMedia("(min-width: 1024px)");
-    const sync = () => setDesktop(mq.matches);
-    sync();
-    mq.addEventListener("change", sync);
-    return () => mq.removeEventListener("change", sync);
-  }, []);
-  return desktop;
-}
-
 type Dismiss = "clear" | "spam" | "archive";
 
 export function TodayView({
@@ -100,6 +86,29 @@ export function TodayView({
   }, [desktop, open, waiting, next]);
 
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+
+  // Desktop keyboard: ↓/↑ or J/K walk the queue, Enter opens, Esc closes.
+  // Ignored while typing (the reply box, the ⌘K search).
+  useEffect(() => {
+    if (!desktop) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (isTypingTarget(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+      const all = [...waiting, ...next];
+      if (all.length === 0) return;
+      const idx = open ? all.findIndex((r) => r.id === open.id) : -1;
+      if (e.key === "ArrowDown" || e.key === "j") {
+        e.preventDefault();
+        setOpen(all[Math.min(idx + 1, all.length - 1)]);
+      } else if (e.key === "ArrowUp" || e.key === "k") {
+        e.preventDefault();
+        setOpen(all[Math.max(idx - 1, 0)]);
+      } else if (e.key === "Escape") {
+        setOpen(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [desktop, waiting, next, open]);
 
   const openRow = (r: TodayRow) => {
     if (!r.leadId && !r.contactId) return;
@@ -206,7 +215,7 @@ export function TodayView({
         )}
 
         {/* Phone: the queue. Desktop: queue | conversation. */}
-        <div className="lg:grid lg:grid-cols-[minmax(360px,460px)_minmax(0,1fr)] lg:gap-6 lg:items-start">
+        <div className="lg:grid lg:grid-cols-[minmax(360px,460px)_minmax(0,1fr)] xl:grid-cols-[520px_minmax(0,1fr)] lg:gap-6 lg:items-start">
           <div className="min-w-0">{queue}</div>
 
           {desktop && (

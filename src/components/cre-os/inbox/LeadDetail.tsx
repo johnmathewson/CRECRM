@@ -209,7 +209,8 @@ export function LeadDetail({ lead }: { lead: LeadDetailData }) {
 
   return (
     <AppShell rail={rail}>
-      <div className="bg-steward-base/80 backdrop-blur-md border-b border-white/[0.04] -mx-4 px-4 -mt-5 pt-5 pb-5 mb-6 lg:-mx-8 lg:px-8 lg:-mt-6 lg:pt-6">
+      {/* lg:mt-14 clears the desktop action bar pinned under the Topbar. */}
+      <div className="bg-steward-base border-b border-white/[0.04] -mx-4 px-4 -mt-5 pt-5 pb-5 mb-6 lg:-mx-8 lg:px-8 lg:mt-14 lg:pt-6">
         <Eyebrow tone="coral">
           Inbox · Lead{lead.source && <span className="ml-2 text-cream-subtle">·  {lead.source.toUpperCase()}</span>}
         </Eyebrow>
@@ -429,9 +430,10 @@ export function LeadDetail({ lead }: { lead: LeadDetailData }) {
 
       {/* Sticky action bar — fixed, thumb-zone friendly */}
       {!isArchived && (
-        // Sits ABOVE the mobile BottomNav (--bottom-nav-h = 56px + home
-        // indicator; 0 on lg). bottom-0 put Send behind the nav on phones.
-        <div className="fixed bottom-[var(--bottom-nav-h)] left-0 right-0 lg:left-56 lg:right-[300px] bg-steward-base border-t-2 border-cream px-4 lg:px-8 py-3 z-30 lg:[padding-bottom:max(0.75rem,env(safe-area-inset-bottom))]">
+        // Phone: thumb-zone bar pinned ABOVE the BottomNav (--bottom-nav-h =
+        // 56px + home indicator). Desktop: the same bar sits at the TOP of
+        // the page, under the Topbar, where a mouse expects actions.
+        <div className="fixed bottom-[var(--bottom-nav-h)] left-0 right-0 lg:bottom-auto lg:top-14 lg:left-56 xl:right-[300px] bg-steward-base border-t-2 lg:border-t-0 lg:border-b-2 border-cream px-4 lg:px-8 py-3 z-30">
           {actionState.error && (
             <div className="mb-2 px-3 py-1.5 rounded bg-coral-400/[0.08] border border-coral-400/30 font-body text-[12px] text-coral-300">
               {actionState.error}
