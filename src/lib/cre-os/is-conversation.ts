@@ -26,6 +26,9 @@ const PLATFORM_SENDERS = [
   "@crexi.com",
   "@loopnet.com",
   "@costar.com",
+  // Bounces. "Mail Delivery Subsystem" is not a person waiting on a reply.
+  "mailer-daemon@",
+  "postmaster@",
 ];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

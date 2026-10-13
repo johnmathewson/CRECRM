@@ -32,14 +32,18 @@ function priority(l: LeadCard): number {
 export default async function TodayPage() {
   const [stream, leads, brief] = await Promise.all([loadCommsStream(600), loadInboxList(), loadLatestBrief()]);
 
-  // One row per person: their latest unanswered inbound.
+  // One row per person, decided by their NEWEST touch (rows are newest-
+  // first). If that touch is our reply, or John cleared it, the person is
+  // not waiting — an older inbound of theirs must not resurrect them.
+  // (That was how Sherelle showed as waiting here while Communications
+  // correctly said 0: her newest message was cleared, her older one wasn't.)
   const seen = new Set<string>();
   const waiting: TodayRow[] = [];
   for (const r of stream.rows) {
-    if (!r.unanswered || r.cleared || r.automated) continue;
     const key = r.contactId ?? r.who;
     if (seen.has(key)) continue;
     seen.add(key);
+    if (!r.unanswered || r.cleared || r.automated) continue;
     waiting.push({
       id: r.id,
       kind: "comm",
