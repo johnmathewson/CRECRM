@@ -182,6 +182,16 @@ export async function sendMessage(
   accessToken: string,
   input: SendMessageInput
 ): Promise<SendMessageResponse> {
+  // Global outbound freeze (CRM rollout, 2026-10). Every email sender in the
+  // app exits through this function, so one env var stops all of them —
+  // auto-ack, Steward, bulk-AI, cadence, manual. Throw (don't silently
+  // no-op) so callers log a clear failure instead of recording a "sent"
+  // that never happened. Lift by removing OUTBOUND_FREEZE in Netlify.
+  if (process.env.OUTBOUND_FREEZE === "true") {
+    throw new Error(
+      "OUTBOUND_FREEZE: outbound email is frozen during the CRM rollout — nothing was sent."
+    );
+  }
   const headers: string[] = [
     `From: ${input.from}`,
     `To: ${input.to}`,

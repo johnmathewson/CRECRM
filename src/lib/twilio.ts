@@ -126,6 +126,14 @@ export interface SendSmsResult {
  * which can be stored on lane_touches.metadata for later matching.
  */
 export async function sendSms(input: SendSmsInput): Promise<SendSmsResult> {
+  // Global outbound freeze (CRM rollout, 2026-10). Same switch as
+  // gmail.sendMessage — every SMS sender exits through here. Checked before
+  // test-mode so even the reroute-to-John path stays silent while frozen.
+  if (process.env.OUTBOUND_FREEZE === "true") {
+    throw new Error(
+      "OUTBOUND_FREEZE: outbound SMS is frozen during the CRM rollout — nothing was sent."
+    );
+  }
   const { client, config } = getClient();
 
   let actualTo = input.to;
