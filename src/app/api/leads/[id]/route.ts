@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { splitThread } from "@/lib/cre-os/is-conversation";
 
 export const dynamic = "force-dynamic";
 
@@ -75,10 +76,16 @@ export async function GET(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     .sort((a: any, b: any) => new Date(a.occurred_at).getTime() - new Date(b.occurred_at).getTime());
 
+  // One definition of "a real message" shared with the Stream. CREXi
+  // engagement signals and platform-sender notifications come back as
+  // `signals`, never inside `thread`, so a bot can't pose as the person.
+  const { messages, signals } = splitThread(thread);
+
   return NextResponse.json({
     lead,
     events: events || [],
-    thread,
+    thread: messages,
+    signals,
   });
 }
 

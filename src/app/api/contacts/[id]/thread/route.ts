@@ -11,6 +11,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { splitThread } from "@/lib/cre-os/is-conversation";
 
 export const dynamic = "force-dynamic";
 
@@ -37,7 +38,7 @@ export async function GET(
 
   const { data: thread } = await supabase
     .from("communications")
-    .select("id, direction, channel, subject, body_preview, from_address, occurred_at, lead_id")
+    .select("id, direction, channel, subject, body_preview, from_address, occurred_at, lead_id, touch_kind, raw_payload")
     .eq("organization_id", ORG_ID)
     .eq("contact_id", params.id)
     .order("occurred_at", { ascending: true })
@@ -50,5 +51,8 @@ export async function GET(
       .reverse()
       .find((m) => m.lead_id)?.lead_id ?? null;
 
-  return NextResponse.json({ contact, thread: thread ?? [], leadId });
+  // Same predicate as the Stream and the lead thread: signals and system
+  // mail are returned separately, never as messages from the person.
+  const { messages, signals } = splitThread(thread ?? []);
+  return NextResponse.json({ contact, thread: messages, signals, leadId });
 }

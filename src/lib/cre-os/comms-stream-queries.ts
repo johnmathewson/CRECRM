@@ -10,6 +10,7 @@
 
 import { createServerSupabase } from "@/lib/supabase/server";
 import { relativeTime } from "./time-utils";
+import { AUTOMATED_KINDS, isSignal } from "./is-conversation";
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 
@@ -44,20 +45,10 @@ export interface StreamData {
   properties: Array<{ id: string; name: string }>;
 }
 
-const AUTOMATED_KINDS = new Set(["ai_followup", "auto_ack", "internal", "campaign"]);
-
-/** Engagement signals (CREXi page views, CA executions…) are robot events,
- *  not messages — they must never mark a party Unanswered or pose as a
- *  human touch. Matched by source AND subject prefix: a 7/29 backfill once
- *  wrote them under a different source and polluted the Unanswered count
- *  with 81 phantom parties. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function isSignal(r: any): boolean {
-  return (
-    String(r.raw_payload?.source ?? "") === "crexi_report" ||
-    String(r.subject ?? "").startsWith("CREXi activity")
-  );
-}
+// AUTOMATED_KINDS and isSignal() now live in ./is-conversation so the Stream,
+// the lead thread and the contact thread share ONE definition of "a real
+// message". The local copies were the reason threads showed CREXi bots as
+// people while the Stream filtered them.
 
 // (Party identity is computed inside loadCommsStream via keyOf — contact id
 // when resolvable through the address→contact map, else normalized address.
