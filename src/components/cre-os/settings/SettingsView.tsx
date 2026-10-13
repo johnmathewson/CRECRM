@@ -92,12 +92,120 @@ export function SettingsView() {
           </p>
         </header>
 
+        <IntegritySection />
         <DataImportsSection />
         <GmailSection />
         <TwilioSection />
         <ExtensionKeysSection />
       </div>
     </AppShell>
+  );
+}
+
+// ── Integrity ──────────────────────────────────────────────────────────
+// The record's health check. Every count must read zero; the same scorecard
+// runs nightly and texts John when it isn't. Reads /api/integrity →
+// integrity_scorecard() (migration 0036).
+
+interface IntegrityCard {
+  checked_at: string;
+  checks: Array<{ key: string; label: string; count: number }>;
+  alarms: Array<{ at: string; kind: string | null; message: string | null }>;
+  totals: Record<string, number>;
+}
+
+function IntegritySection() {
+  const [card, setCard] = useState<IntegrityCard | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/integrity", { cache: "no-store" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+      setCard(json);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const nonZero = card?.checks.filter((c) => c.count > 0) ?? [];
+  const clean = !!card && nonZero.length === 0;
+
+  return (
+    <Panel
+      eyebrow="Integrity"
+      num={0}
+      title="The record"
+      actions={
+        loading ? (
+          <span className="font-mono text-[10px] text-cream-subtle">Checking…</span>
+        ) : clean ? (
+          <StatusBadge tone="teal" size="xs">All clear</StatusBadge>
+        ) : (
+          <StatusBadge tone="danger" size="xs">{nonZero.length} issue{nonZero.length === 1 ? "" : "s"}</StatusBadge>
+        )
+      }
+    >
+      <p className="font-body text-[13px] text-cream-dim mb-4 leading-relaxed">
+        Every message has a person, every lead has a person, one open lead per person and property,
+        phones and emails in one format. The database enforces it; this proves it. Checked nightly —
+        you get a text only when a number here is not zero.
+      </p>
+
+      {error && (
+        <div className="border border-coral-400/40 bg-coral-400/[0.08] px-3 py-2 font-body text-[12px] text-coral-300 mb-3">
+          {error}
+        </div>
+      )}
+
+      {card && (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6">
+            {card.checks.map((c) => (
+              <div key={c.key} className="flex items-baseline justify-between gap-3 border-b border-white/[0.06] py-2">
+                <span className="font-body text-[13px] text-cream">{c.label}</span>
+                <span className={`font-mono text-[14px] font-semibold ${c.count > 0 ? "text-coral-400" : "text-cream-subtle"}`}>
+                  {c.count}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-x-5 gap-y-1 font-mono text-[11px] text-cream-subtle">
+            <span>{card.totals.communications} messages</span>
+            <span>{card.totals.contacts} people</span>
+            <span>{card.totals.leads} leads</span>
+            <span>{card.totals.archived_communications + card.totals.archived_contacts} rows in the Oct 2026 archive</span>
+            <span>checked {timeAgo(card.checked_at)}</span>
+          </div>
+
+          {card.alarms.length > 0 && (
+            <div className="mt-4 border-t-2 border-cream pt-3">
+              <div className="font-heading text-[10px] font-bold uppercase tracking-eyebrow text-cream-muted mb-2">
+                Recent alarms
+              </div>
+              <ul className="space-y-1.5">
+                {card.alarms.slice(0, 8).map((a, i) => (
+                  <li key={i} className="font-body text-[12px] text-cream-dim">
+                    <span className="font-mono text-[10px] text-cream-subtle mr-2">{fmtTime(a.at)}</span>
+                    <span className="font-semibold text-cream">{a.kind}</span>
+                    {a.message ? ` — ${a.message}` : ""}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </>
+      )}
+    </Panel>
   );
 }
 
