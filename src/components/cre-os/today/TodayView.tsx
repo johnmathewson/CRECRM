@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/cre-os/AppShell";
@@ -10,9 +10,13 @@ import { ThreadPanel } from "@/components/cre-os/comms/ThreadPanel";
  * TodayView — the kitchen. No dashboard, no rails, no hot/warm badges: a
  * list of decisions, waiting-first, with the reply one tap away.
  *
- * Every row can also be cleared out: Clear (done with it — the message is
- * marked read, nothing deleted), Spam (lead → spam), Archive (lead →
- * archived). All three are the existing, reversible routes.
+ * Phone: the queue; tapping a row opens the thread as a bottom sheet.
+ * Desktop (lg+): master–detail. Queue on the left, the open conversation
+ * inline on the right (first waiting person pre-selected), so the morning
+ * is read → edit → send → next without a single overlay.
+ *
+ * Every row can also be cleared out: Clear (message marked read, nothing
+ * deleted), Spam (lead → spam), Archive (lead → archived).
  *
  * Brand: Bone canvas, White rows, Archivo, 2px Ink section rules, one
  * Copper action per row. Zero radius.
@@ -46,6 +50,21 @@ function initials(name: string): string {
   return (parts[0][0] + (parts[parts.length - 1]?.[0] ?? "")).toUpperCase();
 }
 
+/** lg breakpoint (1024px) — same line the nav flips on. SSR renders the
+ *  phone layout, then the client upgrades; no layout thrash on desktop
+ *  because the grid classes are CSS, only the thread's mount mode waits. */
+function useIsDesktop(): boolean {
+  const [desktop, setDesktop] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const sync = () => setDesktop(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+  return desktop;
+}
+
 type Dismiss = "clear" | "spam" | "archive";
 
 export function TodayView({
@@ -58,10 +77,27 @@ export function TodayView({
   brief: { lede: string; date: string } | null;
 }) {
   const router = useRouter();
+  const desktop = useIsDesktop();
   const [waiting, setWaiting] = useState(waitingInitial);
   const [next, setNext] = useState(nextInitial);
   const [open, setOpen] = useState<TodayRow | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+
+  // Fresh server data (after a send / refresh) replaces the lists.
+  useEffect(() => { setWaiting(waitingInitial); }, [waitingInitial]);
+  useEffect(() => { setNext(nextInitial); }, [nextInitial]);
+
+  // Desktop: the first person waiting is already open when the page lands
+  // (once — closing the column afterwards leaves it closed).
+  const autoOpened = useRef(false);
+  useEffect(() => {
+    if (!desktop || open || autoOpened.current) return;
+    const first = waiting[0] ?? next[0] ?? null;
+    if (first) {
+      autoOpened.current = true;
+      setOpen(first);
+    }
+  }, [desktop, open, waiting, next]);
 
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 
@@ -70,10 +106,18 @@ export function TodayView({
     setOpen(r);
   };
 
+  /** After the open conversation changes (send, dismiss), move to the next
+   *  person on desktop instead of leaving an empty column. */
+  const advanceFrom = (row: TodayRow) => {
+    const all = [...waiting, ...next].filter((r) => r.id !== row.id);
+    setOpen(desktop ? (all[0] ?? null) : null);
+  };
+
   async function dismiss(row: TodayRow, how: Dismiss) {
     // Optimistic: the row leaves the list now; the server catches up.
     setWaiting((w) => w.filter((r) => r.id !== row.id));
     setNext((n) => n.filter((r) => r.id !== row.id));
+    if (open?.id === row.id) advanceFrom(row);
     try {
       if (row.kind === "comm") {
         const res = await fetch(`/api/communications/${row.id}`, {
@@ -100,51 +144,93 @@ export function TodayView({
     }
   }
 
+  const queue = (
+    <div className="space-y-8">
+      {notice && (
+        <div className="bg-cream px-3 py-2 font-body text-[13px] text-steward-base" role="status">
+          {notice}
+        </div>
+      )}
+
+      <Section label="Waiting on you" count={waiting.length}>
+        {waiting.length === 0 ? (
+          <Empty>Nobody is waiting on you.</Empty>
+        ) : (
+          waiting.map((r) => (
+            <Row key={r.id} row={r} primary selected={open?.id === r.id} onOpen={openRow} onDismiss={dismiss} />
+          ))
+        )}
+      </Section>
+
+      <Section label="Next up" count={next.length}>
+        {next.length === 0 ? (
+          <Empty>Nothing queued. The pipeline and people pages have the rest.</Empty>
+        ) : (
+          next.map((r) => (
+            <Row key={r.id} row={r} selected={open?.id === r.id} onOpen={openRow} onDismiss={dismiss} />
+          ))
+        )}
+      </Section>
+    </div>
+  );
+
   return (
     <AppShell>
-      <div className="max-w-3xl space-y-8">
-        <header>
-          <div className="font-heading text-[11px] font-bold uppercase tracking-eyebrow text-cream-muted">{today}</div>
-          <h1 className="mt-1 font-display text-[30px] font-extrabold text-cream leading-none">Today</h1>
+      <div className="space-y-6">
+        <header className="flex items-end justify-between gap-6 flex-wrap">
+          <div>
+            <div className="font-heading text-[11px] font-bold uppercase tracking-eyebrow text-cream-muted">{today}</div>
+            <h1 className="mt-1 font-display text-[30px] font-extrabold text-cream leading-none">Today</h1>
+          </div>
+          {brief && (
+            <Link
+              href="/cre-os/today/brief"
+              className="hidden lg:inline-block font-heading text-[12px] font-semibold text-coral-400 hover:text-coral-500"
+            >
+              Read Steward&apos;s full brief →
+            </Link>
+          )}
         </header>
 
         {brief && (
-          <section className="border-l-[3px] border-coral-400 bg-steward-surface px-4 py-3">
+          <section className="border-l-[3px] border-coral-400 bg-steward-surface px-4 py-3 max-w-3xl">
             <div className="font-heading text-[10px] font-bold uppercase tracking-eyebrow text-coral-400">Steward</div>
             <p className="mt-1 font-body text-[15px] leading-[1.5] text-cream">{brief.lede}</p>
             <Link
               href="/cre-os/today/brief"
-              className="mt-2 inline-block font-heading text-[12px] font-semibold text-coral-400 hover:text-coral-500"
+              className="mt-2 inline-block lg:hidden font-heading text-[12px] font-semibold text-coral-400 hover:text-coral-500"
             >
               Read the brief →
             </Link>
           </section>
         )}
 
-        {notice && (
-          <div className="bg-cream px-3 py-2 font-body text-[13px] text-steward-base" role="status">
-            {notice}
-          </div>
-        )}
+        {/* Phone: the queue. Desktop: queue | conversation. */}
+        <div className="lg:grid lg:grid-cols-[minmax(360px,460px)_minmax(0,1fr)] lg:gap-6 lg:items-start">
+          <div className="min-w-0">{queue}</div>
 
-        <Section label="Waiting on you" count={waiting.length}>
-          {waiting.length === 0 ? (
-            <Empty>Nobody is waiting on you.</Empty>
-          ) : (
-            waiting.map((r) => <Row key={r.id} row={r} primary onOpen={openRow} onDismiss={dismiss} />)
+          {desktop && (
+            <div className="min-w-0 lg:sticky lg:top-0 lg:h-[calc(100dvh-10.5rem)]">
+              {open ? (
+                <ThreadPanel
+                  key={open.id}
+                  variant="inline"
+                  leadId={open.leadId}
+                  contactId={open.contactId}
+                  initialChannel={open.channel}
+                  onClose={() => setOpen(null)}
+                />
+              ) : (
+                <div className="h-full flex items-center justify-center border-l-2 border-cream bg-steward-surface">
+                  <p className="font-body text-[15px] text-cream-muted">Pick someone on the left.</p>
+                </div>
+              )}
+            </div>
           )}
-        </Section>
-
-        <Section label="Next up" count={next.length}>
-          {next.length === 0 ? (
-            <Empty>Nothing queued. The pipeline and people pages have the rest.</Empty>
-          ) : (
-            next.map((r) => <Row key={r.id} row={r} onOpen={openRow} onDismiss={dismiss} />)
-          )}
-        </Section>
+        </div>
       </div>
 
-      {open && (
+      {!desktop && open && (
         <ThreadPanel
           leadId={open.leadId}
           contactId={open.contactId}
@@ -178,18 +264,25 @@ function Empty({ children }: { children: React.ReactNode }) {
 function Row({
   row,
   primary = false,
+  selected = false,
   onOpen,
   onDismiss,
 }: {
   row: TodayRow;
   primary?: boolean;
+  selected?: boolean;
   onOpen: (r: TodayRow) => void;
   onDismiss: (r: TodayRow, how: Dismiss) => void;
 }) {
   const [menu, setMenu] = useState(false);
   const channel = CHANNEL_WORD[row.channel] ?? row.channel;
   return (
-    <div className="border-b border-white/[0.06] bg-steward-surface">
+    <div
+      className={`border-b border-white/[0.06] ${
+        selected ? "bg-copper-100 border-l-[3px] border-l-coral-400" : "bg-steward-surface border-l-[3px] border-l-transparent"
+      }`}
+      aria-current={selected ? "true" : undefined}
+    >
       <div className="flex items-center gap-2 px-3 py-3">
         <button
           type="button"

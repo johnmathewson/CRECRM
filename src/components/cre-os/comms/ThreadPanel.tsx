@@ -51,12 +51,19 @@ export function ThreadPanel({
   contactId,
   initialChannel,
   onClose,
+  variant = "overlay",
 }: {
   leadId?: string | null;
   contactId?: string | null;
   /** Channel of the row that was tapped — reply defaults in kind */
   initialChannel: string;
   onClose: () => void;
+  /**
+   * overlay — bottom sheet (phone) / right slide-over (desktop stream).
+   * inline  — a plain column the parent lays out itself (desktop Today,
+   *           where the thread sits beside the queue instead of over it).
+   */
+  variant?: "overlay" | "inline";
 }) {
   const router = useRouter();
   const [effLeadId, setEffLeadId] = useState<string | null>(leadId ?? null);
@@ -236,15 +243,15 @@ export function ThreadPanel({
 
   const who = data?.who ?? "…";
 
-  return (
-    // z-[70]: above the mobile BottomNav (z-40) and the nav drawers (z-50) —
-    // at z-40 the nav painted over the reply bar and hid Send on phones.
-    <div className="fixed inset-0 z-[70]" role="dialog" aria-modal="true">
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" onClick={onClose} />
-
-      {/* Sheet — bottom on mobile, right-side on desktop */}
-      <div className="canvas-light absolute inset-x-0 bottom-0 top-14 lg:inset-y-0 lg:left-auto lg:right-0 lg:w-[480px] flex flex-col bg-steward-base border-t-2 lg:border-t-0 lg:border-l-2 border-cream">
+  const sheet = (
+      // Sheet — bottom on mobile, right-side on desktop; or an inline column.
+      <div
+        className={
+          variant === "inline"
+            ? "h-full min-h-0 flex flex-col bg-steward-surface border-l-2 border-cream"
+            : "canvas-light absolute inset-x-0 bottom-0 top-14 lg:inset-y-0 lg:left-auto lg:right-0 lg:w-[480px] flex flex-col bg-steward-base border-t-2 lg:border-t-0 lg:border-l-2 border-cream"
+        }
+      >
         {/* Header */}
         <div className="flex items-start justify-between gap-3 px-4 py-3 border-b border-white/[0.06]">
           <div className="min-w-0">
@@ -390,6 +397,17 @@ export function ThreadPanel({
           )}
         </div>
       </div>
+  );
+
+  if (variant === "inline") return sheet;
+
+  return (
+    // z-[70]: above the mobile BottomNav (z-40) and the nav drawers (z-50) —
+    // at z-40 the nav painted over the reply bar and hid Send on phones.
+    <div className="fixed inset-0 z-[70]" role="dialog" aria-modal="true">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" onClick={onClose} />
+      {sheet}
     </div>
   );
 }
