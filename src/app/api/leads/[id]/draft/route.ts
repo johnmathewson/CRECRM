@@ -58,28 +58,30 @@ export async function POST(
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
-  // If force, clear existing draft first so the helper doesn't short-circuit
-  if (body.force) {
-    await supabase.from("leads").update({ draft_reply: null }).eq("id", leadId);
-  }
-
   const result = await draftLeadReply({
     supabase,
     organizationId: ORG_ID,
     leadId,
     tone,
     engagementSignal: body.engagement_signal || null,
+    // force = John pressed the button: draft even if a draft exists or a
+    // reply was already sent (a follow-up). The drafter still refuses spam.
+    force: !!body.force,
   });
 
   if (!result.ok) {
+    // A draft that already exists IS the answer the caller wants.
+    if (result.skipped === "already_drafted" && result.draft) {
+      return NextResponse.json({ ok: true, lead_id: leadId, tone, draft: result.draft, reused: true });
+    }
+    const reason =
+      result.skipped === "already_sent" ? "A reply was already sent on this lead — pass force to draft a follow-up."
+      : result.skipped === "no_email" ? "This lead has no email address to draft to."
+      : result.skipped === "spam" ? "This lead is marked spam."
+      : result.error || "Drafter failed";
     return NextResponse.json(
-      {
-        ok: false,
-        error: result.error || result.skipped || "unknown",
-        skipped: result.skipped || null,
-        existing_draft: result.draft || null,
-      },
-      { status: result.skipped ? 200 : 500 }
+      { ok: false, error: reason, skipped: result.skipped || null },
+      { status: result.skipped ? 409 : 500 }
     );
   }
 
@@ -87,6 +89,8 @@ export async function POST(
     ok: true,
     lead_id: leadId,
     tone,
+    // The full draft — the panel puts it straight into the composer.
+    draft: result.draft,
     draft_preview: result.draft?.slice(0, 200) || null,
     char_count: result.draft?.length || 0,
     model: result.model,

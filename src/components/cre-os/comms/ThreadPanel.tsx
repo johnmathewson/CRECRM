@@ -205,19 +205,27 @@ export function ThreadPanel({
     try {
       const id = await ensureLead();
       if (!id) throw new Error("No lead or contact to draft for");
-      const res = await fetch(`/api/leads/${id}/draft`, { method: "POST" });
+      // force: John pressed the button — draft even if one exists or a
+      // reply already went out (a follow-up). Without it the route
+      // answered "already sent" with 200 and the composer stayed empty.
+      const res = await fetch(`/api/leads/${id}/draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ force: true }),
+      });
       const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "Drafter failed");
-      const fresh = (json?.draft_reply as string) ?? null;
-      if (fresh) setText(fresh);
-      else {
-        // Route may not echo the draft — pull it from the refetched lead
+      if (!res.ok || !json?.ok) throw new Error(json?.error || "Drafter failed");
+      let fresh = (json?.draft as string) ?? null;
+      if (!fresh) {
+        // Belt and braces — pull it from the refetched lead
         const res2 = await fetch(`/api/leads/${id}`);
         const json2 = await res2.json();
-        if (json2?.lead?.draft_reply) setText(json2.lead.draft_reply);
+        fresh = json2?.lead?.draft_reply ?? null;
       }
+      if (!fresh) throw new Error("The drafter returned nothing — try again");
+      setText(fresh);
       setDraftLoaded(true);
-      setNotice({ kind: "ok", msg: "Fresh draft ready — edit and send" });
+      setNotice({ kind: "ok", msg: "Draft ready — edit and send" });
       await loadThread(id);
     } catch (e) {
       setNotice({ kind: "err", msg: e instanceof Error ? e.message : "Drafter failed" });

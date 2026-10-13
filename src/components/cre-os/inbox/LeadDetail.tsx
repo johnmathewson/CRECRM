@@ -115,9 +115,15 @@ export function LeadDetail({ lead }: { lead: LeadDetailData }) {
   async function regenerateDraft() {
     setActionState({ busy: "redraft", error: null, success: null });
     try {
-      const res = await fetch(`/api/leads/${lead.id}/draft`, { method: "POST" });
+      // force: the button is John asking — draft even if one exists or a
+      // reply already went out.
+      const res = await fetch(`/api/leads/${lead.id}/draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ force: true }),
+      });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Drafter failed");
+      if (!res.ok || !data?.ok) throw new Error(data?.error || "Drafter failed");
       setActionState({ busy: null, error: null, success: "Fresh draft generated" });
       startTransition(() => router.refresh());
     } catch (e: any) {

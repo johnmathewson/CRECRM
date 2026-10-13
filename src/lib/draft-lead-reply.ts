@@ -43,6 +43,13 @@ export interface DraftLeadReplyOpts {
    * Ignored for first_touch.
    */
   engagementSignal?: string | null;
+  /**
+   * John asked for a draft by hand (the "AI draft" button). Bypass the
+   * already-sent / already-drafted guards — those exist so the crons don't
+   * overwrite his work, not to refuse him a follow-up on a lead he has
+   * already replied to. Spam is still refused.
+   */
+  force?: boolean;
 }
 
 export interface DraftLeadReplyResult {
@@ -129,7 +136,7 @@ async function recordEvent(
 export async function draftLeadReply(
   opts: DraftLeadReplyOpts
 ): Promise<DraftLeadReplyResult> {
-  const { supabase, organizationId, leadId, tone, engagementSignal } = opts;
+  const { supabase, organizationId, leadId, tone, engagementSignal, force = false } = opts;
 
   // Load the lead + contact + matched property facts. Single query that
   // pulls everything we need.
@@ -152,12 +159,13 @@ export async function draftLeadReply(
     };
   }
 
-  // Skip if already sent — don't overwrite a sent reply
-  if (lead.final_sent_at) {
+  // Skip if already sent — don't overwrite a sent reply (crons only; a
+  // forced request is John asking for a follow-up draft)
+  if (lead.final_sent_at && !force) {
     return { ok: false, skipped: "already_sent" };
   }
   // Skip if a draft already exists and we're not explicitly re-drafting
-  if (lead.draft_reply) {
+  if (lead.draft_reply && !force) {
     return { ok: false, skipped: "already_drafted", draft: lead.draft_reply };
   }
   // Skip spam

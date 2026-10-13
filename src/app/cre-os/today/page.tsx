@@ -42,6 +42,7 @@ export default async function TodayPage() {
     seen.add(key);
     waiting.push({
       id: r.id,
+      kind: "comm",
       leadId: r.leadId,
       contactId: r.contactId,
       who: r.who,
@@ -61,6 +62,7 @@ export default async function TodayPage() {
     .slice(0, 8)
     .map(({ l }) => ({
       id: l.id,
+      kind: "lead" as const,
       leadId: l.id,
       contactId: l.contactId,
       who: l.senderDisplay,
