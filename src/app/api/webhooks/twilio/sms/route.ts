@@ -135,6 +135,9 @@ export async function POST(req: NextRequest) {
     .select("id, full_name")
     .eq("organization_id", ORG_ID)
     .or(`phone.eq.${normalizedFrom},phone.eq.${from}`)
+    // One row: two contacts on the same number used to make maybeSingle()
+    // error → null → the text and its lead were created with no person.
+    .limit(1)
     .maybeSingle();
 
   const { data: mirrorRow, error: mirrorErr } = await supabase
@@ -285,7 +288,10 @@ export async function POST(req: NextRequest) {
         .from("communications")
         .update({
           property_id: parent.property_id,
-          contact_id: parent.contact_id ?? phoneContact?.id ?? null,
+          // The counterparty is the SENDER (matched by phone) first; the
+          // parent's contact is only a fallback. Preferring the parent filed a
+          // colleague's text under whoever we last messaged on that thread.
+          contact_id: phoneContact?.id ?? parent.contact_id ?? null,
         })
         .eq("id", mirrorRow.id);
     }
@@ -360,7 +366,8 @@ export async function POST(req: NextRequest) {
         .from("communications")
         .update({
           lead_id: lead.id,
-          contact_id: lead.contact_id ?? contact?.id ?? null,
+          // Sender first, lead's contact as fallback (same rule as above).
+          contact_id: contact?.id ?? lead.contact_id ?? null,
           property_id: lead.property_id ?? null,
         })
         .eq("id", mirrorRow.id);
