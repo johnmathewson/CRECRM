@@ -1,5 +1,40 @@
 import type { Config } from "tailwindcss";
 
+/**
+ * Stewardship CRE Brand Guide v1.0 (2026) — Ink & Copper, Archivo only,
+ * zero radius, no shadows, no gradients. See CLAUDE.md "Brand".
+ *
+ * The old token NAMES (coral / teal / amber / cream / steward-*) are kept so
+ * ~3,400 existing class usages keep working; their VALUES now resolve to the
+ * brand ramps:
+ *   coral → Copper (the one accent)
+ *   teal  → Ink neutrals (there is no second accent; "positive" is quiet)
+ *   amber → Copper 500/700 (attention, still copper)
+ *   cream → Bone / Ink text channel
+ */
+const INK = {
+  100: "#F7F6F4",
+  200: "#E7E4DE",
+  300: "#D5D2CC",
+  400: "#B6B8B9",
+  500: "#9AA0A6",
+  600: "#6B7076",
+  700: "#4A5056",
+  800: "#2E353B",
+  900: "#191D21",
+};
+const COPPER = {
+  100: "#FDF1EB",
+  200: "#F8DFD2",
+  300: "#EFC0A6",
+  400: "#E2966F",
+  500: "#CE6E42",
+  600: "#B4552F",
+  700: "#7E361B",
+  800: "#5C2614",
+  900: "#3D1D12",
+};
+
 const config: Config = {
   content: [
     "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
@@ -7,130 +42,123 @@ const config: Config = {
     "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   theme: {
+    // Zero radius everywhere (brand). `rounded-full` stays for avatars.
+    borderRadius: {
+      none: "0",
+      sm: "0",
+      DEFAULT: "0",
+      md: "0",
+      lg: "0",
+      xl: "0",
+      "2xl": "0",
+      "3xl": "0",
+      panel: "0",
+      inner: "0",
+      full: "9999px",
+    },
     extend: {
       colors: {
-        // Brand backgrounds — charcoal-anchored (dropped green tint per
-        // brand evolution; mirrors the editorial financial-terminal feel
-        // closer than the teal-base did).
-        // Semantic surface tokens are CSS-variable channels so a single
-        // `.canvas-light` scope can flip the main content area to the light
-        // "slate glass" theme while the nav chrome (sidebar/topbar/rail)
-        // keeps the dark defaults. Channel form ("13 13 13") preserves
-        // Tailwind opacity modifiers (bg-steward-base/80 still works).
+        // Semantic surface tokens are CSS-variable channels so `.canvas-light`
+        // (the content area) runs Bone/White while the nav chrome stays Ink.
         steward: {
-          base: "rgb(var(--bg) / <alpha-value>)",        // page / canvas background
-          dark: "rgb(var(--surface) / <alpha-value>)",   // alt bg / sticky overlays
-          mid: "rgb(var(--surface-hi) / <alpha-value>)", // raised surface (cards, panels)
-          panel: "rgb(var(--surface-panel) / <alpha-value>)", // active / selected panel
+          base: "rgb(var(--bg) / <alpha-value>)",
+          dark: "rgb(var(--surface) / <alpha-value>)",
+          mid: "rgb(var(--surface-hi) / <alpha-value>)",
+          panel: "rgb(var(--surface-panel) / <alpha-value>)",
           ink: "rgb(var(--bg) / <alpha-value>)",
           surface: "rgb(var(--surface) / <alpha-value>)",
           surfaceHi: "rgb(var(--surface-hi) / <alpha-value>)",
         },
+        ink: INK,
+        copper: { ...COPPER, DEFAULT: COPPER[600] },
+        bone: "#F0EDE7",
+        // Legacy accent names → brand values.
         coral: {
-          50:  "#FCF1EE",
-          100: "#F8DBD2",
-          200: "#F2BCAB",
-          300: "#EA9A82",
-          400: "#E07A5F",
-          500: "#C66648",
-          600: "#A55236",
-          700: "#843E27",
-          800: "#5F2C1B",
-          900: "#3A1A10",
-          DEFAULT: "#E07A5F",
-          muted: "rgba(224,122,95,0.22)",
-          glow: "rgba(224,122,95,0.35)",
+          50: COPPER[100],
+          100: COPPER[100],
+          200: COPPER[200],
+          300: COPPER[400], // light accent text on Ink chrome
+          400: COPPER[600], // the accent
+          500: COPPER[700],
+          600: COPPER[800],
+          700: COPPER[900],
+          800: COPPER[900],
+          900: COPPER[900],
+          DEFAULT: COPPER[600],
+          muted: "rgba(180,85,47,0.18)",
+          glow: "rgba(180,85,47,0.18)",
         },
         teal: {
-          50:  "#EDFAF8",
-          100: "#D0F4EE",
-          200: "#A3E8DD",
-          300: "#6DD8C9",
-          400: "#4ECDC4",
-          500: "#3CB8AD",
-          600: "#2E9A91",
-          700: "#247B74",
-          800: "#1A5C57",
-          900: "#103D3A",
-          DEFAULT: "#4ECDC4",
-          muted: "rgba(78,205,196,0.22)",
+          50: INK[100],
+          100: INK[200],
+          200: INK[300],
+          300: INK[400], // quiet "done" text on Ink chrome
+          400: INK[500],
+          500: INK[600],
+          600: INK[700],
+          700: INK[800],
+          800: INK[900],
+          900: INK[900],
+          DEFAULT: INK[500],
+          muted: "rgba(107,112,118,0.18)",
         },
-        // "cream" is the INK/text color. Variable-channel so text flips to
-        // slate-black inside `.canvas-light` and stays cream on dark chrome.
-        // (Numeric shades stay literal — used as fixed bright accents.)
         cream: {
-          50:  "#FFFFFF",
-          100: "#FAF8F5",
-          200: "#F0EDE8",
-          300: "#E5E0D8",
-          400: "#D4CEC4",
+          50: "#FFFFFF",
+          100: INK[100],
+          200: "#F0EDE7",
+          300: INK[200],
+          400: INK[300],
           DEFAULT: "rgb(var(--ink) / <alpha-value>)",
-          // Readability contract (2026-07-28): three tiers, all ≥ WCAG-ish
-          // legibility on both canvases. dim = secondary text, muted =
-          // supporting text, subtle = metadata/captions — nothing below 52%.
-          // These three numbers govern ~1,800 usages; change them together
-          // or not at all.
+          // Readability tiers (unchanged contract): dim = secondary, muted =
+          // supporting, subtle = captions. Ink 600 is the lightest text the
+          // brand allows on Bone; 0.62 of Ink lands there.
           muted: "rgb(var(--ink) / 0.72)",
           subtle: "rgb(var(--ink) / 0.62)",
           dim: "rgb(var(--ink) / 0.86)",
         },
         charcoal: {
-          50:  "#F7F7F7",
-          100: "#E3E3E3",
-          200: "#C8C8C8",
-          300: "#A4A4A4",
-          400: "#818181",
-          500: "#666666",
-          600: "#4D4D4D",
-          700: "#383838",
-          800: "#282828",
-          900: "#1A1A1A",
-          950: "#0D0D0D",
+          50: INK[100],
+          100: INK[200],
+          200: INK[300],
+          300: INK[400],
+          400: INK[500],
+          500: INK[600],
+          600: INK[700],
+          700: INK[800],
+          800: INK[800],
+          900: INK[900],
+          950: INK[900],
         },
         emerald: {
-          DEFAULT: "#6BCB77",
-          muted: "rgba(107,203,119,0.20)",
+          DEFAULT: INK[600],
+          muted: "rgba(107,112,118,0.18)",
         },
         amber: {
-          DEFAULT: "#F2C94C",
-          muted: "rgba(242,201,76,0.20)",
+          DEFAULT: COPPER[500],
+          muted: "rgba(206,110,66,0.18)",
         },
       },
       fontFamily: {
-        // Brand voice: Space Grotesk display, DM Sans heading, Inter body,
-        // JetBrains Mono mono. Loaded via next/font (CSS variable indirection).
-        // Display swapped from Cinzel — wanted modern editorial / financial-
-        // terminal energy, not luxury-invitation.
-        display: ["var(--font-space-grotesk)", "system-ui", "sans-serif"],
-        heading: ["var(--font-dm-sans)", "system-ui", "sans-serif"],
-        body:    ["var(--font-inter)", "system-ui", "sans-serif"],
-        mono:    ["var(--font-jetbrains)", "ui-monospace", "monospace"],
-        // `sans` keeps existing legacy stack so old pages don't change.
-        sans: [
-          "-apple-system",
-          "SF Pro Display",
-          "SF Pro Text",
-          "Inter",
-          "BlinkMacSystemFont",
-          "Segoe UI",
-          "sans-serif",
-        ],
+        // Archivo only. The four roles stay as names so existing classes work;
+        // weight does the differentiation (800 headlines, 700 labels, 600 key
+        // figures, 400 body).
+        display: ["var(--font-archivo)", "system-ui", "Helvetica", "sans-serif"],
+        heading: ["var(--font-archivo)", "system-ui", "Helvetica", "sans-serif"],
+        body: ["var(--font-archivo)", "system-ui", "Helvetica", "sans-serif"],
+        mono: ["var(--font-archivo)", "system-ui", "Helvetica", "sans-serif"],
+        sans: ["var(--font-archivo)", "-apple-system", "system-ui", "Helvetica", "sans-serif"],
       },
       backdropBlur: {
-        glass: "24px",
-        "glass-heavy": "30px",
-      },
-      borderRadius: {
-        panel: "6px",
-        inner: "4px",
+        glass: "0px",
+        "glass-heavy": "0px",
       },
       boxShadow: {
-        "panel-flat": "0 0 0 1px rgba(255,255,255,0.04)",
-        "panel-soft": "0 8px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.04)",
-        "coral-glow": "0 0 24px rgba(224,122,95,0.20)",
+        "panel-flat": "none",
+        "panel-soft": "none",
+        "coral-glow": "none",
       },
       letterSpacing: {
-        eyebrow: "0.12em",
+        eyebrow: "0.16em",
       },
     },
   },

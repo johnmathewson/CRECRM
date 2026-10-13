@@ -5,7 +5,7 @@ import { AppShell } from "@/components/cre-os/AppShell";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
 import type { RailSection } from "@/components/cre-os/InsightsRail";
 import { StewardFeedback } from "./StewardFeedback";
-import type { TodayBriefingRow } from "@/app/cre-os/today/page";
+import type { TodayBriefingRow } from "@/lib/cre-os/brief-queries";
 
 /**
  * TodayBriefView — read-only render of the latest Steward brief, plus

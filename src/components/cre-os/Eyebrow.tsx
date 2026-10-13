@@ -1,9 +1,9 @@
 "use client";
 
 /**
- * Eyebrow — small uppercase label above a section, in coral. The signature
- * editorial accent across the CRE OS UI. Numbered eyebrows ("01 PIPELINE")
- * give the page a Bloomberg-section feel.
+ * Eyebrow — small uppercase label above a section. Brand: Archivo 700,
+ * uppercase, 0.16em tracking, Copper for the one accented eyebrow on a
+ * screen, Ink for the rest. Numbered eyebrows ("01 PIPELINE") stay.
  */
 export function Eyebrow({
   children,
@@ -18,12 +18,12 @@ export function Eyebrow({
 }) {
   const colorClass =
     tone === "coral" ? "text-coral-400"
-    : tone === "teal" ? "text-teal-400"
-    : tone === "amber" ? "text-amber"
+    : tone === "amber" ? "text-coral-400"
+    : tone === "teal" ? "text-cream-muted"
     : "text-cream-muted";
   return (
     <div
-      className={`font-heading text-[10px] font-semibold uppercase tracking-eyebrow ${colorClass} ${className}`}
+      className={`font-heading text-[10px] font-bold uppercase tracking-eyebrow ${colorClass} ${className}`}
     >
       {num !== undefined && (
         <span className="font-mono mr-3 opacity-70">

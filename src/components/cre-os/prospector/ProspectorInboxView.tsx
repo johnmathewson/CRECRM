@@ -174,7 +174,7 @@ export function ProspectorInboxView({
       children: (
         <div className="space-y-1.5">
           <Link
-            href="/cre-os/inbox"
+            href="/cre-os/stream"
             className="block px-3 py-2 rounded border border-coral-400/30 bg-coral-400/[0.06] hover:bg-coral-400/[0.12] font-body text-[11px] text-coral-300 hover:text-coral-200"
           >
             View inbox (replies) →
@@ -208,7 +208,7 @@ export function ProspectorInboxView({
             <h1 className="mt-1 font-display font-medium text-2xl text-cream">Cadence Manager</h1>
             <p className="mt-2 font-heading text-[13px] text-cream-dim leading-relaxed max-w-3xl">
               Every outbound touch the agent has sent — what's queued, what's been delivered, what's waiting on a reply.
-              When a contact writes back, it surfaces in your <Link href="/cre-os/inbox" className="text-coral-300 hover:text-coral-200 underline underline-offset-2">main inbox</Link> as a re-opened lead.
+              When a contact writes back, it surfaces in your <Link href="/cre-os/stream" className="text-coral-300 hover:text-coral-200 underline underline-offset-2">main inbox</Link> as a re-opened lead.
             </p>
           </div>
           <button
@@ -251,7 +251,7 @@ export function ProspectorInboxView({
           {/* Replies go to the main inbox — surface the count as a link, not a filter */}
           {snapshot.totals.repliesUnread > 0 && (
             <Link
-              href="/cre-os/inbox"
+              href="/cre-os/stream"
               className="px-2.5 py-1.5 rounded border border-coral-400/40 bg-coral-400/[0.08] font-mono text-[10.5px] uppercase tracking-eyebrow text-coral-300 hover:bg-coral-400/[0.16]"
             >
               {snapshot.totals.repliesUnread} {snapshot.totals.repliesUnread === 1 ? "reply" : "replies"} → open inbox
@@ -358,7 +358,7 @@ function TouchRow({
               {/* Replied touches are handled in the main inbox — surface a direct link */}
               {isReply && (
                 <Link
-                  href="/cre-os/inbox"
+                  href="/cre-os/stream"
                   onClick={(e) => e.stopPropagation()}
                   className="font-mono text-[10px] uppercase tracking-eyebrow text-coral-300 hover:text-coral-200"
                   title="Reply surfaced in your main inbox — open to read and respond"
@@ -513,7 +513,7 @@ function TouchDetailPanel({ touch, onClose }: { touch: InboxTouch; onClose: () =
               and send your response from there — it keeps the thread, AI draft, and contact history all together.
             </p>
             <Link
-              href="/cre-os/inbox"
+              href="/cre-os/stream"
               className="inline-flex items-center gap-2 px-4 py-2 rounded border border-coral-400/40 bg-coral-400/[0.12] hover:bg-coral-400/[0.20] font-mono text-[10.5px] uppercase tracking-eyebrow text-coral-300"
             >
               Open inbox →

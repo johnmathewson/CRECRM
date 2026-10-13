@@ -87,19 +87,6 @@ export function RelationshipListView({ contacts }: { contacts: RelationshipCard[
       eyebrow: "Warmth distribution",
       children: <WarmthDistribution counts={warmthDist} total={contacts.length} />,
     },
-    {
-      eyebrow: "Quick actions",
-      children: (
-        <div className="space-y-1.5">
-          <div className="block px-3 py-2 rounded border border-white/[0.04] bg-white/[0.01] font-body text-[11px] text-cream-subtle">
-            Add contact <span className="ml-2 font-mono text-[9px] uppercase">soon</span>
-          </div>
-          <div className="block px-3 py-2 rounded border border-white/[0.04] bg-white/[0.01] font-body text-[11px] text-cream-subtle">
-            Bulk update warmth <span className="ml-2 font-mono text-[9px] uppercase">soon</span>
-          </div>
-        </div>
-      ),
-    },
   ];
 
   return (

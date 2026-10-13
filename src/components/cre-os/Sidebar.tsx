@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -112,45 +113,31 @@ const ICON = {
   ),
 };
 
-const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
-  {
-    label: "Operate",
-    items: [
-      { label: "Today's Brief", href: "/cre-os/today",          icon: ICON.sun },
-      { label: "Home",          href: "/cre-os",                icon: ICON.home,     legacyHref: "/" },
-      { label: "Properties",    href: "/cre-os/properties",     icon: ICON.building, legacyHref: "/properties" },
-      { label: "Pipeline",      href: "/cre-os/pipeline",       icon: ICON.pipeline, legacyHref: "/deals" },
-      // Inbox tab retired 2026-07-29 — the stream owns triage + reply now.
-      // /cre-os/inbox/[id] lead files remain live for every deeplink.
-      { label: "Communications", href: "/cre-os/stream",        icon: ICON.inbox },
-      { label: "Outreach tracker", href: "/cre-os/communications", icon: ICON.mail },
-      { label: "Relationships", href: "/cre-os/relationships",  icon: ICON.users,    legacyHref: "/contacts" },
-    ],
-  },
-  {
-    label: "Intelligence",
-    items: [
-      { label: "Buyers",     href: "/cre-os/buyers",     icon: ICON.users },
-      { label: "Prospector", href: "/cre-os/prospector", icon: ICON.radar },
-      { label: "Listings",   href: "/cre-os/listings",   icon: ICON.trending },
-      { label: "Market",     href: "/cre-os/market",     icon: ICON.globe,    legacyHref: "/comps" },
-      { label: "Valuation",  href: "/cre-os/valuate",    icon: ICON.scale,    legacyHref: "/valuate" },
-      { label: "Reports",    href: "/cre-os/reports",    icon: ICON.chart },
-      { label: "Documents",  href: "/cre-os/documents",  icon: ICON.doc },
-    ],
-  },
-  {
-    label: "Share",
-    items: [
-      { label: "Portals", href: "/cre-os/portals", icon: ICON.link },
-    ],
-  },
-  {
-    label: "System",
-    items: [
-      { label: "Settings", href: "/cre-os/settings", icon: ICON.cog },
-    ],
-  },
+/**
+ * Seven destinations (Oct 2026 audit: 17 → 7). Everything a broker touches
+ * daily is primary; the analysis layers live under "More" so they stay one
+ * tap away without competing for attention. Home was absorbed by Today;
+ * the Inbox list was retired (lead files at /cre-os/inbox/[id] still work).
+ */
+const PRIMARY: NavItem[] = [
+  { label: "Today",          href: "/cre-os/today",         icon: ICON.sun },
+  { label: "Communications", href: "/cre-os/stream",        icon: ICON.inbox },
+  { label: "Properties",     href: "/cre-os/properties",    icon: ICON.building, legacyHref: "/properties" },
+  { label: "Pipeline",       href: "/cre-os/pipeline",      icon: ICON.pipeline, legacyHref: "/deals" },
+  { label: "People",         href: "/cre-os/relationships", icon: ICON.users,    legacyHref: "/contacts" },
+  { label: "Prospector",     href: "/cre-os/prospector",    icon: ICON.radar },
+  { label: "Settings",       href: "/cre-os/settings",      icon: ICON.cog },
+];
+
+const MORE: NavItem[] = [
+  { label: "Buyers",           href: "/cre-os/buyers",         icon: ICON.users },
+  { label: "Listings",         href: "/cre-os/listings",       icon: ICON.trending },
+  { label: "Market",           href: "/cre-os/market",         icon: ICON.globe,  legacyHref: "/comps" },
+  { label: "Valuation",        href: "/cre-os/valuate",        icon: ICON.scale,  legacyHref: "/valuate" },
+  { label: "Reports",          href: "/cre-os/reports",        icon: ICON.chart },
+  { label: "Documents",        href: "/cre-os/documents",      icon: ICON.doc },
+  { label: "Portals",          href: "/cre-os/portals",        icon: ICON.link },
+  { label: "Outreach tracker", href: "/cre-os/communications", icon: ICON.mail },
 ];
 
 export function Sidebar({
@@ -161,6 +148,33 @@ export function Sidebar({
   onClose?: () => void;
 }) {
   const pathname = usePathname();
+  const isActive = (href: string) => pathname === href || !!pathname?.startsWith(href + "/");
+  // "More" opens by itself when you're on one of its pages.
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreActive = MORE.some((i) => isActive(i.href));
+  const showMore = moreOpen || moreActive;
+
+  const renderItem = (item: NavItem) => {
+    const active = isActive(item.href);
+    return (
+      <Link
+        key={item.href}
+        href={item.href}
+        onClick={onClose}
+        className={`flex items-center gap-3 px-2.5 py-2.5 lg:py-2 transition-colors ${
+          active
+            ? "bg-white/[0.04] text-cream border-l-2 border-coral-400 pl-2"
+            : "text-cream-dim hover:bg-white/[0.04] hover:text-cream active:bg-white/[0.06]"
+        }`}
+      >
+        <span className={active ? "text-coral-300" : "text-cream-subtle"}>{item.icon}</span>
+        <span className="font-heading text-[13px] lg:text-[12px] font-semibold flex-1">{item.label}</span>
+        {item.badge !== undefined && item.badge > 0 && (
+          <span className="font-mono text-[9px] text-coral-300">{item.badge}</span>
+        )}
+      </Link>
+    );
+  };
 
   return (
     <>
@@ -186,8 +200,8 @@ export function Sidebar({
         {/* Brand + mobile close */}
         <div className="px-5 py-4 border-b border-white/[0.04] flex items-start justify-between gap-2">
           <div>
-            <div className="font-display font-medium text-base text-cream tracking-wider">STEWARDSHIP</div>
-            <div className="font-mono text-[9px] text-coral-400 uppercase tracking-eyebrow mt-0.5">CRE OS · Beta</div>
+            <div className="font-display font-extrabold text-base text-cream">Stewardship</div>
+            <div className="font-heading font-bold text-[9px] text-coral-300 uppercase tracking-eyebrow mt-0.5">CRE OS</div>
           </div>
           <button
             onClick={onClose}
@@ -203,36 +217,20 @@ export function Sidebar({
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-5">
-          {NAV_GROUPS.map((group) => (
-            <div key={group.label}>
-              <div className="px-2 mb-2 font-heading text-[9px] font-semibold uppercase tracking-eyebrow text-cream-subtle">
-                {group.label}
-              </div>
-              <div className="space-y-0.5">
-                {group.items.map((item) => {
-                  const active = pathname === item.href || pathname?.startsWith(item.href + "/");
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      onClick={onClose}
-                      className={`flex items-center gap-3 px-2.5 py-2.5 lg:py-2 rounded transition-colors ${
-                        active
-                          ? "bg-coral-400/[0.10] text-cream border-l-2 border-coral-400 pl-2"
-                          : "text-cream-dim hover:bg-white/[0.04] hover:text-cream active:bg-white/[0.06]"
-                      }`}
-                    >
-                      <span className={active ? "text-coral-300" : "text-cream-subtle"}>{item.icon}</span>
-                      <span className="font-heading text-[13px] lg:text-[12px] font-medium flex-1">{item.label}</span>
-                      {item.badge !== undefined && item.badge > 0 && (
-                        <span className="font-mono text-[9px] text-coral-300">{item.badge}</span>
-                      )}
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
+          <div className="space-y-0.5">{PRIMARY.map(renderItem)}</div>
+
+          <div>
+            <button
+              type="button"
+              onClick={() => setMoreOpen((v) => !v)}
+              aria-expanded={showMore}
+              className="w-full flex items-center justify-between px-2.5 py-2 font-heading text-[9px] font-bold uppercase tracking-eyebrow text-cream-subtle hover:text-cream transition-colors"
+            >
+              <span>More</span>
+              <span aria-hidden className="font-mono">{showMore ? "–" : "+"}</span>
+            </button>
+            {showMore && <div className="space-y-0.5 border-t-2 border-white/[0.08] pt-1">{MORE.map(renderItem)}</div>}
+          </div>
         </nav>
 
         {/* Footer */}

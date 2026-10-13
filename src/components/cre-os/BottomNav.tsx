@@ -51,16 +51,29 @@ const ICON_INBOX = (
   </svg>
 );
 
+const ICON_SUN = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" className="w-5 h-5">
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" strokeLinecap="round" />
+  </svg>
+);
+const ICON_USERS = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" className="w-5 h-5">
+    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+// Oct 2026: Today is the home (the decision queue). Comms is the stream +
+// reply bar. Lead files at /cre-os/inbox/[id] still exist for deeplinks.
 const TABS: BottomTab[] = [
-  { href: "/cre-os",                label: "Home",       icon: ICON_HOME },
-  { href: "/cre-os/prospector",     label: "Prospector", icon: ICON_RADAR },
-  // Inbox retired 2026-07-29 — Communications (the stream + ThreadPanel
-  // reply bar) is the one front door. Lead files at /cre-os/inbox/[id]
-  // still exist and every deeplink keeps working.
+  { href: "/cre-os/today",          label: "Today",      icon: ICON_SUN },
   { href: "/cre-os/stream",         label: "Comms",      icon: ICON_INBOX },
   { href: "/cre-os/properties",     label: "Properties", icon: ICON_BUILDING },
   { href: "/cre-os/pipeline",       label: "Pipeline",   icon: ICON_PIPELINE },
+  { href: "/cre-os/relationships",  label: "People",     icon: ICON_USERS },
 ];
+void ICON_HOME;
+void ICON_RADAR;
 
 export function BottomNav() {
   const pathname = usePathname() ?? "";

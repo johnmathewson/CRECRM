@@ -1,97 +1,81 @@
-import { createClient } from "@supabase/supabase-js";
-import { marked } from "marked";
-import { TodayBriefView } from "@/components/cre-os/today/TodayBriefView";
+import { TodayView, type TodayRow } from "@/components/cre-os/today/TodayView";
+import { loadCommsStream } from "@/lib/cre-os/comms-stream-queries";
+import { loadInboxList, type LeadCard } from "@/lib/cre-os/inbox-queries";
+import { loadLatestBrief, briefLede } from "@/lib/cre-os/brief-queries";
 
 /**
- * /cre-os/today — Steward's morning brief inside the CRM.
+ * /cre-os/today — the home. One list of decisions, waiting-first.
  *
- * Same source of truth as the email: reads the most recent row from
- * daily_briefings. Renders content_text as page-styled HTML (we don't
- * reuse the email-grade content_html because it's a full document
- * with inline styles tuned for Gmail/Apple Mail).
+ *   Waiting on you  = people whose latest real message to us has no reply
+ *                     (the same Unanswered rule the Communications stream
+ *                     uses — one definition, comms-stream-queries).
+ *   Next up         = ranked open leads that aren't already waiting
+ *                     (hot first, SLA-overdue, draft ready, new).
  *
- * Feedback widgets at the bottom write back to the same row's
- * feedback_thumbs / feedback_chat columns via /api/agents/steward/feedback.
- *
- * The regenerate button hits /api/agents/steward/run (which kicks the
- * background function). Polling logic + "updated" reload lives in the
- * client view.
+ * Tapping a row opens the ThreadPanel (thread + reply bar); every send goes
+ * through the existing lead routes, so sending clears the row everywhere.
  */
-
-const ORG_ID = "a0000000-0000-0000-0000-000000000001";
-
 export const dynamic = "force-dynamic";
 
-export interface TodayBriefingRow {
-  id: string;
-  brief_type: "daily" | "weekly";
-  brief_date: string;
-  generated_at: string;
-  content_text: string;
-  content_html_inner: string;
-  reasoning: any;
-  sources_read: Record<string, number>;
-  email_sent_at: string | null;
-  feedback_thumbs: Array<{ section: string; value: "up" | "down"; at: string }>;
-  feedback_chat: Array<{ message: string; at: string }>;
-  model_used: string | null;
-  agent_iterations: number | null;
-  tokens_input: number | null;
-  tokens_output: number | null;
-  duration_ms: number | null;
-}
-
-async function loadLatestBrief(): Promise<TodayBriefingRow | null> {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
-  const { data, error } = await supabase
-    .from("daily_briefings")
-    .select(
-      "id, brief_type, brief_date, generated_at, content_text, reasoning, sources_read, " +
-        "email_sent_at, feedback_thumbs, feedback_chat, model_used, agent_iterations, " +
-        "tokens_input, tokens_output, duration_ms"
-    )
-    .eq("organization_id", ORG_ID)
-    .order("generated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error || !data) return null;
-
-  // The daily_briefings table isn't in the generated Supabase TS types
-  // yet, so the row comes back typed as a generic record. Cast and
-  // narrow at this seam — every consumer downstream of this function
-  // sees a fully-typed TodayBriefingRow.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const row = data as any;
-
-  // Pre-render markdown → HTML on the server so the client component
-  // stays small (no marked bundle shipped to the browser).
-  const inner = marked.parse(row.content_text ?? "", { gfm: true, breaks: false, async: false }) as string;
-
-  return {
-    id: row.id,
-    brief_type: row.brief_type,
-    brief_date: row.brief_date,
-    generated_at: row.generated_at,
-    content_text: row.content_text,
-    content_html_inner: inner,
-    reasoning: row.reasoning ?? {},
-    sources_read: row.sources_read ?? {},
-    email_sent_at: row.email_sent_at,
-    feedback_thumbs: Array.isArray(row.feedback_thumbs) ? row.feedback_thumbs : [],
-    feedback_chat: Array.isArray(row.feedback_chat) ? row.feedback_chat : [],
-    model_used: row.model_used,
-    agent_iterations: row.agent_iterations,
-    tokens_input: row.tokens_input,
-    tokens_output: row.tokens_output,
-    duration_ms: row.duration_ms,
-  };
+function priority(l: LeadCard): number {
+  const status = (l.status ?? "").toLowerCase();
+  if (status === "archived" || status === "spam" || status === "sent" || l.finalSent) return -1;
+  let p = 0;
+  if (l.urgency === "hot") p += 500;
+  else if (l.urgency === "warm") p += 250;
+  if (l.slaOverdue) p += 400;
+  if (l.hasDraft) p += 300;
+  if (status === "new") p += 100;
+  return p;
 }
 
 export default async function TodayPage() {
-  const brief = await loadLatestBrief();
-  return <TodayBriefView brief={brief} />;
+  const [stream, leads, brief] = await Promise.all([loadCommsStream(600), loadInboxList(), loadLatestBrief()]);
+
+  // One row per person: their latest unanswered inbound.
+  const seen = new Set<string>();
+  const waiting: TodayRow[] = [];
+  for (const r of stream.rows) {
+    if (!r.unanswered || r.cleared || r.automated) continue;
+    const key = r.contactId ?? r.who;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    waiting.push({
+      id: r.id,
+      leadId: r.leadId,
+      contactId: r.contactId,
+      who: r.who,
+      property: r.property?.name ?? null,
+      what: r.subject || r.preview || `${r.channel} message`,
+      channel: r.channel,
+      when: r.when,
+      action: "Reply",
+    });
+  }
+
+  const waitingContacts = new Set(waiting.map((w) => w.contactId).filter(Boolean) as string[]);
+  const next: TodayRow[] = leads
+    .map((l) => ({ l, p: priority(l) }))
+    .filter((x) => x.p >= 0 && !(x.l.contactId && waitingContacts.has(x.l.contactId)))
+    .sort((a, b) => b.p - a.p)
+    .slice(0, 8)
+    .map(({ l }) => ({
+      id: l.id,
+      leadId: l.id,
+      contactId: l.contactId,
+      who: l.senderDisplay,
+      property: l.property?.name ?? l.propertyLabel,
+      what: l.qualifierSummary || l.rawSubject || "New inquiry",
+      channel: l.source ?? "email",
+      when: l.createdRelative,
+      action: l.hasDraft ? "Send draft" : "Reply",
+    }));
+
+  return (
+    <TodayView
+      waiting={waiting}
+      next={next}
+      brief={brief ? { lede: briefLede(brief.content_text), date: brief.brief_date } : null}
+    />
+  );
 }

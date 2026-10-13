@@ -220,12 +220,6 @@ export function PipelineView({
           >
             Run a BOV → save as deal
           </a>
-          <div className="block px-3 py-2 rounded border border-white/[0.04] bg-white/[0.01] font-body text-[11px] text-cream-subtle">
-            New deal <span className="ml-2 font-mono text-[9px] uppercase">soon</span>
-          </div>
-          <div className="block px-3 py-2 rounded border border-white/[0.04] bg-white/[0.01] font-body text-[11px] text-cream-subtle">
-            Export forecast <span className="ml-2 font-mono text-[9px] uppercase">soon</span>
-          </div>
         </div>
       ),
     },

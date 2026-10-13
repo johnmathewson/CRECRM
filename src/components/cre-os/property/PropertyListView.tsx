@@ -150,12 +150,6 @@ export function PropertyListView({
           <a href="/valuate" className="block px-3 py-2 rounded border border-coral-400/30 bg-coral-400/[0.05] hover:bg-coral-400/[0.10] font-body text-[11px] text-cream font-medium transition-colors">
             New valuation
           </a>
-          <div className="block px-3 py-2 rounded border border-white/[0.04] bg-white/[0.01] font-body text-[11px] text-cream-subtle">
-            Add property <span className="ml-2 font-mono text-[9px] uppercase">soon</span>
-          </div>
-          <div className="block px-3 py-2 rounded border border-white/[0.04] bg-white/[0.01] font-body text-[11px] text-cream-subtle">
-            Generate weekly portfolio report <span className="ml-2 font-mono text-[9px] uppercase">soon</span>
-          </div>
         </div>
       ),
     },
@@ -472,7 +466,7 @@ function buildInsights(properties: PropertyCard[]): InsightItem[] {
       confidence: 100,
       headline: `${totalHot} hot inquir${totalHot === 1 ? "y" : "ies"} across ${hotAssets.length} asset${hotAssets.length === 1 ? "" : "s"}`,
       caption: "Inbound interest the AI flagged hot. SLA target: 60 minutes.",
-      href: "/cre-os/inbox",
+      href: "/cre-os/stream",
       tone: "coral",
     });
   }

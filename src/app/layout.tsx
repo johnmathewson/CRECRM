@@ -23,7 +23,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   // Allow the broker to pinch-zoom for accessibility — capped at 5x.
   maximumScale: 5,
-  themeColor: "#0D0D0D",
+  themeColor: "#191D21",
   // viewport-fit=cover lets us paint into the iOS notch area
   viewportFit: "cover",
 };
@@ -36,12 +36,6 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="font-sans">
-        {/* Ambient background orbs — gives the glass something to frost over */}
-        <div className="bg-orb-coral" />
-        <div className="bg-orb-teal" />
-        <div className="bg-orb-green" />
-        <div className="bg-mesh" />
-
         {/* App shell */}
         <div className="relative z-[1]">{children}</div>
       </body>

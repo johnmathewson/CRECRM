@@ -466,7 +466,7 @@ export function LeadDetail({ lead }: { lead: LeadDetailData }) {
               Mark spam
             </button>
             <a
-              href="/cre-os/inbox"
+              href="/cre-os/stream"
               className="ml-auto font-heading text-[10px] uppercase tracking-eyebrow text-cream-subtle hover:text-cream-dim"
             >
               ← Back to inbox

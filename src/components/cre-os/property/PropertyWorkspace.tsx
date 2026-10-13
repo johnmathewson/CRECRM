@@ -95,14 +95,8 @@ function RailStat({ label, value }: { label: string; value: string }) {
 }
 
 function RailAction({ label, href, disabled }: { label: string; href: string; disabled?: boolean }) {
-  if (disabled) {
-    return (
-      <div className="block px-3 py-2 rounded border border-white/[0.04] bg-white/[0.01] font-body text-[11px] text-cream-subtle cursor-not-allowed">
-        {label}
-        <span className="ml-2 font-mono text-[9px] uppercase">soon</span>
-      </div>
-    );
-  }
+  // A button that does nothing is noise, not a promise. Hide until it works.
+  if (disabled) return null;
   return (
     <a
       href={href}

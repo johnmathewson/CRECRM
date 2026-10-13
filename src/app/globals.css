@@ -2,153 +2,104 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── Base ─────────────────────────────────────── */
+/* ── Base ─────────────────────────────────────────
+   Stewardship CRE Brand Guide v1.0 (2026): Ink & Copper, Archivo, zero
+   radius, no shadows, no gradients, 2px Ink rules between sections. */
 :root {
-  --coral: #E07A5F;
-  --cream: #F0EDE4;
-  --teal: #4ECDC4;
-  --green: #6BCB77;
-  --amber: #F2C94C;
+  --ink-900: #191D21;
+  --copper: #B4552F;
+  --copper-700: #7E361B;
+  --bone: #F0EDE7;
+  --coral: #B4552F;   /* legacy var names kept for old pages */
+  --cream: #F0EDE7;
+  --teal: #6B7076;
+  --green: #6B7076;
+  --amber: #CE6E42;
 
-  /* Semantic surface/ink channels (RGB triplets, space-separated, for
-     Tailwind's rgb(var(--x) / <alpha-value>) pattern). DEFAULTS ARE DARK —
-     this reproduces the existing dark theme exactly. The nav chrome
-     (sidebar / topbar / rail) reads these defaults and stays dark. */
-  --bg: 13 13 13;             /* #0D0D0D page background */
-  --surface: 26 26 26;        /* #1A1A1A cards / panels */
-  --surface-hi: 40 40 40;     /* #282828 raised surface */
-  --surface-panel: 56 56 56;  /* #383838 active panel */
-  --ink: 240 237 228;         /* #F0EDE4 text */
+  /* Semantic surface/ink channels (RGB triplets) for Tailwind's
+     rgb(var(--x) / <alpha-value>). DEFAULTS ARE THE INK CHROME — the
+     sidebar / topbar / rail read these. */
+  --bg: 25 29 33;             /* Ink 900 */
+  --surface: 46 53 59;        /* Ink 800 */
+  --surface-hi: 74 80 86;     /* Ink 700 */
+  --surface-panel: 74 80 86;
+  --ink: 240 237 231;         /* Bone text on Ink */
 }
 
-/* ── Light "slate glass" content theme ─────────────
+/* ── Light content canvas (Bone) ──────────────────
    Scoped to the main content area (AppShell <main>.canvas-light) so the
-   left sidebar + topbar stay dark. Apple-ish frosted glass on a light
-   slate canvas. */
+   chrome stays Ink. Bone ground, White cards, Ink text. Flat. */
 .canvas-light {
-  --bg: 232 236 241;          /* slightly deeper slate so white glass pops */
-  --surface: 255 255 255;     /* white cards (made translucent in glass rule below) */
-  --surface-hi: 248 250 252;
+  --bg: 240 237 231;          /* Bone */
+  --surface: 255 255 255;     /* White cards lifted off Bone */
+  --surface-hi: 247 246 244;  /* Ink 100 */
   --surface-panel: 255 255 255;
-  --ink: 23 28 36;            /* #171C24 deeper slate-black — more contrast */
+  --ink: 25 29 33;            /* Ink 900 */
   color: rgb(var(--ink));
-  /* Liquid glass needs COLOR behind it to refract. A flat slate canvas
-     gives the frost nothing to do. Layer subtle coral + teal radials over
-     the slate so the cards' backdrop-blur picks up faint warm/cool tints
-     and the whole surface feels alive. Fixed so it doesn't scroll. */
   background-color: rgb(var(--bg));
-  background-image:
-    radial-gradient(ellipse 70% 55% at 12% 0%, rgba(224, 122, 95, 0.13), transparent 60%),
-    radial-gradient(ellipse 60% 50% at 100% 8%, rgba(78, 205, 196, 0.12), transparent 58%),
-    radial-gradient(ellipse 80% 60% at 50% 110%, rgba(224, 122, 95, 0.07), transparent 55%);
-  background-attachment: fixed;
 }
 
 /* The literal white-opacity utilities (border-white/[x], bg-white/[x]) are
-   hairlines/fills tuned for dark surfaces — near-invisible on light. Inside
-   the light canvas, retarget them to slate-ink equivalents. Borders are
-   safe to blanket-flip; bg fills are split base vs hover so hover stays
-   hover-only. */
-.canvas-light [class*="border-white/"] { border-color: rgb(27 32 39 / 0.10); }
+   hairlines/fills tuned for dark chrome. On Bone, borders become Ink 200
+   structure lines and fills become faint Ink washes. */
+.canvas-light [class*="border-white/"] { border-color: #E7E4DE; }
 
 .canvas-light .bg-white\/\[0\.01\],
 .canvas-light .bg-white\/\[0\.02\],
-.canvas-light .bg-white\/\[0\.03\] { background-color: rgb(27 32 39 / 0.025); }
+.canvas-light .bg-white\/\[0\.03\] { background-color: #F7F6F4; }
 .canvas-light .bg-white\/\[0\.04\],
-.canvas-light .bg-white\/\[0\.06\] { background-color: rgb(27 32 39 / 0.045); }
+.canvas-light .bg-white\/\[0\.06\] { background-color: #F0EDE7; }
 .canvas-light .bg-white\/\[0\.08\],
-.canvas-light .bg-white\/\[0\.10\] { background-color: rgb(27 32 39 / 0.07); }
+.canvas-light .bg-white\/\[0\.10\] { background-color: #E7E4DE; }
 
 .canvas-light .hover\:bg-white\/\[0\.02\]:hover,
-.canvas-light .hover\:bg-white\/\[0\.03\]:hover { background-color: rgb(27 32 39 / 0.04); }
+.canvas-light .hover\:bg-white\/\[0\.03\]:hover { background-color: #F7F6F4; }
 .canvas-light .hover\:bg-white\/\[0\.04\]:hover,
 .canvas-light .hover\:bg-white\/\[0\.05\]:hover,
-.canvas-light .hover\:bg-white\/\[0\.06\]:hover { background-color: rgb(27 32 39 / 0.06); }
+.canvas-light .hover\:bg-white\/\[0\.06\]:hover { background-color: #F0EDE7; }
 .canvas-light .hover\:bg-white\/\[0\.08\]:hover,
-.canvas-light .hover\:bg-white\/\[0\.10\]:hover { background-color: rgb(27 32 39 / 0.09); }
+.canvas-light .hover\:bg-white\/\[0\.10\]:hover { background-color: #E7E4DE; }
 
-/* Accent TEXT retargets (readability pass 2026-07-28). The -300 accent text
-   shades are pastels tuned for dark chrome — on the light canvas they wash
-   out to near-invisible (the faded chips John flagged). Retarget to deep
-   readable equivalents of the same hue. Attribute selectors catch opacity
-   variants (e.g. text-amber-300/80) too. */
-.canvas-light [class*="text-coral-300"]  { color: #A8472B; }
-.canvas-light [class*="text-coral-400"]  { color: #9E4226; }
-.canvas-light [class*="text-teal-300"]   { color: #0E7C74; }
-.canvas-light [class*="text-teal-400"]   { color: #0B6B64; }
-.canvas-light [class*="text-amber-300"]  { color: #8A6116; }
-.canvas-light [class*="text-amber-400"]  { color: #7C570F; }
-.canvas-light [class*="text-purple-300"] { color: #6D5BB8; }
-.canvas-light [class*="text-blue-300"]   { color: #2D6CB5; }
+/* Accent TEXT on Bone: body-size copper is Copper 700 (brand); the quiet
+   "positive" shades are Ink 700. Attribute selectors catch opacity
+   variants (text-amber-300/80) too. */
+.canvas-light [class*="text-coral-300"],
+.canvas-light [class*="text-coral-400"],
+.canvas-light [class*="text-coral-200"] { color: #7E361B; }
+.canvas-light [class*="text-teal-300"],
+.canvas-light [class*="text-teal-400"]  { color: #4A5056; }
+.canvas-light [class*="text-amber"]     { color: #7E361B; }
+.canvas-light [class*="text-purple-300"],
+.canvas-light [class*="text-blue-300"]  { color: #4A5056; }
 .canvas-light [class*="text-green-300"],
-.canvas-light [class*="text-emerald-300"] { color: #2F7D46; }
+.canvas-light [class*="text-emerald-300"] { color: #4A5056; }
+.canvas-light [class*="text-red-300"]   { color: #7E361B; }
 
-/* Whole-element opacity clamps. 91 usages of opacity-40/50/60 fade entire
-   chips/buttons/rows — tolerable on dark chrome, illegible on the light
-   canvas (this stacked ON TOP of pastel text colors). Clamp to 0.72 so
-   "de-emphasized" still reads as text, not a watermark. Disabled states
-   keep their look via cursor + border; if a surface truly needs deeper
-   fade, use a bg tint, not element opacity. */
+/* Whole-element opacity clamps: "de-emphasized" still reads as text. */
 .canvas-light .opacity-40,
 .canvas-light .opacity-50,
 .canvas-light .opacity-60 { opacity: 0.72; }
 
-/* LIQUID GLASS cards. The trick is translucency + heavy backdrop-blur +
-   a saturation boost (so colors behind the glass go vivid — this is what
-   makes accents POP), plus a bright top edge-highlight and a layered
-   ambient shadow for real depth. Translucent (not opaque) so the colored
-   canvas refracts through.
-   Specificity (.canvas-light .bg-steward-*) beats the var-based utility,
-   so these win without !important. */
+/* Cards: White on Bone, flat, no blur. (Specificity beats the var-based
+   utility so these win without !important.) */
 .canvas-light .bg-steward-surface,
-.canvas-light .bg-steward-dark {
-  background-color: rgba(255, 255, 255, 0.58);
-  border: 1px solid rgba(255, 255, 255, 0.65);
-  border-top-color: rgba(255, 255, 255, 0.9);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.85),
-    0 1px 2px rgba(23, 28, 36, 0.05),
-    0 10px 30px rgba(23, 28, 36, 0.10);
-  backdrop-filter: blur(22px) saturate(1.9);
-  -webkit-backdrop-filter: blur(22px) saturate(1.9);
-}
+.canvas-light .bg-steward-dark,
 .canvas-light .bg-steward-mid,
-.canvas-light .bg-steward-surfaceHi {
-  background-color: rgba(255, 255, 255, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.7);
-  border-top-color: rgba(255, 255, 255, 0.95);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.9),
-    0 1px 2px rgba(23, 28, 36, 0.05),
-    0 10px 30px rgba(23, 28, 36, 0.10);
-  backdrop-filter: blur(22px) saturate(1.9);
-  -webkit-backdrop-filter: blur(22px) saturate(1.9);
-}
+.canvas-light .bg-steward-surfaceHi,
 .canvas-light .bg-steward-panel {
-  background-color: rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(255, 255, 255, 0.8);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.95),
-    0 2px 4px rgba(23, 28, 36, 0.06),
-    0 12px 34px rgba(23, 28, 36, 0.12);
-  backdrop-filter: blur(22px) saturate(1.9);
-  -webkit-backdrop-filter: blur(22px) saturate(1.9);
+  background-color: #FFFFFF;
+  border-color: #E7E4DE;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
+/* Translucent surface variants (bg-steward-surface/40 etc.) → solid white. */
+.canvas-light [class*="bg-steward-surface/"],
+.canvas-light [class*="bg-steward-dark/"],
+.canvas-light [class*="bg-steward-mid/"] { background-color: #FFFFFF; }
 
-/* Make the accent chips/badges/pills POP on the light glass — richer
-   fills + saturated text than the dark-tuned faint tints. */
-.canvas-light .text-coral-400,
-.canvas-light .text-coral-300 { color: #C6552F; }   /* deeper coral reads on white */
-.canvas-light .text-teal-400,
-.canvas-light .text-teal-300 { color: #1E9C90; }    /* deeper teal reads on white */
-.canvas-light .text-amber { color: #B8860B; }       /* amber on white needs depth */
-/* The stock Tailwind amber-200/300/400 are bright yellows that vanish on the
-   light glass (the theme only darkens the custom `.text-amber`). Retarget the
-   numeric text shades to a deep amber so warnings/notes stay readable. Borders,
-   bg fills and ::marker keep their bright tint — only the text color flips. */
-.canvas-light .text-amber-200,
-.canvas-light .text-amber-300,
-.canvas-light .text-amber-400 { color: #B45309; }   /* amber-700 — reads on white */
+/* No gradients, anywhere. */
+.canvas-light [class*="bg-gradient-to"] { background-image: none; }
 
 html {
   -webkit-font-smoothing: antialiased;
@@ -156,61 +107,49 @@ html {
 }
 
 body {
-  /* Charcoal-anchored ink — subtle 4-stop gradient through the charcoal scale,
-     no green tint. Editorial financial-terminal energy. */
-  background: linear-gradient(160deg, #0D0D0D 0%, #141414 30%, #1A1A1A 60%, #0D0D0D 100%);
+  background: #191D21;
   color: var(--cream);
   min-height: 100vh;
+  font-feature-settings: "kern";
 }
 
-/* ── Glassmorphism layers ─────────────────────── */
+/* Figures line up (prices, SF, counts). The old mono role now renders in
+   Archivo, so tabular figures come from the feature flag, not the face. */
+.font-mono,
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* Headlines: Archivo 800, tight tracking (brand). */
+.font-display { letter-spacing: -0.02em; }
+
+/* Focus: 2px Copper outline, 2px offset. */
+:focus-visible {
+  outline: 2px solid #B4552F;
+  outline-offset: 2px;
+}
+
+/* ── Flat panel classes (legacy names, brand values) ─────── */
 @layer components {
   .glass {
-    background: rgba(255, 255, 255, 0.04);
-    backdrop-filter: blur(24px) saturate(1.4);
-    -webkit-backdrop-filter: blur(24px) saturate(1.4);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-top-color: rgba(255, 255, 255, 0.14);
-    border-radius: 6px;
-    box-shadow:
-      0 8px 32px rgba(0, 0, 0, 0.25),
-      inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    background: rgb(var(--surface));
+    border: 1px solid #2E353B;
   }
-
   .glass-inner {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 4px;
+    background: rgb(var(--surface-hi));
+    border: 1px solid #2E353B;
   }
-
   .glass-nav {
-    background: rgba(255, 255, 255, 0.03);
-    backdrop-filter: blur(30px) saturate(1.4);
-    -webkit-backdrop-filter: blur(30px) saturate(1.4);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
+    background: rgb(var(--bg));
+    border-bottom: 1px solid #2E353B;
   }
-
   .glass-ai {
-    background: rgba(255, 255, 255, 0.035);
-    backdrop-filter: blur(28px) saturate(1.4);
-    -webkit-backdrop-filter: blur(28px) saturate(1.4);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-top-color: rgba(255, 255, 255, 0.12);
-    border-radius: 6px;
-    box-shadow:
-      0 8px 32px rgba(0, 0, 0, 0.25),
-      inset 0 1px 0 rgba(255, 255, 255, 0.05);
-    transition: all 0.3s ease;
+    background: rgb(var(--surface));
+    border: 1px solid #2E353B;
   }
-
   .glass-ai:focus-within {
-    background: rgba(255, 255, 255, 0.055);
-    border-top-color: rgba(224, 122, 95, 0.25);
-    box-shadow:
-      0 8px 40px rgba(0, 0, 0, 0.3),
-      0 0 30px rgba(224, 122, 95, 0.35),
-      inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    border-color: #B4552F;
   }
 }
 
@@ -220,14 +159,12 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 2px solid #191D21;
 }
-
 .panel-header h3 {
   font-size: 12.5px;
-  font-weight: 600;
-  letter-spacing: 0.2px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
   margin: 0;
 }
 
@@ -235,112 +172,44 @@ body {
 .icon-btn {
   width: 26px;
   height: 26px;
-  border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.03);
-  color: rgba(240, 237, 228, 0.3);
+  border: 1px solid #2E353B;
+  background: transparent;
+  color: rgb(var(--ink) / 0.62);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   font-size: 12px;
   padding: 0;
-  transition: all 0.15s ease;
+  transition: color 0.15s ease, border-color 0.15s ease;
 }
-
 .icon-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(240, 237, 228, 0.6);
+  border-color: #B4552F;
+  color: rgb(var(--ink));
 }
 
-/* ── Ambient background orbs ──────────────────── */
-.bg-orb-coral {
-  position: fixed;
-  top: -15%;
-  right: -10%;
-  width: 55vw;
-  height: 55vw;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(224, 122, 95, 0.12) 0%, rgba(224, 122, 95, 0.04) 40%, transparent 70%);
-  pointer-events: none;
-}
-
-.bg-orb-teal {
-  position: fixed;
-  bottom: -20%;
-  left: -15%;
-  width: 65vw;
-  height: 65vw;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(78, 205, 196, 0.10) 0%, rgba(78, 205, 196, 0.03) 40%, transparent 70%);
-  pointer-events: none;
-}
-
-.bg-orb-green {
-  position: fixed;
-  top: 40%;
-  left: 30%;
-  width: 40vw;
-  height: 40vw;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(107, 203, 119, 0.06) 0%, transparent 60%);
-  pointer-events: none;
-}
-
-.bg-mesh {
-  position: fixed;
-  inset: 0;
-  opacity: 0.35;
-  background:
-    radial-gradient(ellipse at 20% 50%, rgba(224, 122, 95, 0.06) 0%, transparent 50%),
-    radial-gradient(ellipse at 80% 20%, rgba(78, 205, 196, 0.05) 0%, transparent 50%),
-    radial-gradient(ellipse at 60% 80%, rgba(242, 201, 76, 0.04) 0%, transparent 50%);
-  pointer-events: none;
-}
-
-/* ── Tabular numbers for financial data ───────── */
-.tnum {
-  font-feature-settings: 'tnum';
-}
+/* Ambient orbs retired with the brand — kept as no-ops so old markup is harmless. */
+.bg-orb-coral, .bg-orb-teal, .bg-orb-green, .bg-mesh { display: none; }
 
 /* ── Scrollbar ────────────────────────────────── */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.18);
-}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgb(var(--ink) / 0.2); }
+::-webkit-scrollbar-thumb:hover { background: rgb(var(--ink) / 0.35); }
 
 /* ── Selection ────────────────────────────────── */
 ::selection {
-  background: rgba(224, 122, 95, 0.3);
-  color: var(--cream);
+  background: #F8DFD2;
+  color: #191D21;
 }
 
-/* ── Hide scrollbar utility (for horizontal tab strips on mobile) ─ */
-.no-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
-}
+/* ── Hide scrollbar utility (horizontal tab strips on mobile) ─ */
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
 
 /* ── Mobile-friendliness baseline ─────────────── */
 @media (max-width: 1023px) {
-  /* Stop iOS from auto-zooming on focused inputs/selects/textareas. The
-     16px floor on form-control text is the magic threshold. */
+  /* 16px floor on form controls stops iOS auto-zoom on focus. */
   input:not([type="checkbox"]):not([type="radio"]),
   select,
   textarea {
