@@ -191,14 +191,19 @@ export function TodayView({
             <div className="font-heading text-[11px] font-bold uppercase tracking-eyebrow text-cream-muted">{today}</div>
             <h1 className="mt-1 font-display text-[30px] font-extrabold text-cream leading-none">Today</h1>
           </div>
-          {brief && (
-            <Link
-              href="/cre-os/today/brief"
-              className="hidden lg:inline-block font-heading text-[12px] font-semibold text-coral-400 hover:text-coral-500"
-            >
-              Read Steward&apos;s full brief →
-            </Link>
-          )}
+          <div className="hidden lg:flex items-baseline gap-5">
+            {desktop && (
+              <span className="font-mono text-[11px] text-cream-subtle">↓ ↑ move · Enter open · Esc close</span>
+            )}
+            {brief && (
+              <Link
+                href="/cre-os/today/brief"
+                className="font-heading text-[12px] font-semibold text-coral-400 hover:text-coral-500"
+              >
+                Read Steward&apos;s full brief →
+              </Link>
+            )}
+          </div>
         </header>
 
         {brief && (

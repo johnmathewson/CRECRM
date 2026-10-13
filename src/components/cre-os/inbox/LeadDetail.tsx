@@ -479,7 +479,7 @@ export function LeadDetail({ lead }: { lead: LeadDetailData }) {
               href="/cre-os/stream"
               className="ml-auto font-heading text-[10px] uppercase tracking-eyebrow text-cream-subtle hover:text-cream-dim"
             >
-              ← Back to inbox
+              ← Communications
             </a>
           </div>
         </div>
