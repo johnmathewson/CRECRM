@@ -282,6 +282,14 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
       // Fetch each new message + dispatch to intake. Done sequentially to avoid
       // hammering Gmail's quota and to keep ordering stable.
       const origin = req.nextUrl.origin;
+      // Every connected mailbox is "us", not just the one being polled.
+      // Mail John sends from john@ into an inquiries@ thread used to pass
+      // this check and get logged as an INBOUND reply under the client's
+      // contact — then sent-sync logged it again as outbound: a double log
+      // with a flipped direction. (The sent-sync job already builds this set.)
+      const ourMailboxes = new Set(
+        (await getActiveGmailTokens(supabase)).map((t) => t.email.toLowerCase())
+      );
       let dispatched = 0;
       for (const msgRef of newMessages) {
         try {
@@ -294,7 +302,11 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
 
           // Skip: our own outbound shouldn't appear here (filtered above), but
           // double-check — anything from our connected mailbox is us.
-          if (fromEmail && fromEmail.toLowerCase() === token.email.toLowerCase()) {
+          if (
+            fromEmail &&
+            (fromEmail.toLowerCase() === token.email.toLowerCase() ||
+              ourMailboxes.has(fromEmail.toLowerCase()))
+          ) {
             await logIngest(supabase, {
               gmailMessageId: msg.id,
               gmailThreadId: msg.threadId,
