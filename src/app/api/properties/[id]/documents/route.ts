@@ -12,6 +12,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { createStorageClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -44,9 +45,12 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  // Storage needs a role the bucket policies trust (service or the broker's
+  // own session) — the anon key is deliberately blind to this bucket.
+  const { client: storage } = await createStorageClient();
   const documents = await Promise.all(
     (rows ?? []).map(async (r) => {
-      const { data: signed } = await sb.storage
+      const { data: signed } = await storage.storage
         .from(BUCKET)
         .createSignedUrl(r.file_path, 60 * 30); // 30 min — fresh on each render
       return { ...r, signed_url: signed?.signedUrl ?? null };
@@ -57,6 +61,12 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const sb = svc();
+  const { client: storage, role } = await createStorageClient();
+  if (role === "anon") {
+    // No service key and no session: the bucket will refuse the write.
+    // Say so instead of letting the RLS error read like a mystery.
+    return NextResponse.json({ error: "Sign in to upload documents" }, { status: 401 });
+  }
 
   // Verify property belongs to org
   const { data: prop } = await sb
@@ -86,13 +96,17 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   const path = storageKey(params.id, fileName);
 
-  const { error: upErr } = await sb.storage.from(BUCKET).upload(path, file, {
+  const { error: upErr } = await storage.storage.from(BUCKET).upload(path, file, {
     contentType: file.type || "application/octet-stream",
     cacheControl: "3600",
     upsert: false,
   });
   if (upErr) {
-    return NextResponse.json({ error: `Upload failed: ${upErr.message}` }, { status: 500 });
+    // The bucket only accepts PDF, JPEG/PNG, XLSX/XLS, DOCX, ZIP (100MB).
+    const friendly = /mime type/i.test(upErr.message)
+      ? `That file type isn't allowed in the vault (${file.type || "unknown type"}). PDF, Excel, Word, images, or ZIP.`
+      : `Upload failed: ${upErr.message}`;
+    return NextResponse.json({ error: friendly }, { status: 500 });
   }
 
   const { data: row, error: insErr } = await sb
@@ -113,12 +127,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   if (insErr) {
     // Best-effort cleanup of the orphaned upload
-    await sb.storage.from(BUCKET).remove([path]).catch(() => {});
+    await storage.storage.from(BUCKET).remove([path]).catch(() => {});
     return NextResponse.json({ error: insErr.message }, { status: 500 });
   }
 
   // Return with signed URL so UI can immediately link
-  const { data: signed } = await sb.storage.from(BUCKET).createSignedUrl(path, 60 * 30);
+  const { data: signed } = await storage.storage.from(BUCKET).createSignedUrl(path, 60 * 30);
   return NextResponse.json(
     { document: { ...row, signed_url: signed?.signedUrl ?? null } },
     { status: 201 }

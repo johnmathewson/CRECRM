@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "@/lib/cors";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -91,7 +92,11 @@ export async function GET(req: NextRequest, { params }: { params: { slug: string
   });
 
   // ── Generate short-lived signed URL ───────────────────────────────────
-  const { data: signed, error: signErr } = await supabase.storage
+  // The token check above IS the authorization. Signing uses the service
+  // role so the anon key never needs read access to the bucket (falls back
+  // to anon only until SUPABASE_SERVICE_ROLE_KEY is configured).
+  const signer = createAdminClient() ?? supabase;
+  const { data: signed, error: signErr } = await signer.storage
     .from("vault-documents")
     .createSignedUrl(doc.file_path, 300); // 5 min — enough for the browser to fetch
 
