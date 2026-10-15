@@ -125,6 +125,8 @@ export interface LeadDetail {
     notes: string | null;
   }>;
   notes: string | null;
+  /** Lease application submitted through the public site, if any. */
+  leaseApplication: { id: string; status: string; businessLegalName: string; documentCount: number } | null;
 }
 
 // ── List loader ───────────────────────────────────────────────────────────
@@ -272,7 +274,7 @@ export async function loadLeadDetail(id: string): Promise<LeadDetail | null> {
   const l: any = lRaw;
   if (!l) return null;
 
-  const [{ data: events }, { data: thread }] = await Promise.all([
+  const [{ data: events }, { data: thread }, { data: apps }] = await Promise.all([
     sb.from("lead_events")
       .select("id, event_type, notes, occurred_at")
       .eq("lead_id", id)
@@ -281,7 +283,14 @@ export async function loadLeadDetail(id: string): Promise<LeadDetail | null> {
       .select("id, direction, subject, body_preview, from_address, occurred_at, channel")
       .eq("lead_id", id)
       .order("occurred_at", { ascending: true }),
+    sb.from("lease_applications")
+      .select("id, status, business_legal_name, lease_application_documents(count)")
+      .eq("lead_id", id)
+      .order("created_at", { ascending: false })
+      .limit(1),
   ]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const appRow: any = (apps ?? [])[0] ?? null;
 
   const property = castOne<{ id: string; name: string; slug: string; address: string | null; city: string | null; state: string | null }>(l.property);
   const contact = castOne<{ id: string; full_name: string; warmth: string | null }>(l.contact);
@@ -341,6 +350,14 @@ export async function loadLeadDetail(id: string): Promise<LeadDetail | null> {
       notes: e.notes,
     })),
     notes: l.notes,
+    leaseApplication: appRow
+      ? {
+          id: appRow.id,
+          status: appRow.status,
+          businessLegalName: appRow.business_legal_name,
+          documentCount: Number(appRow.lease_application_documents?.[0]?.count ?? 0),
+        }
+      : null,
   };
 }
 
