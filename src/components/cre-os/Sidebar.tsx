@@ -131,6 +131,7 @@ const PRIMARY: NavItem[] = [
 
 const MORE: NavItem[] = [
   { label: "Buyers",           href: "/cre-os/buyers",         icon: ICON.users },
+  { label: "Applications",     href: "/cre-os/applications",   icon: ICON.doc },
   { label: "Listings",         href: "/cre-os/listings",       icon: ICON.trending },
   { label: "Market",           href: "/cre-os/market",         icon: ICON.globe,  legacyHref: "/comps" },
   { label: "Valuation",        href: "/cre-os/valuate",        icon: ICON.scale,  legacyHref: "/valuate" },

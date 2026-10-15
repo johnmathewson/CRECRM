@@ -274,6 +274,21 @@ export function LeadDetail({ lead }: { lead: LeadDetailData }) {
           </div>
         )}
 
+        {lead.leaseApplication && (
+          <a
+            href={`/cre-os/applications/${lead.leaseApplication.id}`}
+            className="flex items-center justify-between gap-3 rounded-md border border-teal-400/30 bg-teal-400/[0.05] hover:bg-teal-400/[0.10] px-5 py-4 transition-colors"
+          >
+            <div className="min-w-0">
+              <Eyebrow tone="teal">Lease application</Eyebrow>
+              <div className="mt-1 font-heading text-[15px] text-cream truncate">
+                {lead.leaseApplication.businessLegalName} · {lead.leaseApplication.documentCount} document{lead.leaseApplication.documentCount === 1 ? "" : "s"}
+              </div>
+            </div>
+            <span className="font-heading text-[10px] uppercase tracking-eyebrow text-teal-300 shrink-0">Open application →</span>
+          </a>
+        )}
+
         {/* Original message / CREXi activity */}
         {lead.source === "crexi"
           ? <CrexiLeadCard rawBody={lead.rawBody} qualifierSummary={lead.qualifierSummary} />
