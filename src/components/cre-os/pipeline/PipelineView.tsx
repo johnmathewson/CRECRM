@@ -295,7 +295,7 @@ export function PipelineView({
       <CreateDealDialog
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        properties={candidates.properties.map((p) => ({ id: p.id, name: p.name, city: p.city, state: p.state }))}
+        properties={candidates.properties.map((p) => ({ id: p.id, name: p.headline || p.name, city: p.city, state: p.state, status: p.status }))}
         contacts={candidates.contacts.map((c) => ({ id: c.id, fullName: c.name, email: c.email }))}
         defaultDealType={side === "pursuits" ? "buyer_rep" : "sale"}
       />
