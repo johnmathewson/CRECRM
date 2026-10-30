@@ -382,7 +382,8 @@ function prettyLeaseType(t: string): string {
 /**
  * DealEditCard — one row per open deal on the peeked property.
  *
- * Editable fields: price, commission %, est. commission. Save fires
+ * Editable fields: price, commission %, est. commission, probability,
+ * expected close. Save fires
  * PATCH /api/deals/[id] which auto-derives weighted_commission server-
  * side so the kanban rollups stay correct. Lease deals show the price
  * field as a rate ($/SF/yr) hint.
@@ -406,6 +407,10 @@ function DealEditCard({
   const [estCommission, setEstCommission] = useState<string>(
     deal.estimated_commission !== null ? String(deal.estimated_commission) : ""
   );
+  const [probability, setProbability] = useState<string>(
+    deal.probability_pct !== null ? String(Math.round(deal.probability_pct)) : ""
+  );
+  const [expectedClose, setExpectedClose] = useState<string>(deal.expected_close ?? "");
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -414,7 +419,9 @@ function DealEditCard({
   const dirty =
     price !== (deal.price !== null ? String(deal.price) : "") ||
     commissionPct !== (deal.commission_pct !== null ? String(deal.commission_pct) : "") ||
-    estCommission !== (deal.estimated_commission !== null ? String(deal.estimated_commission) : "");
+    estCommission !== (deal.estimated_commission !== null ? String(deal.estimated_commission) : "") ||
+    probability !== (deal.probability_pct !== null ? String(Math.round(deal.probability_pct)) : "") ||
+    expectedClose !== (deal.expected_close ?? "");
 
   // Sale-mode: auto-suggest est. commission from price × pct when broker
   // hasn't overridden it. Same UX pattern as CreateDealDialog.
@@ -441,6 +448,12 @@ function DealEditCard({
       if (priceN !== deal.price) payload.price = priceN;
       if (pctN !== deal.commission_pct) payload.commission_pct = pctN;
       if (estN !== deal.estimated_commission) payload.estimated_commission = estN;
+      const probN = probability === "" ? null : Number(probability.replace(/[%]/g, ""));
+      if (probN !== null && (Number.isNaN(probN) || probN < 0 || probN > 100)) {
+        throw new Error("Probability must be between 0 and 100.");
+      }
+      if (probN !== (deal.probability_pct !== null ? Math.round(deal.probability_pct) : null)) payload.probability_pct = probN;
+      if (expectedClose !== (deal.expected_close ?? "")) payload.expected_close = expectedClose || null;
       const r = await fetch(`/api/deals/${deal.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -523,6 +536,37 @@ function DealEditCard({
             disabled={saving}
             onChange={(e) => setEstCommission(e.target.value)}
             placeholder="120000"
+            className={inputCls}
+          />
+        </label>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <label className="block">
+          <div className="font-mono text-[9.5px] uppercase tracking-eyebrow text-cream-subtle mb-0.5">
+            Probability %
+          </div>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={0}
+            max={100}
+            value={probability}
+            disabled={saving}
+            onChange={(e) => setProbability(e.target.value)}
+            placeholder="25"
+            className={inputCls}
+          />
+        </label>
+        <label className="block">
+          <div className="font-mono text-[9.5px] uppercase tracking-eyebrow text-cream-subtle mb-0.5">
+            Expected close
+          </div>
+          <input
+            type="date"
+            value={expectedClose}
+            disabled={saving}
+            onChange={(e) => setExpectedClose(e.target.value)}
             className={inputCls}
           />
         </label>
