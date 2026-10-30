@@ -41,20 +41,7 @@ export function DealWorkspace({ d }: { d: DealDetail }) {
     {
       eyebrow: "Deal forecast",
       children: (
-        <div className="space-y-2 text-[11px] font-body text-cream-dim">
-          <RailStat label="Deal value" value={fmtMoney(d.price)} />
-          <RailStat
-            label="Probability"
-            value={
-              d.probabilityPct !== null
-                ? Math.round(d.probabilityPct) + "%"
-                : `${cfg.defaultProbability}% (default)`
-            }
-          />
-          <RailStat label="Weighted" value={fmtMoney(weighted)} />
-          <RailStat label="Est. commission" value={fmtMoney(d.estimatedCommission)} />
-          <RailStat label="Target close" value={d.expectedClose || "—"} />
-        </div>
+        <DealForecast d={d} weighted={weighted} defaultProbability={cfg.defaultProbability} />
       ),
     },
     {
@@ -105,6 +92,13 @@ export function DealWorkspace({ d }: { d: DealDetail }) {
       {/* Main 2-col body */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
+          {/* The rail is a drawer below xl — keep the forecast (and its
+              editor) on the page itself so it's one tap away on a phone. */}
+          <div className="xl:hidden">
+            <Panel eyebrow="Deal forecast" title="Probability, value & close">
+              <DealForecast d={d} weighted={weighted} defaultProbability={cfg.defaultProbability} />
+            </Panel>
+          </div>
           <StageGuidance stage={d.stage} />
 
           {/* Stage history */}
@@ -184,6 +178,133 @@ export function DealWorkspace({ d }: { d: DealDetail }) {
         </div>
       </div>
     </AppShell>
+  );
+}
+
+// ── Deal forecast (view + inline edit) ─────────────────────────────────────
+function DealForecast({ d, weighted, defaultProbability }: { d: DealDetail; weighted: number | null; defaultProbability: number }) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const isLease = d.dealType === "lease";
+  const initial = () => ({
+    price: d.price !== null ? String(d.price) : "",
+    probability: d.probabilityPct !== null ? String(Math.round(d.probabilityPct)) : "",
+    commissionPct: d.commissionPct !== null ? String(d.commissionPct) : "",
+    estCommission: d.estimatedCommission !== null ? String(d.estimatedCommission) : "",
+    expectedClose: d.expectedClose ?? "",
+  });
+  const [form, setForm] = useState(initial);
+  const set = (k: keyof ReturnType<typeof initial>, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  function num(v: string, strip: RegExp): number | null {
+    if (v.trim() === "") return null;
+    const n = Number(v.replace(strip, ""));
+    if (Number.isNaN(n)) throw new Error(`"${v}" isn't a number.`);
+    return n;
+  }
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      const probability = num(form.probability, /[%]/g);
+      if (probability !== null && (probability < 0 || probability > 100)) {
+        throw new Error("Probability must be between 0 and 100.");
+      }
+      const start = initial();
+      const payload: Record<string, any> = {};
+      if (form.price !== start.price) payload.price = num(form.price, /[$,]/g);
+      if (form.probability !== start.probability) payload.probability_pct = probability;
+      if (form.commissionPct !== start.commissionPct) payload.commission_pct = num(form.commissionPct, /[%]/g);
+      if (form.estCommission !== start.estCommission) payload.estimated_commission = num(form.estCommission, /[$,]/g);
+      if (form.expectedClose !== start.expectedClose) payload.expected_close = form.expectedClose || null;
+      if (Object.keys(payload).length > 0) {
+        const res = await fetch(`/api/deals/${d.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+      }
+      setEditing(false);
+      router.refresh();
+    } catch (err: any) {
+      setError(err.message ?? String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!editing) {
+    return (
+      <div className="space-y-2 text-[11px] font-body text-cream-dim">
+        <RailStat label="Deal value" value={fmtMoney(d.price)} />
+        <RailStat
+          label="Probability"
+          value={
+            d.probabilityPct !== null
+              ? Math.round(d.probabilityPct) + "%"
+              : `${defaultProbability}% (default)`
+          }
+        />
+        <RailStat label="Weighted" value={fmtMoney(weighted)} />
+        <RailStat label="Est. commission" value={fmtMoney(d.estimatedCommission)} />
+        <RailStat label="Target close" value={d.expectedClose || "—"} />
+        <button
+          onClick={() => { setForm(initial()); setError(null); setEditing(true); }}
+          className="mt-1 w-full px-3 py-1.5 rounded border border-coral-400/30 bg-coral-400/[0.05] hover:bg-coral-400/[0.12] font-heading text-[10px] uppercase tracking-eyebrow font-semibold text-coral-300 transition-colors"
+        >
+          Edit forecast
+        </button>
+      </div>
+    );
+  }
+
+  const inputCls =
+    "w-full px-2 py-1.5 rounded border border-white/[0.08] bg-white/[0.02] font-mono text-base lg:text-[11.5px] text-cream focus:outline-none focus:border-coral-400/50 disabled:opacity-50";
+  const field = (label: string, el: React.ReactNode) => (
+    <label className="block">
+      <div className="font-mono text-[9.5px] uppercase tracking-eyebrow text-cream-subtle mb-0.5">{label}</div>
+      {el}
+    </label>
+  );
+
+  return (
+    <div className="space-y-2.5">
+      {field("Probability %",
+        <input type="number" inputMode="numeric" min={0} max={100} value={form.probability} disabled={busy}
+          onChange={(e) => set("probability", e.target.value)} placeholder={String(defaultProbability)} className={inputCls} />)}
+      {field(isLease ? "Rate $/SF/yr" : "Deal value",
+        <input type="text" inputMode="decimal" value={form.price} disabled={busy}
+          onChange={(e) => set("price", e.target.value)} placeholder={isLease ? "24.50" : "2400000"} className={inputCls} />)}
+      <div className="grid grid-cols-2 gap-2">
+        {field("Comm %",
+          <input type="text" inputMode="decimal" value={form.commissionPct} disabled={busy}
+            onChange={(e) => set("commissionPct", e.target.value)} placeholder="5" className={inputCls} />)}
+        {field("Est. comm $",
+          <input type="text" inputMode="decimal" value={form.estCommission} disabled={busy}
+            onChange={(e) => set("estCommission", e.target.value)} placeholder="120000" className={inputCls} />)}
+      </div>
+      {field("Target close",
+        <input type="date" value={form.expectedClose} disabled={busy}
+          onChange={(e) => set("expectedClose", e.target.value)} className={inputCls} />)}
+      {error && (
+        <div className="px-2 py-1 rounded border border-red-400/30 bg-red-500/[0.06] font-body text-[11px] text-red-300">{error}</div>
+      )}
+      <div className="flex gap-2">
+        <button onClick={() => setEditing(false)} disabled={busy}
+          className="flex-1 px-3 py-1.5 rounded border border-white/[0.08] bg-white/[0.02] hover:bg-white/[0.06] font-heading text-[10px] uppercase tracking-eyebrow font-semibold text-cream-dim disabled:opacity-50">
+          Cancel
+        </button>
+        <button onClick={save} disabled={busy}
+          className="flex-1 px-3 py-1.5 rounded border border-coral-400/50 bg-coral-400/[0.12] hover:bg-coral-400/[0.22] font-heading text-[10px] uppercase tracking-eyebrow font-semibold text-coral-300 disabled:opacity-50">
+          {busy ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </div>
   );
 }
 
