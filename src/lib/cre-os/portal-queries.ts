@@ -188,17 +188,22 @@ export async function loadPortalCandidates(): Promise<{
 }> {
   const sb = createServerSupabase();
   const [{ data: propRows }, { data: contactRows }] = await Promise.all([
+    // The broker's own properties — not the ~15k imported `prospect` rows,
+    // which used to fill PostgREST's 1,000-row cap alphabetically and push
+    // every real listing out of the pickers.
     sb
       .from("properties")
       .select("id, name, headline, city, state, status, transaction_type")
       .eq("organization_id", ORG_ID)
-      .order("name", { ascending: true }),
+      .or("status.is.null,status.neq.prospect")
+      .order("updated_at", { ascending: false })
+      .limit(1000),
     sb
       .from("contacts")
       .select("id, full_name, email, contact_type")
       .eq("organization_id", ORG_ID)
       .order("full_name", { ascending: true })
-      .limit(500),
+      .limit(1000),
   ]);
 
   const properties: PortalCandidate[] = ((propRows ?? []) as any[]).map((p) => ({

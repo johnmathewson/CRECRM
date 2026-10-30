@@ -6,8 +6,10 @@ import { useRouter } from "next/navigation";
 interface PropertyOption {
   id: string;
   name: string;
+  address?: string | null;
   city: string | null;
   state: string | null;
+  status?: string | null;
 }
 interface ContactOption {
   id: string;
@@ -25,6 +27,10 @@ interface ContactOption {
  *
  * Picks: deal type, property (optional), client contact (optional), price,
  * stage, expected close.
+ *
+ * `properties` / `contacts` are only the starting list (the broker's own
+ * properties). Typing searches the whole CRM server-side — the properties
+ * table is ~15k rows, far past what a preloaded list can hold.
  */
 export function CreateDealDialog({
   open,
@@ -44,10 +50,17 @@ export function CreateDealDialog({
   const router = useRouter();
   const [dealType, setDealType] = useState<"sale" | "lease" | "buyer_rep">(defaultDealType);
   const [dealName, setDealName] = useState("");
-  const [propertyId, setPropertyId] = useState<string>(defaultPropertyId || "");
-  const [contactId, setContactId] = useState<string>("");
+  const [selectedProperty, setSelectedProperty] = useState<PropertyOption | null>(
+    () => properties.find((p) => p.id === defaultPropertyId) ?? null
+  );
+  const [selectedContact, setSelectedContact] = useState<ContactOption | null>(null);
   const [propertyQuery, setPropertyQuery] = useState("");
   const [contactQuery, setContactQuery] = useState("");
+  const [propertyResults, setPropertyResults] = useState<PropertyOption[] | null>(null);
+  const [contactResults, setContactResults] = useState<ContactOption[] | null>(null);
+  const [searchingProps, setSearchingProps] = useState(false);
+  const [newContactEmail, setNewContactEmail] = useState("");
+  const [addingContact, setAddingContact] = useState(false);
   const [price, setPrice] = useState("");
   // Commission inputs — broker-side. For sale the natural default
   // is price × commission_pct; for lease the dollar amount typically
@@ -73,18 +86,98 @@ export function CreateDealDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  // Server-side property search (debounced). Empty query → the starting list.
+  useEffect(() => {
+    if (!open) return;
+    const q = propertyQuery.trim();
+    if (!q) { setPropertyResults(null); setSearchingProps(false); return; }
+    let cancelled = false;
+    setSearchingProps(true);
+    const t = setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({ q, limit: "30", working_first: "1" });
+        const r = await fetch(`/api/properties/search?${params.toString()}`);
+        const data = await r.json();
+        if (!cancelled) {
+          setPropertyResults(((data.properties ?? []) as any[]).map((p) => ({
+            id: p.id,
+            name: p.headline || p.name || p.address || "Untitled property",
+            address: p.address ?? null,
+            city: p.city ?? null,
+            state: p.state ?? null,
+            status: p.status ?? null,
+          })));
+        }
+      } catch {
+        if (!cancelled) setPropertyResults([]);
+      } finally {
+        if (!cancelled) setSearchingProps(false);
+      }
+    }, 250);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [propertyQuery, open]);
+
+  // Server-side contact search (debounced).
+  useEffect(() => {
+    if (!open) return;
+    const q = contactQuery.trim().replace(/[,()*%\\]/g, " ").trim();
+    if (!q || selectedContact?.fullName === contactQuery) { setContactResults(null); return; }
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/contacts?q=${encodeURIComponent(q)}`);
+        const data = await r.json();
+        if (!cancelled) {
+          setContactResults(((data.contacts ?? []) as any[]).slice(0, 30).map((c) => ({
+            id: c.id, fullName: c.full_name, email: c.email ?? null,
+          })));
+        }
+      } catch {
+        if (!cancelled) setContactResults([]);
+      }
+    }, 250);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [contactQuery, open, selectedContact]);
+
   if (!open) return null;
 
-  const filteredProps = propertyQuery
-    ? properties.filter((p) =>
-        [p.name, p.city, p.state].some((v) => v && v.toLowerCase().includes(propertyQuery.toLowerCase()))
-      )
-    : properties;
-  const filteredContacts = contactQuery
+  const propertyId = selectedProperty?.id ?? "";
+  const contactId = selectedContact?.id ?? "";
+  const shownProps = propertyResults ?? properties;
+  const shownContacts = contactResults ?? (contactQuery
     ? contacts.filter((c) =>
         [c.fullName, c.email].some((v) => v && v.toLowerCase().includes(contactQuery.toLowerCase()))
       )
-    : contacts;
+    : []);
+  const contactRole = dealType === "lease" ? "Tenant" : dealType === "buyer_rep" ? "Buyer" : "Client";
+
+  async function addContact() {
+    const fullName = contactQuery.trim();
+    if (!fullName) return;
+    setAddingContact(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/contacts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          full_name: fullName,
+          email: newContactEmail.trim().toLowerCase() || undefined,
+          contact_type: dealType === "lease" ? "tenant" : dealType === "buyer_rep" ? "buyer" : undefined,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+      const c = json.contact;
+      setSelectedContact({ id: c.id, fullName: c.full_name, email: c.email ?? null });
+      setContactQuery(c.full_name);
+      setNewContactEmail("");
+    } catch (err: any) {
+      setError(`Couldn't add contact: ${err.message ?? String(err)}`);
+    } finally {
+      setAddingContact(false);
+    }
+  }
 
   async function submit() {
     setError(null);
@@ -161,53 +254,66 @@ export function CreateDealDialog({
               type="text"
               value={propertyQuery}
               onChange={(e) => setPropertyQuery(e.target.value)}
-              placeholder="Filter by name, city, state…"
+              placeholder="Search every property by name or address…"
               className={fieldCls}
             />
-            <div className="mt-2 max-h-32 overflow-y-auto rounded border border-white/[0.04] bg-steward-surface/30">
-              {filteredProps.slice(0, 30).map((p) => {
+            <div className="mt-1 font-mono text-[9px] uppercase tracking-eyebrow text-cream-subtle">
+              {propertyQuery.trim() ? (searchingProps ? "Searching…" : "Search results") : "Your properties — type to search all"}
+            </div>
+            <div className="mt-1 max-h-40 overflow-y-auto rounded border border-white/[0.04] bg-steward-surface/30">
+              {shownProps.slice(0, 30).map((p) => {
                 const sel = p.id === propertyId;
+                const sub = [p.address && p.address !== p.name ? p.address : null, [p.city, p.state].filter(Boolean).join(", ") || null]
+                  .filter(Boolean).join(" · ");
                 return (
                   <button
                     key={p.id}
                     type="button"
-                    onClick={() => setPropertyId(sel ? "" : p.id)}
+                    onClick={() => setSelectedProperty(sel ? null : p)}
                     className={`w-full px-3 py-2 text-left border-b border-white/[0.03] last:border-b-0 transition-colors ${sel ? "bg-coral-400/[0.10]" : "hover:bg-white/[0.03]"}`}
                   >
-                    <div className="font-body text-[12px] text-cream truncate">{p.name}</div>
-                    <div className="font-body text-[10px] text-cream-subtle truncate">{[p.city, p.state].filter(Boolean).join(", ")}</div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-body text-[12px] text-cream truncate">{p.name}</span>
+                      {p.status && p.status !== "prospect" && (
+                        <span className="shrink-0 font-mono text-[9px] uppercase tracking-eyebrow text-coral-300">{p.status.replace(/_/g, " ")}</span>
+                      )}
+                    </div>
+                    {sub && <div className="font-body text-[10px] text-cream-subtle truncate">{sub}</div>}
                   </button>
                 );
               })}
-              {filteredProps.length === 0 && (
+              {shownProps.length === 0 && !searchingProps && (
                 <div className="px-3 py-2 font-body text-[11px] text-cream-subtle">No properties match.</div>
               )}
             </div>
-            {propertyId && (
+            {selectedProperty && (
               <div className="mt-1 font-body text-[10px] text-coral-300">
-                Selected: {properties.find((p) => p.id === propertyId)?.name}{" "}
-                <button onClick={() => setPropertyId("")} className="underline ml-1">clear</button>
+                Selected: {selectedProperty.name}{" "}
+                <button onClick={() => setSelectedProperty(null)} className="underline ml-1">clear</button>
               </div>
             )}
           </Field>
 
-          <Field label="Client contact (optional)">
+          <Field label={`${contactRole} contact (optional)`} hint={dealType === "lease" ? "The prospective tenant. Not in the CRM yet? Type their name and add them here." : undefined}>
             <input
               type="text"
               value={contactQuery}
-              onChange={(e) => setContactQuery(e.target.value)}
-              placeholder="Filter contacts…"
+              onChange={(e) => {
+                setContactQuery(e.target.value);
+                if (selectedContact && e.target.value !== selectedContact.fullName) setSelectedContact(null);
+              }}
+              placeholder="Search contacts by name or email…"
               className={fieldCls}
             />
-            {contactQuery && (
-              <div className="mt-2 max-h-32 overflow-y-auto rounded border border-white/[0.04] bg-steward-surface/30">
-                {filteredContacts.slice(0, 30).map((c) => {
+            {contactQuery && !selectedContact && (
+              <div className="mt-2 max-h-40 overflow-y-auto rounded border border-white/[0.04] bg-steward-surface/30">
+                {shownContacts.slice(0, 30).map((c) => {
                   const sel = c.id === contactId;
                   return (
                     <button
                       key={c.id}
                       type="button"
-                      onClick={() => { setContactId(sel ? "" : c.id); if (!sel) setContactQuery(c.fullName); }}
+                      onClick={() => { setSelectedContact(sel ? null : c); if (!sel) setContactQuery(c.fullName); }}
                       className={`w-full flex items-center justify-between px-3 py-1.5 text-left border-b border-white/[0.03] last:border-b-0 transition-colors ${sel ? "bg-coral-400/[0.10]" : "hover:bg-white/[0.03]"}`}
                     >
                       <span className="font-body text-[12px] text-cream truncate">{c.fullName}</span>
@@ -215,6 +321,29 @@ export function CreateDealDialog({
                     </button>
                   );
                 })}
+                <div className="px-3 py-2 border-t border-white/[0.04] flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="email"
+                    value={newContactEmail}
+                    onChange={(e) => setNewContactEmail(e.target.value)}
+                    placeholder="Email (optional)"
+                    className={`${fieldCls} sm:flex-1`}
+                  />
+                  <button
+                    type="button"
+                    onClick={addContact}
+                    disabled={addingContact}
+                    className="shrink-0 px-3 py-2 rounded border border-coral-400/40 bg-coral-400/[0.08] hover:bg-coral-400/[0.16] font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-coral-300 disabled:opacity-40"
+                  >
+                    {addingContact ? "Adding…" : `+ Add "${contactQuery.trim()}" as new ${contactRole.toLowerCase()}`}
+                  </button>
+                </div>
+              </div>
+            )}
+            {selectedContact && (
+              <div className="mt-1 font-body text-[10px] text-coral-300">
+                Selected: {selectedContact.fullName}{selectedContact.email ? ` · ${selectedContact.email}` : ""}{" "}
+                <button onClick={() => { setSelectedContact(null); setContactQuery(""); }} className="underline ml-1">clear</button>
               </div>
             )}
           </Field>

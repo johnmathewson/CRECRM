@@ -23,7 +23,8 @@ function svc() {
 
 export async function GET(req: NextRequest) {
   const sb = svc();
-  const q = req.nextUrl.searchParams.get("q")?.trim();
+  // Commas/parentheses/wildcards would break or widen the `or` filter below.
+  const q = req.nextUrl.searchParams.get("q")?.replace(/[,()*%\\]/g, " ").trim();
   let query = sb
     .from("contacts")
     .select("id, full_name, email, phone, company_id, role, contact_type, warmth, city, state, last_conversation, next_follow_up")
