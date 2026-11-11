@@ -130,6 +130,7 @@ const PRIMARY: NavItem[] = [
 ];
 
 const MORE: NavItem[] = [
+  { label: "Deal check-in",    href: "/cre-os/checkin",        icon: ICON.pipeline },
   { label: "Buyers",           href: "/cre-os/buyers",         icon: ICON.users },
   { label: "Applications",     href: "/cre-os/applications",   icon: ICON.doc },
   { label: "Listings",         href: "/cre-os/listings",       icon: ICON.trending },

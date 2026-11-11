@@ -2,6 +2,8 @@ import { TodayView, type TodayRow } from "@/components/cre-os/today/TodayView";
 import { loadCommsStream } from "@/lib/cre-os/comms-stream-queries";
 import { loadInboxList, type LeadCard } from "@/lib/cre-os/inbox-queries";
 import { loadLatestBrief, briefLede } from "@/lib/cre-os/brief-queries";
+import { loadLatestCheckin, openCount } from "@/lib/cre-os/checkin-queries";
+import { chicagoDate } from "@/lib/agents/deal-checkin";
 
 /**
  * /cre-os/today — the home. One list of decisions, waiting-first.
@@ -30,7 +32,17 @@ function priority(l: LeadCard): number {
 }
 
 export default async function TodayPage() {
-  const [stream, leads, brief] = await Promise.all([loadCommsStream(600), loadInboxList(), loadLatestBrief()]);
+  const [stream, leads, brief, checkin] = await Promise.all([
+    loadCommsStream(600),
+    loadInboxList(),
+    loadLatestBrief(),
+    loadLatestCheckin(),
+  ]);
+
+  // Deal check-in banner: open questions from last night's (or tonight's)
+  // check-in. Older than yesterday and it's stale — tonight's replaces it.
+  const yesterday = chicagoDate(new Date(Date.now() - 86400000));
+  const checkinOpen = checkin && checkin.date >= yesterday ? openCount(checkin) : 0;
 
   // One row per person, decided by their NEWEST touch (rows are newest-
   // first). If that touch is our reply, or John cleared it, the person is
@@ -82,6 +94,7 @@ export default async function TodayPage() {
       waiting={waiting}
       next={next}
       brief={brief ? { lede: briefLede(brief.content_text), date: brief.brief_date } : null}
+      checkin={checkin && checkinOpen > 0 ? { open: checkinOpen, total: checkin.items.length } : null}
     />
   );
 }

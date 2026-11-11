@@ -99,6 +99,7 @@ export function DealWorkspace({ d }: { d: DealDetail }) {
               <DealForecast d={d} weighted={weighted} defaultProbability={cfg.defaultProbability} />
             </Panel>
           </div>
+          <AgentRead d={d} />
           <StageGuidance stage={d.stage} />
 
           {/* Stage history */}
@@ -305,6 +306,45 @@ function DealForecast({ d, weighted, defaultProbability }: { d: DealDetail; weig
         </button>
       </div>
     </div>
+  );
+}
+
+// ── The nightly deal agent's read + John's next step ───────────────────────
+function AgentRead({ d }: { d: DealDetail }) {
+  if (!d.agent && !d.nextStep) {
+    return (
+      <Panel eyebrow="Where it stands" title="No read yet">
+        <p className="font-body text-[12px] text-cream-subtle py-2">
+          The deal agent reads this deal every night at 8:45 PM. Its read and next step show up here, and its
+          questions come to you in the <a href="/cre-os/checkin" className="text-coral-400 underline">deal check-in</a>.
+        </p>
+      </Panel>
+    );
+  }
+  return (
+    <Panel eyebrow="Where it stands" title={d.nextStep ? `Next: ${d.nextStep}` : "Deal agent's read"}>
+      <div className="space-y-3 font-body text-[13px] leading-[1.5]">
+        {d.nextStep && d.nextStepDue && (
+          <p className="font-mono text-[11px] text-cream-subtle">Your next step · due {d.nextStepDue}</p>
+        )}
+        {d.agent && (
+          <>
+            <p className="text-cream">{d.agent.summary}</p>
+            {d.agent.nextStep && d.agent.nextStep !== d.nextStep && (
+              <p className="text-cream-dim"><span className="font-semibold text-cream">Agent&apos;s next step:</span> {d.agent.nextStep}</p>
+            )}
+            {d.agent.risk && (
+              <p className="text-cream-dim"><span className="font-semibold text-amber-300">Risk:</span> {d.agent.risk}</p>
+            )}
+            {d.agent.at && (
+              <p className="font-mono text-[10px] text-cream-subtle">
+                Read {new Date(d.agent.at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} · from this deal&apos;s emails, texts and your check-in answers
+              </p>
+            )}
+          </>
+        )}
+      </div>
+    </Panel>
   );
 }
 

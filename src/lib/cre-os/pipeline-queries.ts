@@ -102,6 +102,11 @@ export interface DealDetail {
   deadReason: string | null;
   notes: string | null;
   createdAt: string | null;
+  /** John's next step (set by him, or by accepting a check-in suggestion). */
+  nextStep: string | null;
+  nextStepDue: string | null;
+  /** The nightly deal agent's read. */
+  agent: { summary: string; nextStep: string | null; risk: string | null; at: string | null } | null;
   property: { id: string; name: string; slug: string; address: string | null; city: string | null; state: string | null; askingPrice: number | null; sqft: number | null } | null;
   contact: { id: string; fullName: string; email: string | null; phone: string | null } | null;
   /** Stage history — every row in deal_stages, oldest first */
@@ -257,7 +262,7 @@ export async function loadDealDetail(id: string): Promise<DealDetail | null> {
     .select(
       `id, deal_name, deal_type, price, commission_pct, estimated_commission, probability_pct,
        weighted_commission, expected_close, actual_close, is_closed, is_dead, dead_reason,
-       notes, created_at,
+       notes, created_at, next_step, next_step_due, agent_summary, agent_next_step, agent_risk, agent_summary_at,
        property:properties(id, name, slug, address, city, state, asking_price, sqft),
        contact:contacts(id, full_name, email, phone),
        deal_stages(id, stage, entered_at, exited_at, notes)`,
@@ -331,6 +336,11 @@ export async function loadDealDetail(id: string): Promise<DealDetail | null> {
     isDead: !!d.is_dead,
     deadReason: d.dead_reason,
     notes: d.notes,
+    nextStep: d.next_step ?? null,
+    nextStepDue: d.next_step_due ?? null,
+    agent: d.agent_summary
+      ? { summary: d.agent_summary, nextStep: d.agent_next_step ?? null, risk: d.agent_risk ?? null, at: d.agent_summary_at ?? null }
+      : null,
     createdAt: d.created_at,
     property: d.property
       ? {
