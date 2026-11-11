@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/cre-os/AppShell";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
@@ -9,6 +9,7 @@ import type { RailSection } from "@/components/cre-os/InsightsRail";
 import { PipelineScoreboard } from "./PipelineScoreboard";
 import type { Scoreboard } from "@/lib/cre-os/scoreboard-queries";
 import { KanbanBoard } from "./KanbanBoard";
+import { DealList } from "./DealList";
 import { CreateDealDialog } from "./CreateDealDialog";
 import { PropertyPeekPanel } from "@/components/cre-os/property/PropertyPeekPanel";
 import type { PipelineBoard, DealCardData, StageColumn } from "@/lib/cre-os/pipeline-queries";
@@ -22,9 +23,43 @@ const fmtMoney = (n: number) => {
   return "$" + n.toLocaleString();
 };
 
+/** Both sides on one board: columns share the ladder order, so zip them. */
+function mergeBoards(a: PipelineBoard, b: PipelineBoard): PipelineBoard {
+  const columns: StageColumn[] = a.columns.map((col, i) => {
+    const other = b.columns[i];
+    return {
+      stage: col.stage,
+      cards: [...col.cards, ...other.cards].sort((x, y) => (y.daysInStage ?? 0) - (x.daysInStage ?? 0)),
+      count: col.count + other.count,
+      totalValue: col.totalValue + other.totalValue,
+      weightedValue: col.weightedValue + other.weightedValue,
+      totalCommission: col.totalCommission + other.totalCommission,
+      weightedCommission: col.weightedCommission + other.weightedCommission,
+    };
+  });
+  const n = a.totals.activeDeals + b.totals.activeDeals;
+  const probSum = (a.totals.avgProbability ?? 0) * a.totals.activeDeals + (b.totals.avgProbability ?? 0) * b.totals.activeDeals;
+  return {
+    side: a.side,
+    columns,
+    totals: {
+      activeDeals: n,
+      pipelineValue: a.totals.pipelineValue + b.totals.pipelineValue,
+      weightedValue: a.totals.weightedValue + b.totals.weightedValue,
+      avgProbability: n ? probSum / n : null,
+      expectedThisQuarter: a.totals.expectedThisQuarter + b.totals.expectedThisQuarter,
+      pipelineCommission: a.totals.pipelineCommission + b.totals.pipelineCommission,
+      weightedCommission: a.totals.weightedCommission + b.totals.weightedCommission,
+    },
+  };
+}
+
+const VIEW_KEY = "cre-os.pipeline.view";
+
 /**
- * PipelineView — index page for /cre-os/pipeline. Two tabs (Listings vs
- * Pursuits), a horizontal kanban below, and a forecast/health rail.
+ * PipelineView — index page for /cre-os/pipeline. Tabs (Listings,
+ * Pursuits, All), the deals as a kanban or a sortable list, and a
+ * forecast/health rail.
  *
  * Server pre-loads both boards (parallel) so the tab toggle is instant.
  */
@@ -41,8 +76,20 @@ export function PipelineView({
 }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
-  const [side, setSide] = useState<"listings" | "pursuits">("listings");
+  const [side, setSide] = useState<"listings" | "pursuits" | "all">("listings");
+  const [view, setView] = useState<"board" | "list">("board");
   const [createOpen, setCreateOpen] = useState(false);
+
+  // Remember Board vs List per browser (a convenience — falls back to board).
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(VIEW_KEY) === "list") setView("list");
+    } catch { /* storage unavailable */ }
+  }, []);
+  function chooseView(v: "board" | "list") {
+    setView(v);
+    try { localStorage.setItem(VIEW_KEY, v); } catch { /* storage unavailable */ }
+  }
 
   // Local DnD overrides: { [dealId]: newStage }. Layered onto the
   // server-fed board so cards jump instantly on drop. Cleared when
@@ -58,7 +105,8 @@ export function PipelineView({
 
   // Apply stage overrides to whichever board is active. Recomputes
   // column counts + totals so the header stats match the visual move.
-  const baseBoard = side === "listings" ? listings : pursuits;
+  const allBoard = useMemo(() => mergeBoards(listings, pursuits), [listings, pursuits]);
+  const baseBoard = side === "listings" ? listings : side === "pursuits" ? pursuits : allBoard;
   const board: PipelineBoard = useMemo(() => {
     if (Object.keys(stageOverrides).length === 0) return baseBoard;
     // Build a flat list of cards with current effective stage.
@@ -137,6 +185,15 @@ export function PipelineView({
       setPeekPropertyId(deal.property.id);
     }
   }, []);
+
+  // Flat list for the List view, tagged with the side each deal lives on.
+  const listDeals = useMemo(() => {
+    const pursuitIds = new Set(pursuits.columns.flatMap((c) => c.cards.map((x) => x.id)));
+    return board.columns.flatMap((c) => c.cards).map((d) => ({
+      ...d,
+      side: (pursuitIds.has(d.id) ? "pursuits" : "listings") as "listings" | "pursuits",
+    }));
+  }, [board, pursuits]);
 
   // Derived stage health flags for the rail
   const staleCount = board.columns.flatMap((c) => c.cards).filter((c) => c.stale).length;
@@ -255,6 +312,11 @@ export function PipelineView({
           <div className="flex items-center gap-1 border-2 border-white/[0.10] p-1">
             <SideTab label={`Listings · ${listings.totals.activeDeals}`} active={side === "listings"} onClick={() => setSide("listings")} />
             <SideTab label={`Pursuits · ${pursuits.totals.activeDeals}`} active={side === "pursuits"} onClick={() => setSide("pursuits")} />
+            <SideTab label={`All · ${allBoard.totals.activeDeals}`} active={side === "all"} onClick={() => setSide("all")} />
+          </div>
+          <div className="flex items-center gap-1 border-2 border-white/[0.10] p-1">
+            <SideTab label="Board" active={view === "board"} onClick={() => chooseView("board")} />
+            <SideTab label="List" active={view === "list"} onClick={() => chooseView("list")} />
           </div>
           <span className="font-body text-[13px] text-cream-muted">
             {fmtMoney(board.totals.pipelineValue)} in play · {fmtMoney(board.totals.pipelineCommission)} fees · {fmtMoney(board.totals.weightedCommission)} weighted
@@ -263,12 +325,16 @@ export function PipelineView({
 
         {/* Kanban */}
         <Panel
-          eyebrow="Stage board"
+          eyebrow={view === "board" ? "Stage board" : "Deal list"}
           num={1}
-          title={side === "listings" ? "Listings ladder" : "Pursuits ladder"}
+          title={
+            view === "list"
+              ? `${board.totals.activeDeals} deal${board.totals.activeDeals === 1 ? "" : "s"}`
+              : side === "listings" ? "Listings ladder" : side === "pursuits" ? "Pursuits ladder" : "Full ladder"
+          }
           actions={
-            <span className="font-mono text-[10px] text-cream-subtle">
-              Drag cards between stages · click for property
+            <span className="hidden sm:inline font-mono text-[10px] text-cream-subtle">
+              {view === "board" ? "Drag cards between stages · click for property" : "Tap a deal to open it"}
             </span>
           }
         >
@@ -277,10 +343,12 @@ export function PipelineView({
               Stage move failed: {moveError}
             </div>
           )}
-          {board.totals.activeDeals === 0 ? (
+          {view === "list" ? (
+            <DealList deals={listDeals} />
+          ) : board.totals.activeDeals === 0 ? (
             <div className="text-center py-12">
               <p className="font-body text-[13px] text-cream-subtle">
-                No active {side === "listings" ? "listings" : "pursuits"}. New deals will land here as they're created.
+                No active {side === "all" ? "deals" : side}. New deals will land here as they're created.
               </p>
             </div>
           ) : (
