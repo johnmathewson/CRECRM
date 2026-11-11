@@ -57,10 +57,13 @@ export function TodayView({
   waiting: waitingInitial,
   next: nextInitial,
   brief,
+  checkin = null,
 }: {
   waiting: TodayRow[];
   next: TodayRow[];
   brief: { lede: string; date: string } | null;
+  /** Open questions in the latest deal check-in, when there are any. */
+  checkin?: { open: number; total: number } | null;
 }) {
   const router = useRouter();
   const desktop = useIsDesktop();
@@ -205,6 +208,22 @@ export function TodayView({
             )}
           </div>
         </header>
+
+        {checkin && (
+          <Link
+            href="/cre-os/checkin"
+            className="flex items-center justify-between gap-4 border-2 border-coral-400 bg-steward-surface px-4 py-3 max-w-3xl hover:bg-coral-400/[0.06] transition-colors"
+          >
+            <div className="min-w-0">
+              <div className="font-heading text-[10px] font-bold uppercase tracking-eyebrow text-coral-400">Deal check-in</div>
+              <p className="mt-0.5 font-body text-[15px] text-cream">
+                {checkin.open} quick question{checkin.open === 1 ? "" : "s"} about your deals
+                {checkin.open < checkin.total ? ` (${checkin.total - checkin.open} done)` : ""}
+              </p>
+            </div>
+            <span className="shrink-0 font-heading text-[13px] font-semibold text-coral-400">Answer →</span>
+          </Link>
+        )}
 
         {brief && (
           <section className="border-l-[3px] border-coral-400 bg-steward-surface px-4 py-3 max-w-3xl">

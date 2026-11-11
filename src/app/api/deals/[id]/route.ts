@@ -1,7 +1,7 @@
 /**
  * PATCH /api/deals/[id] — update mutable deal fields (price, probability,
  *                          expected close, commission, notes, deal_name,
- *                          client_contact_id).
+ *                          client_contact_id, next_step, next_step_due).
  *
  * Stage moves use /advance. Won/lost/dead use /close.
  */
@@ -16,6 +16,7 @@ const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 const ALLOWED_FIELDS = [
   "deal_name", "deal_type", "price", "commission_pct", "estimated_commission",
   "probability_pct", "expected_close", "client_contact_id", "notes",
+  "next_step", "next_step_due",
 ];
 
 function svc() {
