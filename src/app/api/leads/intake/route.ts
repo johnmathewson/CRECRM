@@ -26,7 +26,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { callAnthropic, parseJsonResponse, MODELS } from "@/lib/anthropic";
 import { checkSpam } from "@/lib/spam-filter";
-import { matchProperty, MATCH_CONFIDENCE_THRESHOLD } from "@/lib/property-match";
+import { matchProperty, MATCH_CONFIDENCE_THRESHOLD, ACK_CONFIDENCE_THRESHOLD } from "@/lib/property-match";
 import { draftLeadReply } from "@/lib/draft-lead-reply";
 import { linkOrphanedComms } from "@/lib/cre-os/send-crm-email";
 import { toE164 } from "@/lib/twilio";
@@ -64,6 +64,8 @@ interface QualificationResult {
   property_label: string | null;
   qualifier_summary: string;
   spam_likelihood: "none" | "low" | "medium" | "high";
+  /** Sender is marketing THEIR listing/space/services to John, or answering John's own outreach — not inquiring about anything John offers. */
+  counterparty_outreach?: boolean;
   notes: string;
 }
 
@@ -83,6 +85,7 @@ Return ONLY valid JSON matching this exact schema (no markdown, no code fences):
   "property_label": string | null,
   "qualifier_summary": string,
   "spam_likelihood": "none" | "low" | "medium" | "high",
+  "counterparty_outreach": boolean,
   "notes": string
 }
 
@@ -94,6 +97,7 @@ Field guidance:
 - property_label: their reference to the property they're asking about — short, recognizable. Examples: "7880 Broadway", "the Joliet medical building", "the Westville industrial". Null if no clear reference.
 - qualifier_summary: ONE sentence with the most important deal qualifiers. Examples: "1031 buyer, $4M cap, 60-day timeline" / "Tenant for 8K SF retail, opening Q3" / "Browsing investor, no urgency stated". Be concrete. Use numbers if the sender gave them.
 - spam_likelihood: "high" for SEO/marketing/vendor pitches, lead-gen services, recruitment, "we found your website" cold outreach. "medium" for borderline cases. "low" for unusual but plausible. "none" for clear prospect inquiries.
+- counterparty_outreach: true when the sender is NOT asking about a property or service John offers — instead they are a broker, landlord, leasing manager, or owner marketing THEIR OWN listing or space to John, following up because John viewed or inquired on THEIR listing (e.g. "I saw you viewed our listing on Crexi"), or replying to outreach John sent them. A listing link to someone else's property plus "what are you looking for?" is counterparty outreach. false for anyone asking about one of John's listings or his services.
 - notes: brief flag for anything ambiguous, missing, or that John should know before responding.
 
 Be precise. Don't invent details the message doesn't contain.`;
@@ -625,9 +629,15 @@ ${body.raw_body || "(empty)"}`;
   //   - We have an email to send to
   //   - Brand-new contact (no prior history) OR new property thread
   //   - Auto-ack hasn't already been queued
+  //   - The receipt names the property, so the match must be strong, and the
+  //     sender must actually be inquiring — not a counterparty pitching their
+  //     own listing (Park 84's leasing manager got "your inquiry on Tru by
+  //     Hilton Merrillville", Oct 2026).
   const eligibleSource = body.source !== "manual_test";
   const eligibleStatus = status === "new";
   const hasEmail = !!(qualification.sender_email_clean || body.sender_email);
+  const isCounterparty = qualification.counterparty_outreach === true;
+  const strongMatch = matchResult.confidence >= ACK_CONFIDENCE_THRESHOLD;
 
   // Fresh-contact check: do they have any other prior leads in the CRM?
   // (Cheaper than calling gatherIntel a second time just for this signal.)
@@ -642,7 +652,20 @@ ${body.raw_body || "(empty)"}`;
     isFreshContact = (count || 0) === 0;
   }
 
-  if (eligibleSource && eligibleStatus && hasEmail && isFreshContact) {
+  if (eligibleSource && eligibleStatus && hasEmail && isFreshContact && (isCounterparty || !strongMatch)) {
+    await recordEvent(
+      supabase,
+      leadId,
+      "qualified",
+      "system",
+      isCounterparty
+        ? "No auto-ack: sender is pitching their own listing or replying to our outreach"
+        : `No auto-ack: property match too weak to name (${(matchResult.confidence * 100).toFixed(0)}%)`,
+      { counterparty_outreach: isCounterparty, match_confidence: matchResult.confidence, reasons: matchResult.reasons }
+    );
+  }
+
+  if (eligibleSource && eligibleStatus && hasEmail && isFreshContact && !isCounterparty && strongMatch) {
     // Random delay 2-5 minutes for the humanizing pause
     const delayMs = (2 + Math.random() * 3) * 60 * 1000;
     const sendAfter = new Date(Date.now() + delayMs).toISOString();
