@@ -21,7 +21,6 @@
  */
 
 import twilio from "twilio";
-import { validateRequest } from "twilio/lib/webhooks/webhooks";
 
 function getEnv(name: string): string | null {
   const v = process.env[name];
@@ -179,7 +178,11 @@ export function verifyTwilioSignature(opts: {
   // verification won't work — caller must accept unsigned in that case.
   const authToken = getEnv("TWILIO_AUTH_TOKEN");
   if (!authToken) return false;
-  return validateRequest(authToken, opts.signature, opts.url, opts.params);
+  // Via the package's default export, not "twilio/lib/webhooks/webhooks":
+  // that extensionless deep path doesn't resolve under Node's ESM loader,
+  // and it crashed every Netlify function that imports this module
+  // (steward-run-background, since 2026-10-13 — no briefs after Oct 12).
+  return twilio.validateRequest(authToken, opts.signature, opts.url, opts.params);
 }
 
 // ── Stop/help keyword detection ────────────────────────────────────────
