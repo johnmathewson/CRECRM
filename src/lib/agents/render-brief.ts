@@ -95,3 +95,17 @@ function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
+
+/**
+ * Drop the agent's warm-up chatter ("All data is in. Writing the brief
+ * now.") and stray rules that come before the brief's title. Only a short
+ * preamble is removed — if there's no "# " title, or more than a couple of
+ * lines before it, the text is returned unchanged.
+ */
+export function stripBriefPreamble(text: string): string {
+  const m = text.match(/^# .+$/m);
+  if (!m || m.index === undefined || m.index === 0) return text;
+  const before = text.slice(0, m.index);
+  if (before.replace(/^-{3,}\s*$/gm, "").trim().length > 200) return text;
+  return text.slice(m.index);
+}

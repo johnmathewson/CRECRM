@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { marked } from "marked";
+import { stripBriefPreamble } from "@/lib/agents/render-brief";
 
 /**
  * Steward's morning brief — same source of truth as the email (the most
@@ -53,7 +54,7 @@ export async function loadLatestBrief(): Promise<TodayBriefingRow | null> {
   const row = data as any;
 
   // Pre-render markdown → HTML on the server so the client stays small.
-  const inner = marked.parse(row.content_text ?? "", { gfm: true, breaks: false, async: false }) as string;
+  const inner = marked.parse(stripBriefPreamble(row.content_text ?? ""), { gfm: true, breaks: false, async: false }) as string;
 
   return {
     id: row.id,
@@ -78,7 +79,7 @@ export async function loadLatestBrief(): Promise<TodayBriefingRow | null> {
 /** The brief's opening, as plain text, for the Today header. Skips the
  *  title line and markdown furniture; capped so it reads as a lede. */
 export function briefLede(contentText: string, maxChars = 320): string {
-  const paragraphs = contentText
+  const paragraphs = stripBriefPreamble(contentText)
     .split(/\n\s*\n/)
     .map((p) =>
       p
