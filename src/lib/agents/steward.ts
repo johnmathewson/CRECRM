@@ -28,7 +28,7 @@ import { MODELS } from "@/lib/anthropic";
 import { getActiveGmailToken } from "@/lib/gmail-auth";
 import { sendCrmEmail } from "@/lib/cre-os/send-crm-email";
 import { runAgent } from "./run-agent";
-import { renderBriefHtml, renderBriefPlaintext } from "./render-brief";
+import { renderBriefHtml, renderBriefPlaintext, stripBriefPreamble } from "./render-brief";
 import { STEWARD_TOOLS } from "./tools/steward-tools";
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
@@ -168,7 +168,7 @@ export async function runStewardBrief(opts: RunStewardOptions): Promise<RunStewa
   // serve it without re-rendering, and into the email body. The
   // markdown stays in content_text so the next brief's
   // get_yesterday_brief tool returns clean prose.
-  const contentText = agentResult.text;
+  const contentText = stripBriefPreamble(agentResult.text);
   const contentHtml = renderBriefHtml(contentText, { briefDate });
 
   const sb = createClient(
