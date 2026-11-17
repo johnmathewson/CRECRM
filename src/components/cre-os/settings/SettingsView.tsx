@@ -92,10 +92,12 @@ export function SettingsView() {
           </p>
         </header>
 
+        {/* First: it's the one connection still waiting on John, and on a
+            phone it was two screens down under Integrity / Imports / Gmail. */}
+        <PersonalGoogleSection />
         <IntegritySection />
         <DataImportsSection />
         <GmailSection />
-        <PersonalGoogleSection />
         <TwilioSection />
         <ExtensionKeysSection />
       </div>
