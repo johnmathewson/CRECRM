@@ -401,7 +401,7 @@ function DataImportsSection() {
 // ── Calendar & personal email ──────────────────────────────────────────────
 
 interface GoogleAccounts {
-  accounts: Array<{ email: string; primary: boolean; calendar: boolean; grantedAt: string | null; error: string | null }>;
+  accounts: Array<{ email: string; primary: boolean; calendar: boolean; calendarWrite: boolean; grantedAt: string | null; error: string | null }>;
   calendar: { events: number; lastSyncedAt: string | null };
 }
 
@@ -434,7 +434,7 @@ function PersonalGoogleSection() {
   }, []);
 
   const personal = data?.accounts.find((a) => !a.primary) ?? null;
-  const ready = !!personal?.calendar;
+  const ready = !!personal?.calendar && !!personal?.calendarWrite;
 
   return (
     <Panel
@@ -447,14 +447,17 @@ function PersonalGoogleSection() {
         ) : ready ? (
           <StatusBadge tone="teal" size="xs">Calendar on</StatusBadge>
         ) : (
-          <StatusBadge tone="amber" size="xs">{personal ? "Needs Calendar permission" : "Not connected"}</StatusBadge>
+          <StatusBadge tone="amber" size="xs">
+            {!personal ? "Not connected" : personal.calendar ? "Read-only — reconnect to add events" : "Needs Calendar permission"}
+          </StatusBadge>
         )
       }
     >
       <p className="font-body text-[12px] text-cream-dim mb-4 leading-relaxed">
-        Your personal Google account. The CRM reads your calendar (read-only) so tours and meetings land on the right
-        deal and the nightly check-in can ask how they went, and reads mail there only from people already in the CRM.
-        Personal events and personal email are never stored. Nothing is sent or changed in Google.
+        Your personal Google account. The CRM reads your calendar so tours and meetings land on the right deal and the
+        nightly check-in can ask how they went, and adds events only when you tap Add on{" "}
+        <a href="/cre-os/calendar" className="underline">Add to calendar</a> — never edits or deletes, never invites anyone.
+        It reads mail there only from people already in the CRM. Personal events and personal email are never stored.
       </p>
 
       {banner && (
@@ -467,7 +470,7 @@ function PersonalGoogleSection() {
       {personal && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
           <Stat label="Account" value={personal.email} />
-          <Stat label="Calendar" value={personal.calendar ? "Allowed" : "Not allowed yet"} />
+          <Stat label="Calendar" value={personal.calendarWrite ? "Read & add events" : personal.calendar ? "Read-only" : "Not allowed yet"} />
           <Stat
             label="Matched events"
             value={String(data?.calendar.events ?? 0)}
@@ -486,11 +489,12 @@ function PersonalGoogleSection() {
         href="/api/auth/google/connect?account=personal"
         className="inline-block px-4 py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] hover:bg-coral-400/[0.18] font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-coral-300 transition-colors"
       >
-        {!personal ? "Connect personal Google account" : ready ? "Reconnect" : "Reconnect and allow Calendar"}
+        {!personal ? "Connect personal Google account" : ready ? "Reconnect" : "Reconnect and allow Calendar access"}
       </a>
       {!ready && (
         <p className="mt-2 font-body text-[11px] text-cream-subtle">
-          Pick your personal account on Google&apos;s screen and leave &ldquo;See your calendar events&rdquo; ticked.
+          Pick your personal account on Google&apos;s screen and leave the calendar permission (&ldquo;View and edit events
+          on all your calendars&rdquo;) ticked.
         </p>
       )}
     </Panel>

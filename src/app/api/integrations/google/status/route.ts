@@ -7,15 +7,22 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { PRIMARY_MAILBOX, tokenStore } from "@/lib/gmail-auth";
+import { createServerSupabase } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 
 export async function GET() {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  // Session-authed (/api is outside the login middleware). The business
+  // inbox only — with a personal account connected too, "newest grant"
+  // would report the wrong mailbox as the lead-routing one.
+  const { data: { user } } = await createServerSupabase().auth.getUser();
+  if (!user) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+
+  const supabase = tokenStore(
+    createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
   );
 
   const { data, error } = await supabase
@@ -23,6 +30,7 @@ export async function GET() {
     .select("email, scopes, granted_at, last_polled_at, poll_error, last_history_id, revoked_at")
     .eq("organization_id", ORG_ID)
     .is("revoked_at", null)
+    .ilike("email", PRIMARY_MAILBOX)
     .order("granted_at", { ascending: false })
     .limit(1)
     .maybeSingle();

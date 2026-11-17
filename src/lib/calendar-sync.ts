@@ -21,8 +21,8 @@
  * nothing from next/* — it runs inside Netlify functions.
  */
 
-import { getActiveGmailTokens, PRIMARY_MAILBOX } from "@/lib/gmail-auth";
-import { CALENDAR_SCOPE } from "@/lib/google-oauth";
+import { getActiveGmailTokens, PRIMARY_MAILBOX, tokenStore } from "@/lib/gmail-auth";
+import { canReadCalendar } from "@/lib/google-oauth";
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 const USER_ID = "b0000000-0000-0000-0000-000000000001";
@@ -117,20 +117,31 @@ async function listEvents(accessToken: string, timeMin: string, timeMax: string)
   return out;
 }
 
-export async function syncCalendar(sb: any): Promise<CalendarSyncResult> {
-  const { data: tokenRows } = await sb
+/**
+ * The Google connection whose calendar the CRM uses: CALENDAR_ACCOUNT when
+ * set, else the one connected account that isn't the business inbox.
+ * Shared with calendar-write so reading and adding use the same calendar.
+ */
+export async function calendarTokenRow(sb: any): Promise<{ email: string; scopes: string[] | null } | null> {
+  const { data: tokenRows } = await tokenStore(sb)
     .from("gmail_oauth_tokens")
     .select("email, scopes")
     .eq("organization_id", ORG_ID)
     .is("revoked_at", null)
     .order("granted_at", { ascending: false });
-  const tokenRow = ((tokenRows ?? []) as any[]).find((r) =>
-    CALENDAR_ACCOUNT_OVERRIDE ? r.email.toLowerCase() === CALENDAR_ACCOUNT_OVERRIDE : r.email.toLowerCase() !== PRIMARY_MAILBOX
+  return (
+    ((tokenRows ?? []) as any[]).find((r) =>
+      CALENDAR_ACCOUNT_OVERRIDE ? r.email.toLowerCase() === CALENDAR_ACCOUNT_OVERRIDE : r.email.toLowerCase() !== PRIMARY_MAILBOX
+    ) ?? null
   );
+}
+
+export async function syncCalendar(sb: any): Promise<CalendarSyncResult> {
+  const tokenRow = await calendarTokenRow(sb);
   const account = (tokenRow?.email ?? CALENDAR_ACCOUNT_OVERRIDE ?? "").toLowerCase();
   const result: CalendarSyncResult = { account, fetched: 0, matched: 0, logged: 0 };
   if (!tokenRow) return { ...result, skipped: "not_connected" };
-  if (!((tokenRow.scopes ?? []) as string[]).includes(CALENDAR_SCOPE)) return { ...result, skipped: "no_calendar_permission" };
+  if (!canReadCalendar(tokenRow.scopes)) return { ...result, skipped: "no_calendar_permission" };
 
   const tokens = await getActiveGmailTokens(sb);
   const token = tokens.find((t) => t.email.toLowerCase() === account);

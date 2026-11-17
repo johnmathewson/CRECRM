@@ -8,8 +8,8 @@
 
 import { NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { PRIMARY_MAILBOX } from "@/lib/gmail-auth";
-import { CALENDAR_SCOPE } from "@/lib/google-oauth";
+import { PRIMARY_MAILBOX, tokenStore } from "@/lib/gmail-auth";
+import { canReadCalendar, canWriteCalendar } from "@/lib/google-oauth";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +21,7 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
 
   const [{ data: rows, error }, { count: events }, { data: last }] = await Promise.all([
-    sb
+    tokenStore(sb)
       .from("gmail_oauth_tokens")
       .select("email, scopes, granted_at, poll_error")
       .eq("organization_id", ORG_ID)
@@ -36,7 +36,8 @@ export async function GET() {
     accounts: (rows ?? []).map((r: any) => ({
       email: r.email,
       primary: String(r.email).toLowerCase() === PRIMARY_MAILBOX,
-      calendar: ((r.scopes ?? []) as string[]).includes(CALENDAR_SCOPE),
+      calendar: canReadCalendar(r.scopes),
+      calendarWrite: canWriteCalendar(r.scopes),
       grantedAt: r.granted_at,
       // netlify/functions/poll-gmail writes "function-heartbeat:<ts>" into
       // poll_error as a liveness marker — that's not an error.

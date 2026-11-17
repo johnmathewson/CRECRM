@@ -14,15 +14,29 @@
  * Scopes:
  *   - gmail.modify covers read + send + draft + label management. One scope
  *     beats three. Tighten later if we want least-privilege.
- *   - calendar.readonly lets the deal check-in and Steward see meetings and
- *     tours (src/lib/calendar-sync.ts). Read-only: nothing on the calendar
- *     is created or changed.
+ *   - calendar.events lets the CRM read events (deal check-in, Steward —
+ *     src/lib/calendar-sync.ts) and add the ones John asks it to
+ *     (src/lib/calendar-write.ts). Events only: no calendar settings,
+ *     sharing or other calendars. Older grants carry calendar.readonly,
+ *     which still covers reading.
  */
 
 export const GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.modify"];
-export const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
+export const CALENDAR_READONLY_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
+export const CALENDAR_EVENTS_SCOPE = "https://www.googleapis.com/auth/calendar.events";
 /** Everything a connect asks for. Google may grant a subset; the callback stores what it granted. */
-export const REQUESTED_SCOPES = [...GMAIL_SCOPES, CALENDAR_SCOPE];
+export const REQUESTED_SCOPES = [...GMAIL_SCOPES, CALENDAR_EVENTS_SCOPE];
+
+/** May the CRM read events with this grant? */
+export function canReadCalendar(scopes: string[] | null | undefined): boolean {
+  const s = scopes ?? [];
+  return s.includes(CALENDAR_EVENTS_SCOPE) || s.includes(CALENDAR_READONLY_SCOPE);
+}
+
+/** May the CRM add events with this grant? */
+export function canWriteCalendar(scopes: string[] | null | undefined): boolean {
+  return (scopes ?? []).includes(CALENDAR_EVENTS_SCOPE);
+}
 
 export interface GoogleTokenResponse {
   access_token: string;

@@ -3,20 +3,28 @@
  *
  * Revokes the OAuth grant at Google + soft-deletes our token row. Future
  * polling cycles skip revoked rows.
+ *
+ * Only the business inbox (PRIMARY_MAILBOX) — this is the Gmail section's
+ * button; the personal account is managed from its own section. Session-
+ * authed: /api is outside the login middleware, and this one revokes.
  */
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { refreshAccessToken, revokeToken } from "@/lib/google-oauth";
+import { revokeToken } from "@/lib/google-oauth";
+import { PRIMARY_MAILBOX, tokenStore } from "@/lib/gmail-auth";
+import { createServerSupabase } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 
 export async function POST() {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  const { data: { user } } = await createServerSupabase().auth.getUser();
+  if (!user) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+
+  const supabase = tokenStore(
+    createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
   );
 
   const { data: token } = await supabase
@@ -24,6 +32,8 @@ export async function POST() {
     .select("id, refresh_token")
     .eq("organization_id", ORG_ID)
     .is("revoked_at", null)
+    .ilike("email", PRIMARY_MAILBOX)
+    .limit(1)
     .maybeSingle();
 
   if (!token) {

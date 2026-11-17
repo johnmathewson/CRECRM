@@ -6,6 +6,7 @@
  * as "Gmail not configured yet."
  */
 
+import { createClient } from "@supabase/supabase-js";
 import { refreshAccessToken } from "./google-oauth";
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
@@ -35,8 +36,22 @@ interface TokenRow {
   last_history_id: string | null;
 }
 
+/**
+ * The client for gmail_oauth_tokens. The table holds Google refresh tokens,
+ * so it has no anon policy: every read and write goes through the service
+ * role (server-only). The fallback only matters on a machine without
+ * SUPABASE_SERVICE_ROLE_KEY (local dev), where the caller's client is used.
+ */
+export function tokenStore(fallback: any): any {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!key) return fallback;
+  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
 async function activeTokenRows(supabase: any): Promise<TokenRow[]> {
-  const { data, error } = await supabase
+  const { data, error } = await tokenStore(supabase)
     .from("gmail_oauth_tokens")
     .select("id, email, refresh_token, last_history_id")
     .eq("organization_id", ORG_ID)
@@ -52,7 +67,7 @@ async function refreshRow(supabase: any, row: TokenRow): Promise<ActiveGmailToke
     tokens = await refreshAccessToken(row.refresh_token);
   } catch (err: any) {
     // Mark the connection broken so the UI can prompt re-auth.
-    await supabase
+    await tokenStore(supabase)
       .from("gmail_oauth_tokens")
       .update({ poll_error: `Refresh failed: ${err.message}` })
       .eq("id", row.id);

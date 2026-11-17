@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { exchangeCodeForTokens, GMAIL_SCOPES } from "@/lib/google-oauth";
 import { getProfile } from "@/lib/gmail";
+import { tokenStore } from "@/lib/gmail-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -70,7 +71,7 @@ export async function GET(req: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
-  const { error: dbErr } = await supabase
+  const { error: dbErr } = await tokenStore(supabase)
     .from("gmail_oauth_tokens")
     .upsert(
       {
