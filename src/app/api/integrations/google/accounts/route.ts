@@ -38,7 +38,9 @@ export async function GET() {
       primary: String(r.email).toLowerCase() === PRIMARY_MAILBOX,
       calendar: ((r.scopes ?? []) as string[]).includes(CALENDAR_SCOPE),
       grantedAt: r.granted_at,
-      error: r.poll_error,
+      // netlify/functions/poll-gmail writes "function-heartbeat:<ts>" into
+      // poll_error as a liveness marker — that's not an error.
+      error: r.poll_error && !String(r.poll_error).startsWith("function-heartbeat:") ? r.poll_error : null,
     })),
     calendar: { events: events ?? 0, lastSyncedAt: last?.synced_at ?? null },
   });
