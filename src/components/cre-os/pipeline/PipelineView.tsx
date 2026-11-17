@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/cre-os/AppShell";
 import { Eyebrow } from "@/components/cre-os/Eyebrow";
@@ -86,9 +86,13 @@ export function PipelineView({
       if (localStorage.getItem(VIEW_KEY) === "list") setView("list");
     } catch { /* storage unavailable */ }
   }, []);
+  // The scoreboard is long on a phone, so choosing a view also brings the
+  // deals into view instead of leaving them a long scroll below.
+  const dealsRef = useRef<HTMLDivElement>(null);
   function chooseView(v: "board" | "list") {
     setView(v);
     try { localStorage.setItem(VIEW_KEY, v); } catch { /* storage unavailable */ }
+    requestAnimationFrame(() => dealsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
 
   // Local DnD overrides: { [dealId]: newStage }. Layered onto the
@@ -289,34 +293,36 @@ export function PipelineView({
     <AppShell rail={rail}>
       <div className="space-y-6">
         {/* Page header */}
-        <div className="flex items-end justify-between gap-6 flex-wrap">
-          <div className="min-w-0 flex-1">
+        <div className="flex items-end justify-between gap-x-6 gap-y-4 flex-wrap">
+          <div className="min-w-[260px] flex-1">
             <Eyebrow tone="coral">Pipeline</Eyebrow>
             <h1 className="mt-1 font-display text-[30px] font-extrabold text-cream leading-none">The year</h1>
             <p className="mt-2 font-body text-[14px] text-cream-muted">
               These deals run six to eighteen months. This is where they are, when they land, and what they're worth.
             </p>
           </div>
-          <button
-            onClick={() => setCreateOpen(true)}
-            className="shrink-0 px-4 py-2.5 bg-copper-600 hover:bg-copper-700 font-heading text-[12px] font-semibold text-white transition-colors"
-          >
-            + Add deal
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1 border-2 border-white/[0.10] p-1">
+              <SideTab label="Board" active={view === "board"} onClick={() => chooseView("board")} />
+              <SideTab label="List" active={view === "list"} onClick={() => chooseView("list")} />
+            </div>
+            <button
+              onClick={() => setCreateOpen(true)}
+              className="shrink-0 px-4 py-2.5 bg-copper-600 hover:bg-copper-700 font-heading text-[12px] font-semibold text-white transition-colors"
+            >
+              + Add deal
+            </button>
+          </div>
         </div>
 
         <PipelineScoreboard data={scoreboard} />
 
         {/* Side toggle */}
-        <div className="flex items-end justify-between gap-4 flex-wrap pt-2">
+        <div ref={dealsRef} className="flex items-end justify-between gap-4 flex-wrap pt-2 scroll-mt-4">
           <div className="flex items-center gap-1 border-2 border-white/[0.10] p-1">
             <SideTab label={`Listings · ${listings.totals.activeDeals}`} active={side === "listings"} onClick={() => setSide("listings")} />
             <SideTab label={`Pursuits · ${pursuits.totals.activeDeals}`} active={side === "pursuits"} onClick={() => setSide("pursuits")} />
             <SideTab label={`All · ${allBoard.totals.activeDeals}`} active={side === "all"} onClick={() => setSide("all")} />
-          </div>
-          <div className="flex items-center gap-1 border-2 border-white/[0.10] p-1">
-            <SideTab label="Board" active={view === "board"} onClick={() => chooseView("board")} />
-            <SideTab label="List" active={view === "list"} onClick={() => chooseView("list")} />
           </div>
           <span className="font-body text-[13px] text-cream-muted">
             {fmtMoney(board.totals.pipelineValue)} in play · {fmtMoney(board.totals.pipelineCommission)} fees · {fmtMoney(board.totals.weightedCommission)} weighted
