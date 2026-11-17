@@ -413,6 +413,51 @@ export const getBrokerVoiceProfile: Tool = {
 };
 
 /** Convenience array of every Steward tool, in registry order. */
+// ─── getTodaysCalendar ──────────────────────────────────────────────────
+// John's meetings today and tomorrow that the calendar sync matched to the
+// CRM (a known contact attending, or a deal property in the title or
+// location). Personal events are never synced, so they can't appear here.
+// calendar_events has no anon policy, so this reads with the service role.
+
+export const getTodaysCalendar: Tool = {
+  definition: {
+    name: "get_todays_calendar",
+    description:
+      "Returns John's CRM-related calendar events for today and tomorrow (Central time): title, time, location, attendees, " +
+      "and the linked deal (name, stage-relevant fields) and property. Empty when the calendar isn't connected yet or " +
+      "nothing on it touches a deal or known contact. Use it for 'Today's meetings' — pair each with what's open on that deal.",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  handler: async () => {
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!key) return { connected: false, events: [] };
+    const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, key, { auth: { persistSession: false } });
+    const now = new Date();
+    const until = new Date(now.getTime() + 48 * 3600_000);
+    const startOfToday = new Date(now.getTime() - 12 * 3600_000); // covers the CT morning from an 11:00 UTC run
+    const { data, error } = await sb
+      .from("calendar_events")
+      .select(
+        `title, location, start_at, end_at, all_day, attendees, match_reason,
+         deal:deals(id, deal_name, deal_type, price, probability_pct, expected_close, next_step, agent_summary),
+         property:properties(id, name, address)`
+      )
+      .eq("organization_id", ORG_ID)
+      .neq("status", "cancelled")
+      .gte("start_at", startOfToday.toISOString())
+      .lte("start_at", until.toISOString())
+      .order("start_at", { ascending: true });
+    if (error) throw new Error(`get_todays_calendar: ${error.message}`);
+    const events = (data ?? []).map((e: any) => ({
+      ...e,
+      starts_ct: new Date(e.start_at).toLocaleString("en-US", {
+        timeZone: "America/Chicago", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+      }),
+    }));
+    return { connected: true, count: events.length, events };
+  },
+};
+
 export const STEWARD_TOOLS: Tool[] = [
   getHotLeadsQueued,
   getStaleDeals,
@@ -423,4 +468,5 @@ export const STEWARD_TOOLS: Tool[] = [
   getApproachingKeyDates,
   getYesterdayBrief,
   getBrokerVoiceProfile,
+  getTodaysCalendar,
 ];

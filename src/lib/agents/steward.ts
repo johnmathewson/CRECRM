@@ -30,6 +30,7 @@ import { sendCrmEmail } from "@/lib/cre-os/send-crm-email";
 import { runAgent } from "./run-agent";
 import { renderBriefHtml, renderBriefPlaintext } from "./render-brief";
 import { STEWARD_TOOLS } from "./tools/steward-tools";
+import { syncCalendar } from "@/lib/calendar-sync";
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 
@@ -113,6 +114,20 @@ function buildUserMessage(briefType: "daily" | "weekly", briefDate: string): str
 export async function runStewardBrief(opts: RunStewardOptions): Promise<RunStewardResult> {
   const briefType = opts.briefType;
   const briefDate = opts.briefDate ?? new Date().toISOString().slice(0, 10);
+
+  // Refresh the calendar so meetings booked since last night's check-in
+  // make it into "Today's meetings". Best-effort: never blocks the brief.
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (serviceKey && !opts.dryRun) {
+    try {
+      const r = await syncCalendar(
+        createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, serviceKey, { auth: { persistSession: false } })
+      );
+      console.log(`[steward] calendar sync: ${JSON.stringify(r)}`);
+    } catch (err) {
+      console.warn(`[steward] calendar sync failed: ${err instanceof Error ? err.message : err}`);
+    }
+  }
 
   const playbook = readPlaybook();
   const userMessage = buildUserMessage(briefType, briefDate);

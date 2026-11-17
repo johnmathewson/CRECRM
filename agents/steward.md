@@ -65,7 +65,11 @@ Specifically:
    within the last 36 hours. These get their own "Newly Listed" callout
    in the brief — a property that just went live is a fresh marketing
    event to announce and watch for early activity.
-6. **today's calendar** (when Google Cal sync is live; null-safe until then)
+6. **today's calendar** — `get_todays_calendar`: meetings, tours and
+   calls today/tomorrow that touch a deal or known contact. When there
+   are any, put a short "Today's meetings" list right after Top 3: time,
+   who, which deal, and the one thing to have ready (pull it from the
+   deal's next step / open items). Empty or not connected → skip silently.
 7. **deals approaching key dates** — expected_close within the next
    7 days, plus LOI/DD/financing dates when those fields land
 

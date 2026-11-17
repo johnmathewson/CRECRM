@@ -95,6 +95,7 @@ export function SettingsView() {
         <IntegritySection />
         <DataImportsSection />
         <GmailSection />
+        <PersonalGoogleSection />
         <TwilioSection />
         <ExtensionKeysSection />
       </div>
@@ -391,6 +392,105 @@ function DataImportsSection() {
         foreclosure, refi-maturity, and tax-delinquency signals onto matched properties.
         Properties in your warm pipeline are never modified.
       </p>
+    </Panel>
+  );
+}
+
+// ── Calendar & personal email ──────────────────────────────────────────────
+
+interface GoogleAccounts {
+  accounts: Array<{ email: string; primary: boolean; calendar: boolean; grantedAt: string | null; error: string | null }>;
+  calendar: { events: number; lastSyncedAt: string | null };
+}
+
+/**
+ * John's personal Google account: its calendar (read-only) feeds the deal
+ * check-in, deal timelines and Steward's "Today's meetings"; its inbox is
+ * read only for mail from people already in the CRM. Connecting goes
+ * through Google's account chooser (no login hint).
+ */
+function PersonalGoogleSection() {
+  const [data, setData] = useState<GoogleAccounts | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [banner, setBanner] = useState<string | null>(null);
+
+  useEffect(() => {
+    // The OAuth callback lands here with ?status=connected|error&msg=…
+    try {
+      const q = new URLSearchParams(window.location.search);
+      const st = q.get("status");
+      if (st === "connected") setBanner(`Connected ${q.get("msg") ?? ""}`.trim());
+      else if (st === "error") setError(`Connect failed: ${q.get("msg") ?? "unknown error"}`);
+    } catch { /* no window */ }
+    fetch("/api/integrations/google/accounts", { cache: "no-store" })
+      .then(async (r) => {
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+        setData(j);
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  }, []);
+
+  const personal = data?.accounts.find((a) => !a.primary) ?? null;
+  const ready = !!personal?.calendar;
+
+  return (
+    <Panel
+      eyebrow="Google"
+      num={2}
+      title="Calendar & personal email"
+      actions={
+        !data ? (
+          <span className="font-mono text-[10px] text-cream-subtle">Loading…</span>
+        ) : ready ? (
+          <StatusBadge tone="teal" size="xs">Calendar on</StatusBadge>
+        ) : (
+          <StatusBadge tone="amber" size="xs">{personal ? "Needs Calendar permission" : "Not connected"}</StatusBadge>
+        )
+      }
+    >
+      <p className="font-body text-[12px] text-cream-dim mb-4 leading-relaxed">
+        Your personal Google account. The CRM reads your calendar (read-only) so tours and meetings land on the right
+        deal and the nightly check-in can ask how they went, and reads mail there only from people already in the CRM.
+        Personal events and personal email are never stored. Nothing is sent or changed in Google.
+      </p>
+
+      {banner && (
+        <div className="mb-3 rounded border border-teal-400/30 bg-teal-400/[0.08] px-3 py-2 font-body text-[11px] text-teal-300">{banner}</div>
+      )}
+      {error && (
+        <div className="mb-3 rounded border border-red-400/30 bg-red-500/[0.08] px-3 py-2 font-body text-[11px] text-red-300">{error}</div>
+      )}
+
+      {personal && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+          <Stat label="Account" value={personal.email} />
+          <Stat label="Calendar" value={personal.calendar ? "Allowed" : "Not allowed yet"} />
+          <Stat
+            label="Matched events"
+            value={String(data?.calendar.events ?? 0)}
+            sub={data?.calendar.lastSyncedAt ? `last sync ${fmtTime(data.calendar.lastSyncedAt)}` : "syncs nightly at 8:45 PM and before the morning brief"}
+          />
+        </div>
+      )}
+
+      {personal?.error && (
+        <div className="mb-3 rounded border border-amber/30 bg-amber/[0.08] px-3 py-2 font-body text-[11px] text-amber">
+          Connection error: {personal.error}
+        </div>
+      )}
+
+      <a
+        href="/api/auth/google/connect?account=personal"
+        className="inline-block px-4 py-2 rounded border border-coral-400/40 bg-coral-400/[0.10] hover:bg-coral-400/[0.18] font-heading text-[11px] uppercase tracking-eyebrow font-semibold text-coral-300 transition-colors"
+      >
+        {!personal ? "Connect personal Google account" : ready ? "Reconnect" : "Reconnect and allow Calendar"}
+      </a>
+      {!ready && (
+        <p className="mt-2 font-body text-[11px] text-cream-subtle">
+          Pick your personal account on Google&apos;s screen and leave &ldquo;See your calendar events&rdquo; ticked.
+        </p>
+      )}
     </Panel>
   );
 }

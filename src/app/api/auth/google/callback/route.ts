@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 
 function redirectToSettings(req: NextRequest, status: string, message?: string) {
-  const url = new URL("/settings/integrations", req.url);
+  const url = new URL("/cre-os/settings", req.url);
   url.searchParams.set("status", status);
   if (message) url.searchParams.set("msg", message);
   return NextResponse.redirect(url);
@@ -77,7 +77,9 @@ export async function GET(req: NextRequest) {
         organization_id: ORG_ID,
         email: profile.emailAddress,
         refresh_token: tokens.refresh_token,
-        scopes: GMAIL_SCOPES,
+        // What Google actually granted (the consent screen lets John untick
+        // Calendar), so calendar-sync can tell whether it may read events.
+        scopes: tokens.scope ? tokens.scope.split(" ").filter(Boolean) : GMAIL_SCOPES,
         last_history_id: profile.historyId,
         granted_at: new Date().toISOString(),
         revoked_at: null,

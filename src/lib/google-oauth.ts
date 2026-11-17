@@ -14,9 +14,15 @@
  * Scopes:
  *   - gmail.modify covers read + send + draft + label management. One scope
  *     beats three. Tighten later if we want least-privilege.
+ *   - calendar.readonly lets the deal check-in and Steward see meetings and
+ *     tours (src/lib/calendar-sync.ts). Read-only: nothing on the calendar
+ *     is created or changed.
  */
 
 export const GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.modify"];
+export const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
+/** Everything a connect asks for. Google may grant a subset; the callback stores what it granted. */
+export const REQUESTED_SCOPES = [...GMAIL_SCOPES, CALENDAR_SCOPE];
 
 export interface GoogleTokenResponse {
   access_token: string;
@@ -50,15 +56,17 @@ function googleClientConfig() {
  *
  * `access_type: "offline"` is what makes Google return a refresh_token at all.
  */
-export function buildAuthUrl(opts: { state: string; loginHint?: string }): string {
+export function buildAuthUrl(opts: { state: string; loginHint?: string; selectAccount?: boolean }): string {
   const { clientId, redirectUri } = googleClientConfig();
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
     response_type: "code",
-    scope: GMAIL_SCOPES.join(" "),
+    scope: REQUESTED_SCOPES.join(" "),
     access_type: "offline",
-    prompt: "consent",
+    // select_account: connecting a second (personal) account must show
+    // Google's account chooser rather than reuse whoever is signed in.
+    prompt: opts.selectAccount ? "select_account consent" : "consent",
     state: opts.state,
     include_granted_scopes: "true",
   });

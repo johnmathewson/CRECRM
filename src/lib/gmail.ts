@@ -134,6 +134,16 @@ export async function getMessage(accessToken: string, messageId: string): Promis
 }
 
 /**
+ * Headers only (no body) — cheap enough to look at every message in a
+ * scan and fetch the full message only for the ones worth keeping.
+ */
+export async function getMessageMetadata(accessToken: string, messageId: string, headers: string[]): Promise<GmailMessage> {
+  const params = new URLSearchParams({ format: "metadata" });
+  for (const h of headers) params.append("metadataHeaders", h);
+  return gmailJson<GmailMessage>(`/messages/${messageId}?${params.toString()}`, accessToken);
+}
+
+/**
  * RFC 2047 encode a header value if it contains any non-ASCII byte.
  * ASCII-only values pass through unchanged (cheaper, more readable in
  * raw message dumps). Non-ASCII values become a single base64
