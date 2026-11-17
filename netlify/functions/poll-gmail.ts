@@ -28,9 +28,11 @@ export default async function handler() {
   // ── Heartbeat: write to DB FIRST, before any other work ──
   let heartbeatErr: string | null = null;
   try {
+    // Service role: gmail_oauth_tokens holds refresh tokens and has no
+    // anon policy (migration 0041).
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     );
     const { error } = await supabase
       .from("gmail_oauth_tokens")

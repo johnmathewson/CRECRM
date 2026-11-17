@@ -18,7 +18,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { getActiveGmailToken, getActiveGmailTokens, PRIMARY_MAILBOX } from "@/lib/gmail-auth";
+import { getActiveGmailToken, getActiveGmailTokens, PRIMARY_MAILBOX, tokenStore } from "@/lib/gmail-auth";
 import {
   getProfile,
   listHistory,
@@ -240,7 +240,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
     // No cursor yet — initialize from current profile.
     try {
       const profile = await getProfile(token.accessToken);
-      await supabase
+      await tokenStore(supabase)
         .from("gmail_oauth_tokens")
         .update({
           last_history_id: profile.historyId,
@@ -252,7 +252,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
       result.poll.cursor_advanced_to = profile.historyId;
     } catch (err: any) {
       result.poll.error = `Profile fetch failed: ${err.message}`;
-      await supabase.from("gmail_oauth_tokens").update({ poll_error: err.message }).eq("id", token.rowId);
+      await tokenStore(supabase).from("gmail_oauth_tokens").update({ poll_error: err.message }).eq("id", token.rowId);
     }
   } else {
     try {
@@ -572,7 +572,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
 
       // Advance cursor to the latest history ID we saw, or current profile.
       const cursor = latestHistoryId || (await getProfile(token.accessToken)).historyId;
-      await supabase
+      await tokenStore(supabase)
         .from("gmail_oauth_tokens")
         .update({
           last_history_id: cursor,
@@ -592,7 +592,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
       if (isStale) {
         try {
           const profile = await getProfile(token.accessToken);
-          await supabase
+          await tokenStore(supabase)
             .from("gmail_oauth_tokens")
             .update({
               last_history_id: profile.historyId,
@@ -601,10 +601,10 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
             })
             .eq("id", token.rowId);
         } catch {
-          await supabase.from("gmail_oauth_tokens").update({ poll_error: errMsg }).eq("id", token.rowId);
+          await tokenStore(supabase).from("gmail_oauth_tokens").update({ poll_error: errMsg }).eq("id", token.rowId);
         }
       } else {
-        await supabase.from("gmail_oauth_tokens").update({ poll_error: errMsg }).eq("id", token.rowId);
+        await tokenStore(supabase).from("gmail_oauth_tokens").update({ poll_error: errMsg }).eq("id", token.rowId);
       }
     }
   }
