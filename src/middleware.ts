@@ -39,12 +39,21 @@ export async function middleware(request: NextRequest) {
   //                      the magic links themselves. Lives outside /cre-os/
   //                      so it doesn't inherit the app shell's viewport lock.
   const isPrintRoute = request.nextUrl.pathname.startsWith("/print/");
+  //   /map/*           : public parcel map (Hobart). Public-tier data only;
+  //                      owner / value / sales tiers are gated inside the
+  //                      page by registration, not by the CRM session.
+  //   /data/*          : static public GIS extracts under /public/data that the
+  //                      map fetches (parcels, zoning, buildings).
+  const isMapRoute =
+    request.nextUrl.pathname.startsWith("/map/") ||
+    request.nextUrl.pathname.startsWith("/data/");
 
   if (
     !user &&
     !request.nextUrl.pathname.startsWith("/login") &&
     !request.nextUrl.pathname.startsWith("/auth") &&
-    !isPrintRoute
+    !isPrintRoute &&
+    !isMapRoute
   ) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";

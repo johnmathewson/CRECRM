@@ -1,0 +1,27 @@
+{
+ "city": "Hobart",
+ "bbox": [
+  -87.31703328077968,
+  41.463657708117985,
+  -87.22019975593004,
+  41.56513057984864
+ ],
+ "home": {
+  "center": [
+   -87.2541,
+   41.5308
+  ],
+  "zoom": 15.5
+ },
+ "counts": {
+  "parcels": 13481,
+  "buildings": 16506,
+  "sales": 17441,
+  "permits": 11449
+ },
+ "pulled_at": "2026-11-17T03:52:42Z",
+ "sources": [
+  "gis.cityofhobart.org (City of Hobart GIS)",
+  "lcsogis.lakecountyin.org (Lake County GIS)"
+ ]
+}

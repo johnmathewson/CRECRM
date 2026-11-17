@@ -33,3 +33,6 @@ npm-debug.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# parcel map full extracts (owners, values) — loaded to Supabase, not committed
+data/parcel-map/

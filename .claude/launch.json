@@ -4,7 +4,15 @@
     {
       "name": "crecrm-dev",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "export NVM_DIR=\"$HOME/.nvm\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && export NEXT_PUBLIC_SUPABASE_URL=https://placeholder.supabase.co && export NEXT_PUBLIC_SUPABASE_ANON_KEY=placeholder && export ANTHROPIC_API_KEY=placeholder && PORT=3017 npm run dev"],
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/johnmathewson/Documents/GitHub/CRECRM && export NVM_DIR=\"$HOME/.nvm\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && export ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-placeholder} && PORT=3017 npm run dev"
+      ],
+      "port": 3017
+    },
+    {
+      "name": "crecrm-attach",
+      "url": "http://localhost:3017",
       "port": 3017
     }
   ]
