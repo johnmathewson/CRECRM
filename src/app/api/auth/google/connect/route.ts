@@ -15,13 +15,16 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const loginHint = searchParams.get("email") || "inquiries@stewardshipcre.com";
+  // ?account=personal → no login hint, Google's account chooser instead
+  // (Settings → "Calendar & personal email"). Otherwise the business inbox.
+  const personal = searchParams.get("account") === "personal";
+  const loginHint = personal ? undefined : searchParams.get("email") || "inquiries@stewardshipcre.com";
 
   let authUrl: string;
   let state: string;
   try {
     state = generateState();
-    authUrl = buildAuthUrl({ state, loginHint });
+    authUrl = buildAuthUrl({ state, loginHint, selectAccount: personal });
   } catch (err: any) {
     return NextResponse.json(
       { error: err.message || "OAuth not configured" },

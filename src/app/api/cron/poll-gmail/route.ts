@@ -24,6 +24,7 @@ import {
   listHistory,
   listMessages,
   getMessage,
+  getMessageMetadata,
   getHeader,
   extractBody,
   extractAttachments,
@@ -187,6 +188,12 @@ interface PollResult {
    *  replies John sends from john@ (not just inquiries@) get logged. */
   sentSync: Record<string, {
     synced?: number;
+    skipped?: number;
+    error?: string;
+  }>;
+  /** INBOX-sync on secondary (personal) mailboxes — every 5th minute. */
+  inboxSync?: Record<string, {
+    logged?: number;
     skipped?: number;
     error?: string;
   }>;
@@ -856,6 +863,107 @@ export async function POST(req: NextRequest): Promise<NextResponse<PollResult>> 
     } catch (syncErr: any) {
       result.sentSync[acct.email] = { error: syncErr.message };
       console.error(`[poll-gmail] sent-sync failed for ${acct.email}:`, syncErr.message);
+    }
+  }
+
+  // ── Job 4: INBOX-sync on secondary mailboxes ───────────────────────────
+  // Job 1 reads the PRIMARY (business) inbox and runs lead intake on it.
+  // John's personal mailbox also gets replies from people on live deals,
+  // and the CRM never saw them. This logs inbound mail there from people
+  // the CRM ALREADY knows (a contact, or a lead's sender) as a plain
+  // communications row:
+  //   • never lead intake, never an auto-ack — nothing is sent;
+  //   • unknown senders (personal mail) and bulk mail are skipped and never
+  //     stored;
+  //   • headers are read first; the body is fetched only for a known sender.
+  // Every 5th minute is plenty for this and keeps API use small.
+  if (new Date().getUTCMinutes() % 5 === 0) {
+    result.inboxSync = {};
+    for (const acct of syncAccounts) {
+      if (acct.email.toLowerCase() === PRIMARY_MAILBOX) continue;
+      let logged = 0;
+      let skipped = 0;
+      try {
+        const refs = await listMessages(
+          acct.accessToken,
+          "in:inbox newer_than:14d -category:promotions -category:social -category:updates -category:forums",
+          30
+        );
+        for (const ref of refs) {
+          try {
+            const { data: alreadyLogged } = await supabase
+              .from("communications")
+              .select("id")
+              .eq("external_id", ref.id)
+              .limit(1)
+              .maybeSingle();
+            if (alreadyLogged) { skipped++; continue; }
+
+            const meta = await getMessageMetadata(acct.accessToken, ref.id, ["From", "List-Unsubscribe", "Auto-Submitted"]);
+            const { email: fromEmail, name: fromName } = parseAddress(getHeader(meta.payload, "From"));
+            if (!fromEmail || ourEmails.has(fromEmail.toLowerCase())) { skipped++; continue; }
+            // Newsletters, notifications and auto-replies aren't conversations.
+            if (getHeader(meta.payload, "List-Unsubscribe") || /^auto-/i.test(getHeader(meta.payload, "Auto-Submitted") ?? "")) { skipped++; continue; }
+            if (/^(no-?reply|notifications?|mailer-daemon|postmaster|bounce)/i.test(fromEmail)) { skipped++; continue; }
+
+            const { data: matchedLead } = await supabase
+              .from("leads")
+              .select("id, property_id, contact_id")
+              .eq("organization_id", ORG_ID)
+              .ilike("sender_email", fromEmail.trim())
+              .not("status", "in", '("archived","spam")')
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            let contactId = (matchedLead?.contact_id as string | null) ?? null;
+            if (!contactId) {
+              const { data: contactRow } = await supabase
+                .from("contacts")
+                .select("id")
+                .eq("organization_id", ORG_ID)
+                .ilike("email", fromEmail.trim())
+                .limit(1)
+                .maybeSingle();
+              contactId = (contactRow?.id as string | null) ?? null;
+            }
+            if (!contactId) { skipped++; continue; } // personal mail — never stored
+
+            const msg = await getMessage(acct.accessToken, ref.id);
+            const { text: bodyText } = extractBody(msg.payload);
+            await recordTouch(supabase, {
+              channel: "email",
+              direction: "inbound",
+              contactId,
+              leadId: (matchedLead?.id as string | null) ?? null,
+              propertyId: (matchedLead?.property_id as string | null) ?? null,
+              externalId: ref.id,
+              subject: getHeader(msg.payload, "Subject"),
+              body: bodyText,
+              fromAddress: fromEmail,
+              toAddresses: [acct.email],
+              occurredAt: msg.internalDate ? new Date(parseInt(msg.internalDate)).toISOString() : new Date().toISOString(),
+              touchKind: "manual",
+              attachments: extractAttachments(msg.payload),
+              source: "gmail_inbox_sync",
+              rawPayload: {
+                gmail_message_id: ref.id,
+                gmail_thread_id: msg.threadId,
+                label_ids: msg.labelIds,
+                mailbox: acct.email,
+                from_name: fromName,
+                matched_lead: !!matchedLead,
+              },
+            });
+            logged++;
+          } catch (msgErr) {
+            console.error(`[poll-gmail] inbox-sync error on ${ref.id}:`, msgErr);
+          }
+        }
+        result.inboxSync[acct.email] = { logged, skipped };
+      } catch (err: any) {
+        result.inboxSync[acct.email] = { error: err.message };
+        console.error(`[poll-gmail] inbox-sync failed for ${acct.email}:`, err.message);
+      }
     }
   }
 

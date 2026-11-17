@@ -23,6 +23,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { callAnthropic, parseJsonResponse, MODELS } from "@/lib/anthropic";
 import { getStageConfig, normalizeStage } from "@/lib/cre-os/stage-config";
+import { syncCalendar, type CalendarSyncResult } from "@/lib/calendar-sync";
 
 const ORG_ID = "a0000000-0000-0000-0000-000000000001";
 
@@ -63,6 +64,7 @@ export interface RunDealCheckinResult {
   skipped?: string;
   notified: boolean;
   errors: string[];
+  calendar?: CalendarSyncResult | { error: string };
 }
 
 interface DealContext {
@@ -71,6 +73,8 @@ interface DealContext {
   daysInStage: number | null;
   lastCheckinAnswerDays: number | null;
   daysSinceAnyTouch: number | null;
+  /** A calendar meeting on this deal ended since John last answered about it. */
+  unansweredMeeting: boolean;
   prompt: string;
 }
 
@@ -109,6 +113,8 @@ Rules:
 - ask_tonight = true when the deal is stalled, a date is near or past, something new arrived, the next step is unclear, or John hasn't updated it in 5+ days. false when he answered about it in the last 2 days and nothing new happened.
 - urgency: 5 = money at risk this week, 1 = fine to ask next week.
 - Voice: direct, plain, numbers-forward. No broker-speak.
+- If the calendar shows a meeting, tour or call on this deal that ended after John's last check-in answer, ask how it went — name it ("How did Thursday's tour with Blue Cloud go?"). quick_answers should cover the outcomes.
+- If one is coming up in the next 2 days, you may ask what John needs to have ready, but only if nothing more urgent is open.
 - Never invent facts. If the evidence is thin, say so in status_summary and ask the question that fills the biggest gap.`;
 
 function daysBetween(fromIso: string | null | undefined, to = new Date()): number | null {
@@ -137,7 +143,9 @@ async function buildContext(sb: any, deal: any, today: string): Promise<DealCont
   if (deal.property_id) ors.push(`property_id.eq.${deal.property_id}`);
   if (deal.client_contact_id) ors.push(`contact_id.eq.${deal.client_contact_id}`);
 
-  const [{ data: comms }, { data: acts }, { data: prior }, { data: tasks }] = await Promise.all([
+  const calSince = new Date(Date.now() - 14 * 86400000).toISOString();
+  const calUntil = new Date(Date.now() + 14 * 86400000).toISOString();
+  const [{ data: comms }, { data: acts }, { data: prior }, { data: tasks }, { data: cal }] = await Promise.all([
     sb
       .from("communications")
       .select("channel, direction, subject, body_preview, from_address, occurred_at, touch_kind")
@@ -166,6 +174,16 @@ async function buildContext(sb: any, deal: any, today: string): Promise<DealCont
       .neq("status", "completed")
       .or(`deal_id.eq.${deal.id}${deal.property_id ? `,property_id.eq.${deal.property_id}` : ""}`)
       .limit(8),
+    sb
+      .from("calendar_events")
+      .select("title, location, start_at, end_at, status, attendees")
+      .eq("organization_id", ORG_ID)
+      .eq("deal_id", deal.id)
+      .neq("status", "cancelled")
+      .gte("start_at", calSince)
+      .lte("start_at", calUntil)
+      .order("start_at", { ascending: true })
+      .limit(10),
   ]);
 
   const lastAnswer = ((prior ?? []) as any[]).find((p) => p.answered_at)?.answered_at ?? null;
@@ -217,6 +235,25 @@ async function buildContext(sb: any, deal: any, today: string): Promise<DealCont
     );
   }
 
+  const calEvents = (cal ?? []) as any[];
+  const nowMs = Date.now();
+  if (calEvents.length) {
+    lines.push(`\nCalendar (John's Google Calendar, ±14 days):`);
+    for (const ev of calEvents) {
+      const ended = new Date(ev.end_at ?? ev.start_at).getTime() < nowMs;
+      const who = ((ev.attendees ?? []) as any[]).map((a) => a.name || a.email).slice(0, 4).join(", ");
+      const when = new Date(ev.start_at).toLocaleString("en-US", {
+        timeZone: "America/Chicago", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+      });
+      lines.push(`- ${when} [${ended ? "happened" : "upcoming"}] ${clip(ev.title, 120)}${ev.location ? ` @ ${clip(ev.location, 80)}` : ""}${who ? ` with ${who}` : ""}`);
+    }
+  }
+  const lastAnswerMs = lastAnswer ? new Date(lastAnswer).getTime() : 0;
+  const unansweredMeeting = calEvents.some((ev) => {
+    const end = new Date(ev.end_at ?? ev.start_at).getTime();
+    return end < nowMs && end > lastAnswerMs && nowMs - end < 3 * 86400000;
+  });
+
   if (tasks?.length) {
     lines.push(`\nOpen tasks:`);
     for (const t of tasks as any[]) lines.push(`- ${t.title}${t.due_date ? ` (due ${t.due_date})` : ""}`);
@@ -228,6 +265,7 @@ async function buildContext(sb: any, deal: any, today: string): Promise<DealCont
     daysInStage,
     lastCheckinAnswerDays: daysBetween(lastAnswer),
     daysSinceAnyTouch: daysBetween(newestTouch),
+    unansweredMeeting,
     prompt: lines.join("\n"),
   };
 }
@@ -248,6 +286,7 @@ function heuristicScore(ctx: DealContext, today: string): number {
   }
   if (d.next_step_due && d.next_step_due <= today) s += 2;
   if (ctx.daysSinceAnyTouch !== null && ctx.daysSinceAnyTouch <= 2) s += 1; // something new to ask about
+  if (ctx.unansweredMeeting) s += 4; // a meeting happened and nobody has asked how it went
   return s;
 }
 
@@ -310,6 +349,17 @@ export async function runDealCheckin(opts: RunDealCheckinOptions = {}): Promise<
   const today = chicagoDate();
   const errors: string[] = [];
   if (!sb) throw new Error("SUPABASE_SERVICE_ROLE_KEY not configured");
+
+  // Pull in the calendar first so tonight's questions can ask about today's
+  // meetings. A calendar failure never blocks the check-in.
+  let calendar: CalendarSyncResult | { error: string };
+  try {
+    calendar = await syncCalendar(sb);
+    if ("error" in calendar && calendar.error) errors.push(`calendar: ${calendar.error}`);
+  } catch (err) {
+    calendar = { error: err instanceof Error ? err.message : String(err) };
+    errors.push(`calendar: ${calendar.error}`);
+  }
 
   const { data: existing } = await sb
     .from("deal_checkins")
@@ -435,5 +485,5 @@ export async function runDealCheckin(opts: RunDealCheckinOptions = {}): Promise<
     }
   }
 
-  return { checkinId: checkin.id, checkinDate: today, dealsReviewed: deals.length, items: picked.length, notified, errors };
+  return { checkinId: checkin.id, checkinDate: today, dealsReviewed: deals.length, items: picked.length, notified, errors, calendar };
 }
