@@ -75,14 +75,14 @@ export function TodayBriefView({ brief }: { brief: TodayBriefingRow | null }) {
 
   return (
     <AppShell rail={rail}>
-      <div className="today-shell rounded-md border border-white/[0.08] bg-[#0D0D0D] p-6 lg:p-8 shadow-panel-soft space-y-6">
-        <header className="flex items-start justify-between gap-4">
-          <div>
+      <div className="today-shell max-w-3xl space-y-6">
+        <header className="flex items-start justify-between gap-x-4 gap-y-3 flex-wrap">
+          <div className="min-w-0">
             <Eyebrow tone="coral">Steward · Chief Operating Officer</Eyebrow>
-            <h1 className="mt-1 font-display font-medium text-3xl text-cream tracking-tight">
+            <h1 className="mt-1 font-display text-[30px] font-extrabold text-cream leading-none">
               Today&apos;s Brief
             </h1>
-            <p className="mt-1 font-mono text-[11px] text-cream-subtle">
+            <p className="mt-2 font-mono text-[11px] text-cream-muted">
               {brief
                 ? `${formatDate(brief.brief_date)} · generated ${formatRelative(brief.generated_at)}`
                 : "No brief has been generated yet."}
@@ -111,7 +111,7 @@ export function TodayBriefView({ brief }: { brief: TodayBriefingRow | null }) {
         {brief ? (
           <>
             <article
-              className="brief-body rounded-md border border-white/[0.08] bg-white/[0.02] p-6 lg:p-7 shadow-panel-soft"
+              className="brief-body border border-white/[0.08] bg-steward-surface px-5 py-5 lg:px-8 lg:py-7"
               dangerouslySetInnerHTML={{ __html: brief.content_html_inner }}
             />
 
@@ -141,79 +141,91 @@ export function TodayBriefView({ brief }: { brief: TodayBriefingRow | null }) {
       </div>
 
       <style jsx global>{`
-        /* Style the marked-rendered HTML to match the CRE OS dark theme.
-           The HTML comes through with semantic tags (h1, h2, p, ul, table,
-           a, code, blockquote, hr) and we map each to the brand. */
+        /* The brief is marked-rendered HTML (h1–h3, p, ul/ol, table, a,
+           blockquote, hr). Brand Guide v1.0 on the light canvas: Ink text on
+           a white card, Copper accents, no radius. Written for reading on a
+           phone at 6 AM — full-contrast body text, no faded tiers. */
         .brief-body {
-          color: rgb(240 237 228);
-          font-family: ui-serif, Georgia, "Cambria", "Times New Roman", Times, serif;
-          font-size: 14px;
+          color: #191D21;
+          font-family: var(--font-body, ui-sans-serif), system-ui, sans-serif;
+          font-size: 15px;
           line-height: 1.6;
         }
         .brief-body h1,
         .brief-body h2,
         .brief-body h3,
         .brief-body h4 {
-          font-family: var(--font-display, ui-sans-serif);
-          color: rgb(240 237 228);
-          font-weight: 500;
+          font-family: var(--font-display, ui-sans-serif), system-ui, sans-serif;
+          color: #191D21;
+          font-weight: 800;
           letter-spacing: -0.01em;
+          line-height: 1.25;
         }
-        .brief-body h1 { font-size: 22px; margin-top: 24px; margin-bottom: 12px; }
-        .brief-body h2 { font-size: 16px; margin-top: 28px; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.08); }
-        .brief-body h3 { font-size: 14px; margin-top: 18px; margin-bottom: 8px; color: rgb(255 186 153); }
+        .brief-body > :first-child { margin-top: 0; }
+        .brief-body h1 { font-size: 22px; margin-top: 8px; margin-bottom: 12px; }
+        .brief-body h2 {
+          font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em;
+          margin-top: 30px; margin-bottom: 12px; padding-bottom: 6px;
+          border-bottom: 2px solid #191D21;
+        }
+        .brief-body h3 { font-size: 15px; margin-top: 20px; margin-bottom: 8px; color: #B4552F; }
         .brief-body p { margin-top: 0; margin-bottom: 12px; }
-        .brief-body strong { color: rgb(255 200 170); font-weight: 600; }
-        .brief-body em { color: rgb(180 173 158); font-style: italic; }
-        .brief-body a { color: rgb(94 234 212); text-decoration: underline; text-decoration-color: rgba(94,234,212,0.35); }
-        .brief-body a:hover { color: rgb(125 245 230); text-decoration-color: rgba(94,234,212,0.7); }
+        .brief-body strong { color: #191D21; font-weight: 700; }
+        .brief-body em { color: #4A5056; font-style: italic; }
+        .brief-body a { color: #B4552F; text-decoration: underline; text-underline-offset: 2px; word-break: break-word; }
+        .brief-body a:hover { color: #7E361B; }
         .brief-body ul,
-        .brief-body ol { margin: 8px 0 12px 0; padding-left: 22px; }
-        .brief-body li { margin-bottom: 4px; }
+        .brief-body ol { margin: 8px 0 14px 0; padding-left: 22px; }
+        .brief-body li { margin-bottom: 8px; }
         .brief-body ul > li { list-style-type: disc; }
+        .brief-body ol > li { list-style-type: decimal; }
+        .brief-body li::marker { color: #B4552F; font-weight: 700; }
         .brief-body blockquote {
-          margin: 12px 0;
-          padding: 10px 14px;
-          border-left: 3px solid rgb(255 137 90);
-          background: rgba(255,137,90,0.05);
-          color: rgb(220 215 200);
+          margin: 14px 0;
+          padding: 12px 16px;
+          border-left: 3px solid #B4552F;
+          background: #F0EDE7;
+          color: #191D21;
           font-style: normal;
-          border-radius: 0 4px 4px 0;
         }
+        .brief-body blockquote p:last-child { margin-bottom: 0; }
         .brief-body code {
-          font-family: ui-monospace, SFMono-Regular, monospace;
-          background: rgba(255,255,255,0.05);
+          font-family: var(--font-mono, ui-monospace), SFMono-Regular, monospace;
+          background: #F0EDE7;
           padding: 1px 5px;
-          border-radius: 3px;
-          font-size: 12.5px;
-          color: rgb(255 200 170);
+          font-size: 13px;
+          color: #191D21;
         }
         .brief-body hr {
           border: 0;
-          border-top: 1px solid rgba(255,255,255,0.08);
-          margin: 22px 0;
+          border-top: 1px solid #E7E4DE;
+          margin: 24px 0;
         }
         .brief-body table {
-          width: 100%;
+          display: block;
+          max-width: 100%;
+          overflow-x: auto;
           border-collapse: collapse;
           margin: 12px 0 16px 0;
-          font-size: 12.5px;
+          font-size: 13.5px;
         }
         .brief-body th,
         .brief-body td {
-          padding: 7px 10px;
+          padding: 8px 10px;
           text-align: left;
-          border-bottom: 1px solid rgba(255,255,255,0.06);
+          border-bottom: 1px solid #E7E4DE;
+          vertical-align: top;
         }
         .brief-body th {
-          font-family: var(--font-mono, ui-monospace);
-          font-size: 10px;
+          font-family: var(--font-mono, ui-monospace), monospace;
+          font-size: 10.5px;
           text-transform: uppercase;
           letter-spacing: 0.08em;
-          color: rgb(180 173 158);
-          font-weight: 500;
+          color: #4A5056;
+          font-weight: 600;
+          white-space: nowrap;
         }
-        .brief-body td { color: rgb(240 237 228); }
+        .brief-body td { color: #191D21; }
         .brief-body table tr:last-child td { border-bottom: none; }
       `}</style>
     </AppShell>
