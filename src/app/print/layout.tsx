@@ -1,33 +1,34 @@
-import { Space_Grotesk, DM_Sans, Inter, JetBrains_Mono } from "next/font/google";
+import localFont from "next/font/local";
 
 /**
- * /print/* layout — loads the brand fonts so PDFs render with the same
+ * /print/* layout — loads the brand fonts (self-hosted in src/app/fonts; see
+ * src/app/layout.tsx for why not next/font/google) so PDFs render with the same
  * typography as the rest of the platform, but does NOT impose the
  * viewport-lock styling that /cre-os/* uses for the app shell. Pages
  * under /print/ scroll naturally on the body, which is what print routes
  * need so the broker can preview the document before saving as PDF.
  */
-const spaceGrotesk = Space_Grotesk({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+const spaceGrotesk = localFont({
+  src: "../fonts/space-grotesk-latin.woff2",
+  weight: "300 700",
   variable: "--font-space-grotesk",
   display: "swap",
 });
-const dmSans = DM_Sans({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+const dmSans = localFont({
+  src: "../fonts/dm-sans-latin.woff2",
+  weight: "100 1000",
   variable: "--font-dm-sans",
   display: "swap",
 });
-const inter = Inter({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
+const inter = localFont({
+  src: "../fonts/inter-latin.woff2",
+  weight: "100 900",
   variable: "--font-inter",
   display: "swap",
 });
-const jetbrains = JetBrains_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
+const jetbrains = localFont({
+  src: "../fonts/jetbrains-mono-latin.woff2",
+  weight: "100 800",
   variable: "--font-jetbrains",
   display: "swap",
 });

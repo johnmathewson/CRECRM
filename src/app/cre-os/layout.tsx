@@ -1,4 +1,4 @@
-import { Archivo } from "next/font/google";
+import localFont from "next/font/local";
 import { ContactDrawerProvider } from "@/components/cre-os/ContactDrawer";
 
 /**
@@ -9,9 +9,10 @@ import { ContactDrawerProvider } from "@/components/cre-os/ContactDrawer";
  * Loading is scoped to /cre-os/*. When the rebuild becomes the default,
  * this moves to the root layout.
  */
-const archivo = Archivo({
-  subsets: ["latin"],
-  weight: ["400", "600", "700", "800"],
+// Self-hosted copy (see src/app/layout.tsx for why not next/font/google).
+const archivo = localFont({
+  src: "../fonts/archivo-latin.woff2",
+  weight: "100 900",
   variable: "--font-archivo",
   display: "swap",
 });

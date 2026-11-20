@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Archivo } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -33,9 +33,13 @@ export const viewport: Viewport = {
 // on <body> so every page — login, legacy routes, CRE OS — resolves the
 // --font-archivo variable; before this it was only set inside /cre-os and
 // the font stack fell through to Times everywhere else.
-const archivo = Archivo({
-  subsets: ["latin"],
-  weight: ["400", "600", "700", "800"],
+// Self-hosted (src/app/fonts) rather than next/font/google: the Google loader
+// fetches fonts.googleapis.com at BUILD time and intermittently fails on
+// Netlify ("Cannot read properties of null (reading '1')"), taking the whole
+// deploy down. Variable Archivo, latin subset, weights 100-900.
+const archivo = localFont({
+  src: "./fonts/archivo-latin.woff2",
+  weight: "100 900",
   variable: "--font-archivo",
   display: "swap",
 });
