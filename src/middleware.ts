@@ -48,6 +48,25 @@ export async function middleware(request: NextRequest) {
     request.nextUrl.pathname.startsWith("/map/") ||
     request.nextUrl.pathname.startsWith("/data/");
 
+  // Public map domain (map.stewardshipcre.com → this same Netlify site as a
+  // domain alias). On that host the map is the whole site: "/" and "/hobart"
+  // serve /map/hobart without changing the URL, map/data/login/auth routes
+  // work as usual (/api/* never reaches middleware), and anything else — the
+  // CRM — bounces to the CRM origin so the public domain never shows it.
+  const host = (request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? "").split(":")[0].toLowerCase();
+  const mapHost = (process.env.MAP_PUBLIC_HOST ?? "map.stewardshipcre.com").toLowerCase();
+  if (host && host === mapHost) {
+    const p = request.nextUrl.pathname;
+    if (p === "/" || p === "/hobart") {
+      const url = request.nextUrl.clone();
+      url.pathname = "/map/hobart";
+      return NextResponse.rewrite(url);
+    }
+    if (!isMapRoute && !p.startsWith("/login") && !p.startsWith("/auth")) {
+      return NextResponse.redirect(new URL(p + request.nextUrl.search, process.env.CRM_ORIGIN ?? "https://stewardship-crm.netlify.app"));
+    }
+  }
+
   if (
     !user &&
     !request.nextUrl.pathname.startsWith("/login") &&
