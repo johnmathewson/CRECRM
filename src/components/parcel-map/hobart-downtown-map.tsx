@@ -535,7 +535,7 @@ export default function HobartParcelMap() {
           <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-100 px-2 py-1.5">
             <span className="shrink-0 pl-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Show</span>
             {MARKET_FILTERS.map((f) => {
-              const n = f.id === "all" ? null : f.id === "sale" ? marketPids.sale.length + marketPids.both.length : f.id === "lease" ? marketPids.lease.length + marketPids.both.length : googlePids.length || businessPids.length;
+              const n = f.id === "all" ? null : f.id === "sale" ? marketPids.sale.length + marketPids.both.length : f.id === "lease" ? marketPids.lease.length + marketPids.both.length : businessPids.length;
               const on = filter === f.id;
               const dot = f.dot;
               return (
