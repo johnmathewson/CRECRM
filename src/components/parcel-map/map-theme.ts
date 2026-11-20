@@ -99,3 +99,28 @@ export const LISTING = {
 /** Occupancy overlay (parcels with at least one operating business). Indigo:
  *  clear of the zoning families, the listing green/cyan and the owner amber. */
 export const BUSINESS_FILL = "#4F46E5";
+
+/** Hobart 2040 Comprehensive Plan — Future Land Use designations (Fig. 11),
+ *  in the plan's own legend colors so the map reads like the adopted figure.
+ *  Keys match `f2` on parcels-lite and `cat` on plan-2040.geojson areas
+ *  (scripts/parcel-map/digitize-plan-2040.py). */
+export const PLAN_2040: Record<string, { fill: string; label: string; short: string }> = {
+  tsn: { fill: "#ECC4A1", label: "Traditional Suburban Neighborhood", short: "TSN" },
+  mixed_nbhd: { fill: "#DD862A", label: "Mixed Neighborhood", short: "MN" },
+  multifamily: { fill: "#916939", label: "Multifamily", short: "MF" },
+  auto: { fill: "#E45C7C", label: "Auto-oriented Commercial", short: "AC" },
+  general_business: { fill: "#EA0B37", label: "General Business", short: "GB" },
+  mixed_use: { fill: "#AA0E3A", label: "Mixed Use", short: "MU" },
+  commercial_core: { fill: "#5E0F0F", label: "Commercial Centers", short: "CC" },
+  employment: { fill: "#C18DC8", label: "Employment Center", short: "EC" },
+  industrial: { fill: "#904795", label: "Industrial", short: "IND" },
+  park: { fill: "#38A800", label: "Park / Open Space", short: "PK" },
+  agriculture: { fill: "#245F03", label: "Agriculture", short: "AG" },
+  conservation: { fill: "#B1D166", label: "Conservation Areas", short: "CON" },
+  institutional: { fill: "#084A4B", label: "Institutional", short: "INS" },
+  study: { fill: "#CCCCCC", label: "Future Study Area", short: "FSA" },
+  utility: { fill: "#868686", label: "Utility", short: "UT" },
+};
+export const PLAN_ORDER = Object.keys(PLAN_2040);
+/** Opportunity sites (Fig. 12) and planned street extensions. */
+export const PLAN_SITE = { fill: "#F97316", line: "#C2410C", road: "#0F172A" };

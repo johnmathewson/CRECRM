@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ZONING, ZONING_FALLBACK, LISTING } from "./map-theme";
+import { ZONING, ZONING_FALLBACK, LISTING, PLAN_2040 } from "./map-theme";
 
 /**
  * Parcel card — right panel on desktop, bottom sheet on phones.
@@ -26,7 +26,7 @@ export type Business = {
 
 export type ParcelProps = {
   pid: string; address: string | null; acres: number | null; class: string | null; class_code: string | null;
-  zoning: string | null; flu: string | null; tif: string | null; flood: string | null; historic: string | null;
+  zoning: string | null; flu: string | null; plan?: string | null; tif: string | null; flood: string | null; historic: string | null;
   legal: string | null; transfer_date: number | null;
   owner: string | null; mail: string | null; mail_city: string | null; mail_state: string | null; mail_zip: string | null;
   deduction: string | null; av_total: number | null; av_land: number | null; av_impr: number | null; conveyance: string | null;
@@ -202,11 +202,12 @@ export function ParcelCard({
             )}
             <div className="grid grid-cols-2 gap-2">
               <Tile label="Lot size" value={p.acres != null ? `${p.acres} ac` : "—"} sub={sqft(p.acres) ? `${sqft(p.acres)} sq ft` : undefined} />
-              <Tile label="Future land use" value={p.flu ?? "—"} small />
+              <Tile label="2040 plan" value={p.plan ? PLAN_2040[p.plan]?.label ?? p.plan : "Not designated"} small />
               <Tile label="Property class" value={p.class ?? (p.class_code ? `Code ${p.class_code}` : "—")} sub={p.class && p.class_code ? `Code ${p.class_code}` : undefined} small />
               <Tile label="Flood zone" value={p.flood ? `FEMA ${p.flood}` : "None mapped"} sub={p.flood === "AE" ? "1% annual chance" : p.flood === "X" ? "Minimal risk" : undefined} small warn={p.flood === "AE"} />
             </div>
             <dl className="mt-3 divide-y divide-slate-100 border-y border-slate-100">
+              <Row k="Land use (city GIS)" v={p.flu ?? "—"} />
               <Row k="TIF district" v={p.tif === "Yes" ? "In a TIF district" : p.tif ?? "None"} highlight={!!p.tif} />
               <Row k="Historic district" v={p.historic === "Yes" ? "Yes" : p.historic ?? "None"} highlight={!!p.historic} />
               <Row k="Last transfer" v={dt(p.transfer_date)} />

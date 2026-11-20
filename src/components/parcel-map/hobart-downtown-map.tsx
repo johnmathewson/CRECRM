@@ -6,7 +6,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { ParcelCard, type ParcelProps, type Listing } from "./parcel-card";
 import { RegisterModal, AskModal } from "./map-forms";
 import {
-  ZONING, ZONING_FALLBACK, LAND_USE, HEIGHT_LEGEND, BUILDING_NEUTRAL, PARCEL_LINE, SELECTION, OWNER_MATCH, LISTING, BUSINESS_FILL,
+  ZONING, ZONING_FALLBACK, LAND_USE, HEIGHT_LEGEND, BUILDING_NEUTRAL, PARCEL_LINE, SELECTION, OWNER_MATCH, LISTING, BUSINESS_FILL, PLAN_2040, PLAN_ORDER, PLAN_SITE,
   matchExpr, heightExpr,
 } from "./map-theme";
 
@@ -23,7 +23,7 @@ import {
 const DATA = "/data/hobart";
 const STYLES = { light: "https://tiles.openfreemap.org/styles/positron", dark: "https://tiles.openfreemap.org/styles/dark" };
 
-type Mode = "zoning" | "flu" | "height" | "none";
+type Mode = "zoning" | "plan" | "flu" | "height" | "none";
 /** Top-level filters shown as chips under the search box. Add future filters
  *  (asset type, price band, lot size, zoning…) as more entries. */
 type MarketFilter = "all" | "sale" | "lease" | "business";
@@ -36,15 +36,15 @@ const MARKET_FILTERS: { id: MarketFilter; label: string; dot: string | null }[] 
 type BizLite = { id: string; pid: string | null; name: string; type_label: string | null; status: string; lon: number | null; lat: number | null; sources?: Array<{ source: string; id: string }> };
 const onGoogle = (b: BizLite) => !!b.sources?.some((x) => x.source === "google");
 type Basemap = "light" | "dark";
-type Overlays = { lines: boolean; buildings: boolean; tif: boolean; flood: boolean; historic: boolean };
+type Overlays = { lines: boolean; buildings: boolean; tif: boolean; flood: boolean; historic: boolean; plan_sites: boolean; plan_roads: boolean };
 /** Lite feature properties as written by fetch-hobart.py. */
-type Lite = { pid: string; a: string | null; z: string | null; f: string | null; ac: number | null; cc: string | null; t: 0 | 1; fl: string | null; h: 0 | 1 };
+type Lite = { pid: string; a: string | null; z: string | null; f: string | null; f2?: string | null; ac: number | null; cc: string | null; t: 0 | 1; fl: string | null; h: 0 | 1 };
 type FC = { type: "FeatureCollection"; features: Array<{ type: "Feature"; geometry: any; properties: Lite }> };
 type Meta = { city: string; bbox: number[]; home: { center: [number, number]; zoom: number }; counts: Record<string, number>; pulled_at: string };
 
 function fromLite(l: Lite): ParcelProps {
   return {
-    pid: l.pid, address: l.a, acres: l.ac, class: null, class_code: l.cc, zoning: l.z, flu: l.f,
+    pid: l.pid, address: l.a, acres: l.ac, class: null, class_code: l.cc, zoning: l.z, flu: l.f, plan: l.f2 ?? null,
     tif: l.t ? "Yes" : null, flood: l.fl, historic: l.h ? "Yes" : null, legal: null, transfer_date: null,
     owner: null, mail: null, mail_city: null, mail_state: null, mail_zip: null, deduction: null,
     av_total: null, av_land: null, av_impr: null, conveyance: null, sales: [], permits: [],
@@ -54,7 +54,7 @@ function fromLite(l: Lite): ParcelProps {
 export default function HobartParcelMap() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
-  const dataRef = useRef<{ parcels: FC; buildings: any } | null>(null);
+  const dataRef = useRef<{ parcels: FC; buildings: any; plan: any } | null>(null);
   const hoverIdRef = useRef<string | null>(null);
   const selectedIdRef = useRef<string | null>(null);
   const basemapRef = useRef<Basemap>("light");
@@ -64,7 +64,7 @@ export default function HobartParcelMap() {
   const [mode, setMode] = useState<Mode>("zoning");
   const [basemap, setBasemap] = useState<Basemap>("light");
   const [threeD, setThreeD] = useState(true);
-  const [overlays, setOverlays] = useState<Overlays>({ lines: true, buildings: true, tif: false, flood: false, historic: false });
+  const [overlays, setOverlays] = useState<Overlays>({ lines: true, buildings: true, tif: false, flood: false, historic: false, plan_sites: false, plan_roads: false });
   const [registered, setRegistered] = useState(false);
   const [sessionName, setSessionName] = useState<string | null>(null);
   const [admin, setAdmin] = useState(false);
@@ -205,9 +205,13 @@ export default function HobartParcelMap() {
     }
     if (!map.getSource("parcels")) map.addSource("parcels", { type: "geojson", data: d.parcels as any, promoteId: "pid" });
     if (!map.getSource("buildings")) map.addSource("buildings", { type: "geojson", data: d.buildings, generateId: true });
+    if (!map.getSource("plan")) map.addSource("plan", { type: "geojson", data: d.plan });
 
     map.addLayer({ id: "zoning-fill", type: "fill", source: "parcels", paint: { "fill-color": matchExpr(["get", "z"], ZONING, ZONING_FALLBACK) as any, "fill-opacity": 0.45 } }, labelLayer);
     map.addLayer({ id: "flu-fill", type: "fill", source: "parcels", paint: { "fill-color": matchExpr(["get", "f"], LAND_USE, ZONING_FALLBACK) as any, "fill-opacity": 0 } }, labelLayer);
+    // Hobart 2040 plan: parcel fill by designation + dissolved area outlines.
+    map.addLayer({ id: "plan-fill", type: "fill", source: "parcels", paint: { "fill-color": matchExpr(["get", "f2"], PLAN_2040, ZONING_FALLBACK) as any, "fill-opacity": 0 } }, labelLayer);
+    map.addLayer({ id: "plan-area-line", type: "line", source: "plan", filter: ["==", ["get", "kind"], "area"], paint: { "line-color": dark ? "#F8FAFC" : "#1E293B", "line-width": ["interpolate", ["linear"], ["zoom"], 12, 0.6, 16, 1.4], "line-opacity": 0 } }, labelLayer);
     map.addLayer({ id: "parcel-hit", type: "fill", source: "parcels", paint: { "fill-color": "#000", "fill-opacity": 0 } }, labelLayer);
     map.addLayer({ id: "overlay-flood", type: "fill", source: "parcels", filter: ["==", ["get", "fl"], "AE"], paint: { "fill-color": "#38BDF8", "fill-opacity": 0 } }, labelLayer);
     map.addLayer({ id: "overlay-tif", type: "line", source: "parcels", filter: ["==", ["get", "t"], 1], paint: { "line-color": "#0EA5E9", "line-width": 1.5, "line-dasharray": [2, 1.5], "line-opacity": 0 } }, labelLayer);
@@ -232,6 +236,23 @@ export default function HobartParcelMap() {
     map.addLayer({ id: "listing-sale-line", type: "line", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "line-color": LISTING.sale.line, "line-width": 2 } }, labelLayer);
     map.addLayer({ id: "listing-lease-line", type: "line", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "line-color": LISTING.lease.line, "line-width": 2 } }, labelLayer);
     map.addLayer({ id: "listing-both-line", type: "line", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "line-color": LISTING.both.line, "line-width": 2, "line-dasharray": [2, 1] } }, labelLayer);
+    // 2040 plan: opportunity sites + planned street extensions (toggle overlays; always on in plan mode).
+    map.addLayer({ id: "plan-sites-fill", type: "fill", source: "plan", filter: ["==", ["get", "kind"], "site"], layout: { visibility: "none" }, paint: { "fill-color": PLAN_SITE.fill, "fill-opacity": 0.3 } }, labelLayer);
+    // dasharray cannot be data-driven: one solid layer for surveyed sites, one dashed for the approximate circle.
+    map.addLayer({ id: "plan-sites-line", type: "line", source: "plan", filter: ["all", ["==", ["get", "kind"], "site"], ["!=", ["get", "approx"], true]], layout: { visibility: "none" }, paint: { "line-color": PLAN_SITE.line, "line-width": 2.5 } }, labelLayer);
+    map.addLayer({ id: "plan-sites-line-approx", type: "line", source: "plan", filter: ["all", ["==", ["get", "kind"], "site"], ["==", ["get", "approx"], true]], layout: { visibility: "none" }, paint: { "line-color": PLAN_SITE.line, "line-width": 2.5, "line-dasharray": [2, 1.5] } }, labelLayer);
+    map.addLayer({ id: "plan-roads-casing", type: "line", source: "plan", filter: ["==", ["get", "kind"], "road"], layout: { visibility: "none", "line-cap": "round" }, paint: { "line-color": "#FFFFFF", "line-width": ["interpolate", ["linear"], ["zoom"], 12, 4, 16, 8] } }, labelLayer);
+    map.addLayer({ id: "plan-roads", type: "line", source: "plan", filter: ["==", ["get", "kind"], "road"], layout: { visibility: "none" }, paint: { "line-color": PLAN_SITE.road, "line-width": ["interpolate", ["linear"], ["zoom"], 12, 2, 16, 4], "line-dasharray": [2, 1.5] } }, labelLayer);
+    map.addLayer({
+      id: "plan-roads-label", type: "symbol", source: "plan", filter: ["==", ["get", "kind"], "road"], minzoom: 13,
+      layout: { visibility: "none", "symbol-placement": "line", "text-field": ["get", "name"], "text-size": 11, "text-font": ["Noto Sans Bold"], "text-letter-spacing": 0.04 },
+      paint: { "text-color": PLAN_SITE.road, "text-halo-color": "#FFFFFF", "text-halo-width": 1.6 },
+    });
+    map.addLayer({
+      id: "plan-sites-label", type: "symbol", source: "plan", filter: ["==", ["get", "kind"], "site"],
+      layout: { visibility: "none", "text-field": ["concat", "Site ", ["to-string", ["get", "num"]], "\n", ["get", "name"]], "text-size": 12, "text-font": ["Noto Sans Bold"], "text-anchor": "center", "text-allow-overlap": true },
+      paint: { "text-color": PLAN_SITE.line, "text-halo-color": "#FFFFFF", "text-halo-width": 1.8 },
+    });
     if (!map.getSource("listing-points")) map.addSource("listing-points", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
     map.addLayer({ id: "parcel-hover", type: "line", source: "parcels", paint: { "line-color": SELECTION, "line-width": 2, "line-opacity": ["case", ["boolean", ["feature-state", "hover"], false], 1, 0] } });
     map.addLayer({ id: "parcel-selected-fill", type: "fill", source: "parcels", paint: { "fill-color": SELECTION, "fill-opacity": ["case", ["boolean", ["feature-state", "selected"], false], 0.22, 0] } });
@@ -266,13 +287,14 @@ export default function HobartParcelMap() {
     if (!containerRef.current || mapRef.current) return;
     let cancelled = false;
     (async () => {
-      const [m, parcels, buildings] = await Promise.all([
+      const [m, parcels, buildings, plan] = await Promise.all([
         fetch(`${DATA}/meta.json`).then((r) => r.json()),
         fetch(`${DATA}/parcels-lite.geojson`).then((r) => r.json()),
         fetch(`${DATA}/buildings-lite.geojson`).then((r) => r.json()),
+        fetch(`${DATA}/plan-2040.geojson`).then((r) => r.json()).catch(() => ({ type: "FeatureCollection", features: [] })),
       ]);
       if (cancelled) return;
-      dataRef.current = { parcels, buildings };
+      dataRef.current = { parcels, buildings, plan };
       setMeta(m);
 
       const map = new maplibregl.Map({
@@ -311,6 +333,18 @@ export default function HobartParcelMap() {
       });
       map.on("click", (e) => {
         if (!map.getLayer("parcel-hit")) return;
+        // An opportunity site (when shown) explains itself instead of selecting the parcel under it.
+        if (map.getLayer("plan-sites-fill") && map.getLayoutProperty("plan-sites-fill", "visibility") === "visible") {
+          const site = map.queryRenderedFeatures(e.point, { layers: ["plan-sites-fill"] })[0];
+          if (site) {
+            const sp = site.properties as { num: number; name: string; desc: string; approx: boolean };
+            const esc = (t: string) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
+            new maplibregl.Popup({ maxWidth: "300px" }).setLngLat(e.lngLat).setHTML(
+              `<div style="font-family:var(--font-archivo),system-ui,sans-serif;color:#0F172A"><div style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#C2410C">Hobart 2040 plan · opportunity site ${sp.num}</div><div style="font-size:15px;font-weight:700;margin:2px 0 4px">${esc(sp.name)}</div><div style="font-size:12px;line-height:1.4;color:#334155">${esc(sp.desc)}</div></div>`,
+            ).addTo(map);
+            return;
+          }
+        }
         const hits = map.queryRenderedFeatures(e.point, { layers: ["parcel-hit"] });
         if (hits.length) selectRef.current(fromLite((hits[0] as MapGeoJSONFeature).properties as Lite), false);
         else selectRef.current(null);
@@ -338,6 +372,11 @@ export default function HobartParcelMap() {
     if (!map || !ready || !map.getLayer("zoning-fill")) return;
     map.setPaintProperty("zoning-fill", "fill-opacity", mode === "zoning" ? 0.45 : 0);
     map.setPaintProperty("flu-fill", "fill-opacity", mode === "flu" ? 0.5 : 0);
+    map.setPaintProperty("plan-fill", "fill-opacity", mode === "plan" ? 0.55 : 0);
+    map.setPaintProperty("plan-area-line", "line-opacity", mode === "plan" ? 0.75 : 0);
+    const sitesOn = mode === "plan" || overlays.plan_sites, roadsOn = mode === "plan" || overlays.plan_roads;
+    for (const id of ["plan-sites-fill", "plan-sites-line", "plan-sites-line-approx", "plan-sites-label"]) map.setLayoutProperty(id, "visibility", sitesOn ? "visible" : "none");
+    for (const id of ["plan-roads-casing", "plan-roads", "plan-roads-label"]) map.setLayoutProperty(id, "visibility", roadsOn ? "visible" : "none");
     map.setLayoutProperty("buildings-3d", "visibility", overlays.buildings && threeD ? "visible" : "none");
     map.setLayoutProperty("parcel-line", "visibility", overlays.lines ? "visible" : "none");
     map.setPaintProperty("overlay-flood", "fill-opacity", overlays.flood ? 0.45 : 0);
@@ -357,6 +396,7 @@ export default function HobartParcelMap() {
     if (onlyMarket) {
       map.setPaintProperty("zoning-fill", "fill-opacity", mode === "zoning" ? 0.12 : 0);
       map.setPaintProperty("flu-fill", "fill-opacity", mode === "flu" ? 0.12 : 0);
+      map.setPaintProperty("plan-fill", "fill-opacity", mode === "plan" ? 0.12 : 0);
     }
     const bf: any = ["in", ["get", "pid"], ["literal", showBusiness ? googlePids : []]];
     map.setFilter("business-fill", bf);
@@ -467,6 +507,7 @@ export default function HobartParcelMap() {
 
   const legend = useMemo(() => {
     if (mode === "zoning") return ["R1", "R2", "R3", "R4", "B1", "B2", "B3", "OS1", "PBP", "M1", "PUD", "A1", "FP"].map((k) => ({ k, fill: ZONING[k].fill, label: ZONING[k].label }));
+    if (mode === "plan") return PLAN_ORDER.map((k) => ({ k: PLAN_2040[k].short, fill: PLAN_2040[k].fill, label: PLAN_2040[k].label }));
     if (mode === "flu") return Object.entries(LAND_USE).filter(([k]) => !/Moderate Density$/.test(k)).map(([k, v]) => ({ k: k.split(" ")[0], fill: v.fill, label: v.label }));
     if (mode === "height") return HEIGHT_LEGEND.map((h) => ({ k: h.sub, fill: h.fill, label: h.label }));
     return [];
@@ -571,10 +612,13 @@ export default function HobartParcelMap() {
           <div className="w-[260px] rounded-[10px] bg-white p-3 text-[13px] shadow-xl ring-1 ring-slate-900/5">
             <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">Color parcels by</div>
             <div className="grid grid-cols-2 gap-1">
-              {([["zoning", "Zoning"], ["flu", "Future land use"], ["height", "Building height"], ["none", "None"]] as [Mode, string][]).map(([m, l]) => (
+              {([["zoning", "Zoning"], ["plan", "2040 Plan"], ["flu", "Land use (city GIS)"], ["height", "Building height"], ["none", "None"]] as [Mode, string][]).map(([m, l]) => (
                 <button key={m} onClick={() => setMode(m)} className={`rounded-[6px] px-2 py-1.5 text-left font-semibold ${mode === m ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}>{l}</button>
               ))}
             </div>
+            {mode === "plan" && (
+              <div className="mt-2 text-[11px] leading-snug text-slate-500">Future land use from the <span className="font-semibold text-slate-700">Hobart 2040 Comprehensive Plan</span> (adopted Sept 2023), digitized parcel by parcel. Orange outlines are the plan&apos;s four opportunity sites — tap one. Dashed black lines are proposed street extensions.</div>
+            )}
             {legend.length > 0 && (
               <ul className="mt-2 grid grid-cols-1 gap-y-0.5 border-t border-slate-200 pt-2">
                 {legend.map((l) => (
@@ -594,7 +638,7 @@ export default function HobartParcelMap() {
             </div>
             <div className="mt-1 text-[11px] text-slate-500">Listings from CREXi, LoopNet and our CRM (daily). Businesses: Google Business Profiles first ({googlePids.length} parcels, solid); City of Hobart licenses and Overture as backup ({backupPids.length} parcels, faint).</div>
             <div className="mt-3 mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">Overlays</div>
-            {([["lines", "Parcel lines"], ["buildings", "3D buildings"], ["tif", "TIF districts (dashed)"], ["flood", "FEMA AE flood zone"], ["historic", "Historic district"]] as [keyof Overlays, string][]).map(([k, l]) => (
+            {([["lines", "Parcel lines"], ["buildings", "3D buildings"], ["plan_sites", "2040 opportunity sites"], ["plan_roads", "2040 planned streets"], ["tif", "TIF districts (dashed)"], ["flood", "FEMA AE flood zone"], ["historic", "Historic district"]] as [keyof Overlays, string][]).map(([k, l]) => (
               <label key={k} className="flex cursor-pointer items-center gap-2 py-1 text-slate-700">
                 <input type="checkbox" checked={overlays[k]} onChange={(e) => setOverlays({ ...overlays, [k]: e.target.checked })} className="h-4 w-4 accent-blue-600" />
                 {l}
@@ -620,7 +664,7 @@ export default function HobartParcelMap() {
 
       {!layersOpen && legend.length > 0 && !isMobile && (
         <div className="absolute bottom-7 left-4 z-10 rounded-[10px] bg-white/95 px-3 py-2 shadow-lg ring-1 ring-slate-900/5">
-          <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">{mode === "zoning" ? "Zoning" : mode === "flu" ? "Future land use" : "Building height"}</div>
+          <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">{mode === "zoning" ? "Zoning" : mode === "plan" ? "2040 plan · future land use" : mode === "flu" ? "Land use (city GIS)" : "Building height"}</div>
           <ul className="flex max-w-[560px] flex-wrap gap-x-3 gap-y-1">
             {legend.map((l) => (
               <li key={l.k + l.label} className="flex items-center gap-1.5 text-[11px] text-slate-700">
@@ -665,6 +709,9 @@ export default function HobartParcelMap() {
               )}
               <div className="text-[12px] font-semibold">{hover.p.address || "No situs address"}</div>
               <div className="text-[11px] text-slate-300">{hover.p.zoning ?? "—"} · {hover.p.acres != null ? `${hover.p.acres} ac` : "—"}{hl.length > 1 ? ` · ${hl.length} listings` : ""}</div>
+              {mode === "plan" && hover.p.plan && PLAN_2040[hover.p.plan] && (
+                <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-200"><span className="inline-block h-2 w-2 rounded-[2px]" style={{ background: PLAN_2040[hover.p.plan].fill }} />2040: {PLAN_2040[hover.p.plan].label}</div>
+              )}
               {(() => {
                 const bz = bizByPid.get(hover.p.pid) ?? [];
                 if (!bz.length) return null;
