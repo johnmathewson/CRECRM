@@ -1,9 +1,15 @@
 {
   "manifest_version": 3,
-  "name": "Stewardship CRE — Listing Sync",
-  "version": "0.5.0",
-  "description": "Pulls listing performance metrics from CREXi/LoopNet into the Stewardship CRM. Lead scraping was retired 2026-10-13; CREXi leads come from the daily Lead Report.",
-  "permissions": ["storage", "alarms", "activeTab", "tabs", "scripting"],
+  "name": "Stewardship CRE \u2014 Listing Sync",
+  "version": "0.6.0",
+  "description": "Syncs listing performance metrics from CREXi/LoopNet into the Stewardship CRM and captures active Hobart listings daily for the parcel map. Lead scraping was retired 2026-10-13.",
+  "permissions": [
+    "storage",
+    "alarms",
+    "activeTab",
+    "tabs",
+    "scripting"
+  ],
   "host_permissions": [
     "https://*.crexi.com/*",
     "https://*.loopnet.com/*",
@@ -27,12 +33,20 @@
         "https://*.crexi.com/property/*",
         "https://*.crexi.com/dashboard/*"
       ],
-      "js": ["content-crexi.js"],
+      "js": [
+        "content-crexi.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://*.loopnet.com/Listing/*", "https://*.loopnet.com/listing/*", "https://*.loopnet.com/products/*"],
-      "js": ["content-loopnet.js"],
+      "matches": [
+        "https://*.loopnet.com/Listing/*",
+        "https://*.loopnet.com/listing/*",
+        "https://*.loopnet.com/products/*"
+      ],
+      "js": [
+        "content-loopnet.js"
+      ],
       "run_at": "document_idle"
     },
     {
@@ -40,7 +54,19 @@
         "https://listingmanager.costar.com/listingperformancereport/*",
         "https://listingmanager.costar.com/listing/*"
       ],
-      "js": ["content-loopnet-share.js"],
+      "js": [
+        "content-loopnet-share.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://*.crexi.com/search*",
+        "https://*.loopnet.com/search/*"
+      ],
+      "js": [
+        "content-listings.js"
+      ],
       "run_at": "document_idle"
     }
   ]

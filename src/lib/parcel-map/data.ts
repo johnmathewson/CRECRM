@@ -7,7 +7,11 @@
 import { createClient } from "@supabase/supabase-js";
 
 function sb() {
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
+  // Next's data cache memoizes fetch() inside route handlers; force every
+  // RPC to hit the network so overlays never serve a stale snapshot.
+  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+    global: { fetch: (url, opts) => fetch(url, { ...opts, cache: "no-store" }) },
+  });
 }
 function key(): string {
   const k = process.env.MAP_DATA_KEY;

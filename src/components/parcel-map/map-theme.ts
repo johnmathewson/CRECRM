@@ -88,3 +88,10 @@ export function heightExpr(): any[] {
   for (const [h, c] of HEIGHT_STOPS) e.push(h, c);
   return e;
 }
+
+/** On-market overlay. Deliberately outside the zoning hue families. */
+export const LISTING = {
+  sale: { fill: "#16A34A", line: "#14532D", label: "For sale" },
+  lease: { fill: "#0891B2", line: "#164E63", label: "For lease" },
+  both: { fill: "#16A34A", line: "#164E63", label: "Sale or lease" },
+};

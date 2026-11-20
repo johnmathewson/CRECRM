@@ -23,6 +23,25 @@
 const POLL_ALARM = "stewardship-poll";
 const LEADS_CYCLE_START = "stewardship-leads-cycle";
 const LEADS_STEP = "stewardship-leads-step";
+const LISTINGS_DAILY = "stewardship-listings-daily";   // once a day: capture active listings
+const LISTINGS_STEP = "stewardship-listings-step";     // chained: one search page per step
+
+// Listing watch: search pages opened in a background tab once a day. The
+// content script (content-listings.js) sees `#stw-capture`, loads every
+// card, posts them to /api/extension/listings and messages back. Edit the
+// list in Options; these are the defaults for Hobart, IN.
+const DEFAULT_LISTING_URLS = [
+  "https://www.crexi.com/search?address_value=Hobart%252C%2520IN&searchType=Sales&mapCenter=41.51444,-87.26867&mapZoom=12",
+  "https://www.crexi.com/search?address_value=Hobart%252C%2520IN&searchType=Lease&mapCenter=41.51444,-87.26867&mapZoom=12",
+  "https://www.loopnet.com/search/commercial-real-estate/hobart-in/for-sale/",
+  "https://www.loopnet.com/search/commercial-real-estate/hobart-in/for-lease/",
+];
+const KEY_LISTING_URLS = "listingWatchUrls";
+const KEY_LISTING_ENABLED = "listingWatchEnabled";      // default true
+const KEY_LISTING_QUEUE = "listingWatchQueue";
+const KEY_LISTING_TAB = "listingWatchTab";              // {tabId, url, openedAt}
+const KEY_LISTING_LOG = "listingWatchLog";              // last results per URL
+const LISTINGS_TAB_TIMEOUT_MS = 120_000;
 
 const LEADS_STEP_SPACING_MS = 10_000;     // Between properties
 // Per-property timeout. First-run deep scrape clicks every lead to capture
@@ -43,6 +62,7 @@ chrome.runtime.onStartup.addListener(setupAlarms);
 function setupAlarms() {
   chrome.alarms.create(POLL_ALARM, { periodInMinutes: 1 });
   chrome.alarms.create(LEADS_CYCLE_START, { periodInMinutes: 30, delayInMinutes: 1 });
+  chrome.alarms.create(LISTINGS_DAILY, { periodInMinutes: 24 * 60, delayInMinutes: 3 });
 }
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
@@ -53,6 +73,10 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
       await startLeadsCycle();
     } else if (alarm.name === LEADS_STEP) {
       await processNextLeadsStep();
+    } else if (alarm.name === LISTINGS_DAILY) {
+      await startListingWatch();
+    } else if (alarm.name === LISTINGS_STEP) {
+      await listingWatchStep();
     }
   } catch (err) {
     console.warn("[stewardship] alarm handler failed", alarm.name, err);
@@ -414,6 +438,71 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         last_run_at: cfg[KEY_LAST_RUN] || null,
       });
     })();
+    return true;
+  }
+});
+
+
+// ── Listing watch (daily capture of active listings) ──────────────────────
+
+async function startListingWatch(force = false) {
+  const cfg = await chrome.storage.local.get([KEY_LISTING_ENABLED, KEY_LISTING_URLS, "apiKey"]);
+  if (!force && cfg[KEY_LISTING_ENABLED] === false) return;
+  if (!cfg.apiKey) return;
+  const urls = (cfg[KEY_LISTING_URLS] && cfg[KEY_LISTING_URLS].length ? cfg[KEY_LISTING_URLS] : DEFAULT_LISTING_URLS).filter(Boolean);
+  await chrome.storage.local.set({ [KEY_LISTING_QUEUE]: urls, [KEY_LISTING_TAB]: null });
+  await chrome.alarms.create(LISTINGS_STEP, { when: Date.now() + 500 });
+}
+
+async function listingWatchStep() {
+  const st = await chrome.storage.local.get([KEY_LISTING_QUEUE, KEY_LISTING_TAB, KEY_LISTING_LOG]);
+  const open = st[KEY_LISTING_TAB];
+  if (open) {
+    // Still waiting on a tab. Time it out if it has gone quiet.
+    if (Date.now() - open.openedAt < LISTINGS_TAB_TIMEOUT_MS) {
+      await chrome.alarms.create(LISTINGS_STEP, { when: Date.now() + 10_000 });
+      return;
+    }
+    await logListingResult(open.url, { ok: false, error: "timeout" });
+    try { await chrome.tabs.remove(open.tabId); } catch {}
+    await chrome.storage.local.set({ [KEY_LISTING_TAB]: null });
+  }
+  const queue = st[KEY_LISTING_QUEUE] || [];
+  if (queue.length === 0) return;
+  const url = queue.shift();
+  await chrome.storage.local.set({ [KEY_LISTING_QUEUE]: queue });
+  try {
+    const tab = await chrome.tabs.create({ url: url + (url.includes("#") ? "" : "#stw-capture"), active: false });
+    await chrome.storage.local.set({ [KEY_LISTING_TAB]: { tabId: tab.id, url, openedAt: Date.now() } });
+  } catch (err) {
+    await logListingResult(url, { ok: false, error: String(err) });
+  }
+  await chrome.alarms.create(LISTINGS_STEP, { when: Date.now() + 10_000 });
+}
+
+async function logListingResult(url, summary) {
+  const st = await chrome.storage.local.get([KEY_LISTING_LOG]);
+  const log = st[KEY_LISTING_LOG] || {};
+  log[url] = { ...summary, at: Date.now() };
+  await chrome.storage.local.set({ [KEY_LISTING_LOG]: log });
+}
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg && msg.type === "stw-listings-done") {
+    (async () => {
+      const st = await chrome.storage.local.get([KEY_LISTING_TAB]);
+      const open = st[KEY_LISTING_TAB];
+      await logListingResult(open ? open.url : (msg.summary && msg.summary.url) || "unknown", msg.summary || {});
+      if (open && sender.tab && sender.tab.id === open.tabId) {
+        try { await chrome.tabs.remove(open.tabId); } catch {}
+        await chrome.storage.local.set({ [KEY_LISTING_TAB]: null });
+        await chrome.alarms.create(LISTINGS_STEP, { when: Date.now() + 5_000 });
+      }
+    })();
+    return false;
+  }
+  if (msg && msg.type === "stw-listings-run-now") {
+    startListingWatch(true).then(() => sendResponse({ ok: true })).catch((e) => sendResponse({ ok: false, error: String(e) }));
     return true;
   }
 });

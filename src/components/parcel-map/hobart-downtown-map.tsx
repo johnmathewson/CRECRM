@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { type Map as MLMap, type MapGeoJSONFeature } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { ParcelCard, type ParcelProps } from "./parcel-card";
+import { ParcelCard, type ParcelProps, type Listing } from "./parcel-card";
 import { RegisterModal, AskModal } from "./map-forms";
 import {
-  ZONING, ZONING_FALLBACK, LAND_USE, HEIGHT_LEGEND, BUILDING_NEUTRAL, PARCEL_LINE, SELECTION, OWNER_MATCH,
+  ZONING, ZONING_FALLBACK, LAND_USE, HEIGHT_LEGEND, BUILDING_NEUTRAL, PARCEL_LINE, SELECTION, OWNER_MATCH, LISTING,
   matchExpr, heightExpr,
 } from "./map-theme";
 
@@ -66,6 +66,10 @@ export default function HobartParcelMap() {
   const [query, setQuery] = useState("");
   const [serverHits, setServerHits] = useState<ParcelProps[]>([]);
   const [meta, setMeta] = useState<Meta | null>(null);
+  const [listings, setListings] = useState<Listing[]>([]);
+  const [showSale, setShowSale] = useState(true);
+  const [showLease, setShowLease] = useState(true);
+  const [onlyMarket, setOnlyMarket] = useState(false);
   const [width, setWidth] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -83,6 +87,27 @@ export default function HobartParcelMap() {
       .then((s) => { if (s?.registered) { setRegistered(true); setSessionName(s.name ?? null); } })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    fetch("/api/map/listings?city=Hobart").then((r) => r.json()).then((d) => setListings(d.listings ?? [])).catch(() => {});
+  }, []);
+
+  /** pid → listings, and the kind to paint (sale / lease / both). */
+  const byPid = useMemo(() => {
+    const m = new Map<string, Listing[]>();
+    for (const l of listings) if (l.pid) m.set(l.pid, [...(m.get(l.pid) ?? []), l]);
+    return m;
+  }, [listings]);
+  const marketPids = useMemo(() => {
+    const sale: string[] = [], lease: string[] = [], both: string[] = [];
+    byPid.forEach((ls, pid) => {
+      const kinds = new Set(ls.map((l) => (l.kind === "both" ? "sale" : l.kind)));
+      const hasSale = kinds.has("sale") || ls.some((l) => l.kind === "both");
+      const hasLease = kinds.has("lease") || ls.some((l) => l.kind === "both");
+      if (hasSale && hasLease) both.push(pid); else if (hasSale) sale.push(pid); else lease.push(pid);
+    });
+    return { sale, lease, both };
+  }, [byPid]);
 
   const flash = useCallback((msg: string) => {
     setToast(msg);
@@ -166,18 +191,39 @@ export default function HobartParcelMap() {
     }, labelLayer);
     map.addLayer({ id: "owner-match", type: "fill", source: "parcels", paint: { "fill-color": OWNER_MATCH, "fill-opacity": 0.55 }, filter: ["in", ["get", "pid"], ["literal", []]] }, labelLayer);
     map.addLayer({ id: "owner-match-line", type: "line", source: "parcels", paint: { "line-color": "#B45309", "line-width": 2 }, filter: ["in", ["get", "pid"], ["literal", []]] }, labelLayer);
+    // On-market overlay: parcel fills by kind + a strong outline, above zoning.
+    map.addLayer({ id: "listing-sale", type: "fill", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "fill-color": LISTING.sale.fill, "fill-opacity": 0.6 } }, labelLayer);
+    map.addLayer({ id: "listing-lease", type: "fill", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "fill-color": LISTING.lease.fill, "fill-opacity": 0.6 } }, labelLayer);
+    map.addLayer({ id: "listing-both", type: "fill", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "fill-color": LISTING.both.fill, "fill-opacity": 0.6 } }, labelLayer);
+    map.addLayer({ id: "listing-sale-line", type: "line", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "line-color": LISTING.sale.line, "line-width": 2 } }, labelLayer);
+    map.addLayer({ id: "listing-lease-line", type: "line", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "line-color": LISTING.lease.line, "line-width": 2 } }, labelLayer);
+    map.addLayer({ id: "listing-both-line", type: "line", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "line-color": LISTING.both.line, "line-width": 2, "line-dasharray": [2, 1] } }, labelLayer);
+    if (!map.getSource("listing-points")) map.addSource("listing-points", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
     map.addLayer({ id: "parcel-hover", type: "line", source: "parcels", paint: { "line-color": SELECTION, "line-width": 2, "line-opacity": ["case", ["boolean", ["feature-state", "hover"], false], 1, 0] } });
     map.addLayer({ id: "parcel-selected-fill", type: "fill", source: "parcels", paint: { "fill-color": SELECTION, "fill-opacity": ["case", ["boolean", ["feature-state", "selected"], false], 0.22, 0] } });
     map.addLayer({ id: "parcel-selected", type: "line", source: "parcels", paint: { "line-color": SELECTION, "line-width": 3, "line-opacity": ["case", ["boolean", ["feature-state", "selected"], false], 1, 0] } });
     map.addLayer({
       id: "buildings-3d", type: "fill-extrusion", source: "buildings", minzoom: 14.5,
       paint: {
-        "fill-extrusion-color": BUILDING_NEUTRAL,
+        "fill-extrusion-color": buildingColor(BUILDING_NEUTRAL),
         "fill-extrusion-height": ["*", ["coalesce", ["get", "h"], 10], 0.3048],
         "fill-extrusion-base": 0,
         "fill-extrusion-opacity": 0.9,
         "fill-extrusion-vertical-gradient": true,
       },
+    });
+    map.addLayer({
+      id: "listing-markers", type: "circle", source: "listing-points",
+      paint: {
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 4, 15, 7, 18, 10],
+        "circle-color": ["match", ["get", "kind"], "sale", LISTING.sale.fill, "lease", LISTING.lease.fill, LISTING.both.fill],
+        "circle-stroke-color": "#FFFFFF", "circle-stroke-width": 2, "circle-pitch-alignment": "map",
+      },
+    });
+    map.addLayer({
+      id: "listing-marker-labels", type: "symbol", source: "listing-points", minzoom: 14,
+      layout: { "text-field": ["match", ["get", "kind"], "sale", "S", "lease", "L", "S/L"], "text-size": 10, "text-font": ["Noto Sans Bold"], "text-allow-overlap": true, "text-ignore-placement": true },
+      paint: { "text-color": "#FFFFFF" },
     });
   }, []);
 
@@ -258,7 +304,6 @@ export default function HobartParcelMap() {
     if (!map || !ready || !map.getLayer("zoning-fill")) return;
     map.setPaintProperty("zoning-fill", "fill-opacity", mode === "zoning" ? 0.45 : 0);
     map.setPaintProperty("flu-fill", "fill-opacity", mode === "flu" ? 0.5 : 0);
-    map.setPaintProperty("buildings-3d", "fill-extrusion-color", mode === "height" ? (heightExpr() as any) : BUILDING_NEUTRAL);
     map.setLayoutProperty("buildings-3d", "visibility", overlays.buildings && threeD ? "visible" : "none");
     map.setLayoutProperty("parcel-line", "visibility", overlays.lines ? "visible" : "none");
     map.setPaintProperty("overlay-flood", "fill-opacity", overlays.flood ? 0.45 : 0);
@@ -267,7 +312,51 @@ export default function HobartParcelMap() {
     const f: any = ["in", ["get", "pid"], ["literal", ownerPids?.pids ?? []]];
     map.setFilter("owner-match", f);
     map.setFilter("owner-match-line", f);
-  }, [mode, overlays, threeD, ownerPids, ready, styleEpoch]);
+
+    // On-market overlay
+    const sale = showSale ? marketPids.sale : [], lease = showLease ? marketPids.lease : [];
+    const both = showSale || showLease ? marketPids.both : [];
+    for (const [id, pids] of [["listing-sale", sale], ["listing-lease", lease], ["listing-both", both]] as [string, string[]][]) {
+      map.setFilter(id, ["in", ["get", "pid"], ["literal", pids]] as any);
+      map.setFilter(id + "-line", ["in", ["get", "pid"], ["literal", pids]] as any);
+    }
+    if (onlyMarket) {
+      map.setPaintProperty("zoning-fill", "fill-opacity", mode === "zoning" ? 0.12 : 0);
+      map.setPaintProperty("flu-fill", "fill-opacity", mode === "flu" ? 0.12 : 0);
+    }
+    // Markers + building colors
+    const d = dataRef.current;
+    if (d) {
+      const kindOf = new Map<string, "sale" | "lease" | "both">();
+      sale.forEach((p) => kindOf.set(p, "sale")); lease.forEach((p) => kindOf.set(p, "lease")); both.forEach((p) => kindOf.set(p, "both"));
+      const feats: any[] = [];
+      const polys: { kind: string; geom: any; bbox: number[] }[] = [];
+      for (const pf of d.parcels.features) {
+        const k = kindOf.get(pf.properties.pid);
+        if (!k) continue;
+        const bb = bboxOf(pf.geometry);
+        polys.push({ kind: k, geom: pf.geometry, bbox: bb });
+        feats.push({ type: "Feature", geometry: { type: "Point", coordinates: [(bb[0] + bb[2]) / 2, (bb[1] + bb[3]) / 2] }, properties: { pid: pf.properties.pid, kind: k } });
+      }
+      (map.getSource("listing-points") as any)?.setData({ type: "FeatureCollection", features: feats });
+      // Buildings: feature-state on footprints whose centroid falls in a listed parcel.
+      const bf = d.buildings.features as any[];
+      const prev: number[] = (map as any).__listedBuildings ?? [];
+      for (const i of prev) map.setFeatureState({ source: "buildings", id: i }, { listing: null });
+      const now: number[] = [];
+      if (polys.length) {
+        bf.forEach((b, i) => {
+          const c = centroidOf(b.geometry);
+          for (const p of polys) {
+            if (c[0] < p.bbox[0] || c[0] > p.bbox[2] || c[1] < p.bbox[1] || c[1] > p.bbox[3]) continue;
+            if (pointInGeom(c, p.geom)) { map.setFeatureState({ source: "buildings", id: i }, { listing: p.kind }); now.push(i); break; }
+          }
+        });
+      }
+      (map as any).__listedBuildings = now;
+    }
+    map.setPaintProperty("buildings-3d", "fill-extrusion-color", buildingColor(mode === "height" ? (heightExpr() as any) : BUILDING_NEUTRAL));
+  }, [mode, overlays, threeD, ownerPids, ready, styleEpoch, marketPids, showSale, showLease, onlyMarket]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -371,6 +460,15 @@ export default function HobartParcelMap() {
                 Stewardship CRE · {meta ? `${meta.counts.parcels.toLocaleString()} parcels` : "…"} · {registered ? <span className="font-semibold text-emerald-700">Registered{sessionName ? ` · ${sessionName}` : ""}</span> : "public records"}
               </div>
             </div>
+            {listings.length > 0 && (
+              <button
+                onClick={() => setOnlyMarket((v) => !v)}
+                className={`shrink-0 rounded-[6px] px-2 py-1 text-[11px] font-semibold ${onlyMarket ? "bg-emerald-600 text-white" : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"}`}
+                title="Show only on-market parcels"
+              >
+                {byPid.size} on market
+              </button>
+            )}
             {!registered && (
               <button onClick={() => setModal("register")} className="hidden shrink-0 rounded-[6px] bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700 hover:bg-blue-100 md:block">Unlock owners</button>
             )}
@@ -437,6 +535,19 @@ export default function HobartParcelMap() {
                 ))}
               </ul>
             )}
+            <div className="mt-3 mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">On market</div>
+            <label className="flex cursor-pointer items-center gap-2 py-1 text-slate-700">
+              <input type="checkbox" checked={showSale} onChange={(e) => setShowSale(e.target.checked)} className="h-4 w-4 accent-emerald-600" />
+              <span className="inline-block h-3 w-3 rounded-[3px]" style={{ background: LISTING.sale.fill }} /> For sale <span className="text-slate-400">({marketPids.sale.length + marketPids.both.length})</span>
+            </label>
+            <label className="flex cursor-pointer items-center gap-2 py-1 text-slate-700">
+              <input type="checkbox" checked={showLease} onChange={(e) => setShowLease(e.target.checked)} className="h-4 w-4 accent-cyan-600" />
+              <span className="inline-block h-3 w-3 rounded-[3px]" style={{ background: LISTING.lease.fill }} /> For lease <span className="text-slate-400">({marketPids.lease.length + marketPids.both.length})</span>
+            </label>
+            <label className="flex cursor-pointer items-center gap-2 py-1 text-slate-700">
+              <input type="checkbox" checked={onlyMarket} onChange={(e) => setOnlyMarket(e.target.checked)} className="h-4 w-4 accent-blue-600" />
+              Fade everything else
+            </label>
             <div className="mt-3 mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">Overlays</div>
             {([["lines", "Parcel lines"], ["buildings", "3D buildings"], ["tif", "TIF districts (dashed)"], ["flood", "FEMA AE flood zone"], ["historic", "Historic district"]] as [keyof Overlays, string][]).map(([k, l]) => (
               <label key={k} className="flex cursor-pointer items-center gap-2 py-1 text-slate-700">
@@ -467,6 +578,12 @@ export default function HobartParcelMap() {
                 {mode === "height" ? l.label : l.k}
               </li>
             ))}
+            {listings.length > 0 && (
+              <>
+                <li className="ml-2 flex items-center gap-1.5 border-l border-slate-200 pl-3 text-[11px] font-semibold text-slate-800"><span className="inline-block h-2.5 w-2.5 rounded-full ring-2 ring-white" style={{ background: LISTING.sale.fill }} />For sale</li>
+                <li className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-800"><span className="inline-block h-2.5 w-2.5 rounded-full ring-2 ring-white" style={{ background: LISTING.lease.fill }} />For lease</li>
+              </>
+            )}
           </ul>
         </div>
       )}
@@ -511,6 +628,7 @@ export default function HobartParcelMap() {
           loading={detailLoading}
           ownerParcels={ownerCount}
           ownerHighlighted={ownerPids?.owner === selected.owner && !!selected.owner}
+          listings={byPid.get(selected.pid) ?? []}
           onClose={() => select(null)}
           onRegister={() => setModal("register")}
           onAsk={() => (registered ? setModal("ask") : setModal("register"))}
@@ -529,6 +647,43 @@ function Swatch({ fill, label }: { fill: string; label: string }) {
       <span className="inline-block h-2.5 w-2.5 rounded-[2px] ring-1 ring-slate-900/10" style={{ background: fill }} />{label}
     </span>
   );
+}
+
+/** Extrusion color: listed buildings take the listing color, else the mode color. */
+function buildingColor(base: any): any {
+  return ["case",
+    ["==", ["feature-state", "listing"], "sale"], LISTING.sale.fill,
+    ["==", ["feature-state", "listing"], "lease"], LISTING.lease.fill,
+    ["==", ["feature-state", "listing"], "both"], LISTING.both.fill,
+    base];
+}
+function bboxOf(geometry: any): number[] {
+  let xmin = 180, ymin = 90, xmax = -180, ymax = -90;
+  const walk = (c: any) => { if (typeof c[0] === "number") { xmin = Math.min(xmin, c[0]); xmax = Math.max(xmax, c[0]); ymin = Math.min(ymin, c[1]); ymax = Math.max(ymax, c[1]); } else for (const k of c) walk(k); };
+  walk(geometry.coordinates);
+  return [xmin, ymin, xmax, ymax];
+}
+function centroidOf(geometry: any): [number, number] {
+  const b = bboxOf(geometry);
+  return [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2];
+}
+function pointInRing(pt: [number, number], ring: number[][]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if (yi > pt[1] !== yj > pt[1] && pt[0] < ((xj - xi) * (pt[1] - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+function pointInGeom(pt: [number, number], geometry: any): boolean {
+  const polys = geometry.type === "Polygon" ? [geometry.coordinates] : geometry.type === "MultiPolygon" ? geometry.coordinates : [];
+  for (const poly of polys) {
+    if (!pointInRing(pt, poly[0])) continue;
+    let hole = false;
+    for (let r = 1; r < poly.length; r++) if (pointInRing(pt, poly[r])) { hole = true; break; }
+    if (!hole) return true;
+  }
+  return false;
 }
 
 function flyToGeometry(map: MLMap, geometry: any, mobile: boolean) {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ZONING, ZONING_FALLBACK } from "./map-theme";
+import { ZONING, ZONING_FALLBACK, LISTING } from "./map-theme";
 
 /**
  * Parcel card — right panel on desktop, bottom sheet on phones.
@@ -10,6 +10,12 @@ import { ZONING, ZONING_FALLBACK } from "./map-theme";
 
 export type Sale = { date: number | null; price: number | null; buyer: string | null; buyer_city: string | null; seller: string | null; valid: string | null; multi: string | null };
 export type Permit = { num: string | null; date: number | null; cost: number | null; type: string | null; desc: string | null };
+
+export type Listing = {
+  id: string; pid: string | null; source: string; url: string | null; kind: "sale" | "lease" | "both"; status: string;
+  title: string | null; address: string | null; price: number | null; price_text: string | null; lease_rate_text: string | null;
+  sqft: number | null; acres: number | null; asset_type: string | null; broker_company: string | null; first_seen_at: string; last_seen_at: string;
+};
 
 export type ParcelProps = {
   pid: string; address: string | null; acres: number | null; class: string | null; class_code: string | null;
@@ -27,9 +33,9 @@ const dt = (ms: number | null | undefined) => (ms ? new Date(ms).toLocaleDateStr
 const sqft = (ac: number | null) => (ac == null ? null : Math.round(ac * 43560).toLocaleString());
 
 export function ParcelCard({
-  p, registered, mobile, loading, ownerParcels, ownerHighlighted, onClose, onRegister, onZoom, onShare, onHighlightOwner, onAsk,
+  p, registered, mobile, loading, ownerParcels, ownerHighlighted, listings = [], onClose, onRegister, onZoom, onShare, onHighlightOwner, onAsk,
 }: {
-  p: ParcelProps; registered: boolean; mobile: boolean; loading?: boolean; ownerParcels: number | null; ownerHighlighted: boolean;
+  p: ParcelProps; registered: boolean; mobile: boolean; loading?: boolean; ownerParcels: number | null; ownerHighlighted: boolean; listings?: Listing[];
   onClose: () => void; onRegister: () => void; onZoom: () => void; onShare: () => void; onHighlightOwner: () => void; onAsk: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("overview");
@@ -98,6 +104,35 @@ export function ParcelCard({
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
         {tab === "overview" && (
           <>
+            {listings.length > 0 && (
+              <div className="mb-3 space-y-2">
+                {listings.map((l) => {
+                  const c = LISTING[l.kind] ?? LISTING.sale;
+                  const src = l.source === "crm" ? "Stewardship CRE" : l.source === "crexi" ? "CREXi" : l.source === "loopnet" ? "LoopNet" : l.source;
+                  return (
+                    <div key={l.id} className="rounded-[10px] border p-3" style={{ borderColor: c.fill, background: `${c.fill}14` }}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="rounded-[4px] px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-white" style={{ background: c.fill }}>{c.label}{l.status === "under_contract" ? " · under contract" : ""}</span>
+                            <span className="text-[11px] text-slate-500">via {src}</span>
+                          </div>
+                          <div className="mt-1 truncate text-[14px] font-semibold text-slate-900">{l.title || l.address || "Listing"}</div>
+                          <div className="text-[12px] text-slate-600">
+                            {[l.asset_type, l.sqft ? `${l.sqft.toLocaleString()} SF` : null, l.acres ? `${l.acres} AC` : null, l.broker_company].filter(Boolean).join(" · ")}
+                          </div>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <div className="text-[16px] font-bold text-slate-900">{l.price_text || l.lease_rate_text || (l.price ? usd(l.price) : "Unpriced")}</div>
+                          <div className="text-[11px] text-slate-500">seen {dt(Date.parse(l.last_seen_at))}</div>
+                        </div>
+                      </div>
+                      {l.url && <a href={l.url} target="_blank" rel="noreferrer" className="mt-2 inline-block text-[12px] font-semibold text-blue-700 hover:underline">View listing ↗</a>}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-2">
               <Tile label="Lot size" value={p.acres != null ? `${p.acres} ac` : "—"} sub={sqft(p.acres) ? `${sqft(p.acres)} sq ft` : undefined} />
               <Tile label="Future land use" value={p.flu ?? "—"} small />

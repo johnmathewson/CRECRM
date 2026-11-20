@@ -46,6 +46,29 @@
 
   <hr style="border-color: rgba(255,255,255,0.06); margin: 28px 0;" />
 
+  <h2 style="font-size: 14px; margin: 0 0 6px;">Listing watch (parcel map)</h2>
+  <p>Once a day the extension opens these search pages in a background tab, captures every active listing card and sends them to the CRM, which paints on-market parcels on the Hobart map. One line per search URL.</p>
+  <div class="field">
+    <label><input type="checkbox" id="lwEnabled" /> Enabled (daily)</label>
+  </div>
+  <div class="field">
+    <label for="lwCity">City filter</label>
+    <input type="text" id="lwCity" placeholder="Hobart" />
+    <div class="help">Only cards whose address city matches are kept (search radii pull in neighbors).</div>
+  </div>
+  <div class="field">
+    <label for="lwUrls">Search URLs</label>
+    <textarea id="lwUrls" rows="5" style="width:100%; padding:10px 12px; background: rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1); color:#f0ede4; border-radius:4px; font-size:12px; box-sizing:border-box; font-family: ui-monospace, monospace;"></textarea>
+  </div>
+  <div class="row">
+    <button id="lwSave">Save watch</button>
+    <button id="lwRun" class="secondary">Run now</button>
+  </div>
+  <div id="lwStatus" class="status"></div>
+  <pre id="lwLog" style="font-size:11px; color: rgba(240,237,228,0.6); white-space: pre-wrap; margin-top:10px;"></pre>
+
+  <hr style="border-color: rgba(255,255,255,0.06); margin: 28px 0;" />
+
   <h2 style="font-size: 14px; margin: 0 0 6px;">How it works</h2>
   <ul style="font-size: 12.5px; color: rgba(240,237,228,0.75); line-height: 1.6; padding-left: 20px;">
     <li>Open a CREXi listing page → click the extension icon → "Sync this listing."</li>
