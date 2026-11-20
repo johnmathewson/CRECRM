@@ -14,6 +14,7 @@ function greeting() {
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const inviteNote = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("invite") === "expired" ? "That invite link has expired (they last 14 days). If you already set a password, sign in below; otherwise ask John for a new link." : null;
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const router = useRouter();
@@ -88,7 +89,8 @@ export default function LoginPage() {
           </p>
         </div>
 
-        <form onSubmit={handleLogin} className="space-y-4">
+        {inviteNote && <p className="mb-3 rounded-[8px] bg-amber-50 px-3 py-2 text-[13px] text-amber-900 ring-1 ring-amber-200">{inviteNote}</p>}
+      <form onSubmit={handleLogin} className="space-y-4">
           {/* Email */}
           <div>
             <label className="block font-mono text-[9px] uppercase tracking-eyebrow text-cream-subtle mb-1.5">

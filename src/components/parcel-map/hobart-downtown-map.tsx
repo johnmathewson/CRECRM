@@ -69,6 +69,7 @@ export default function HobartParcelMap() {
   const [registered, setRegistered] = useState(false);
   const [sessionName, setSessionName] = useState<string | null>(null);
   const [admin, setAdmin] = useState(false);
+  const [loginViewer, setLoginViewer] = useState(false); // partner account (map_viewer role): all tiers, no CRM
   const [modal, setModal] = useState<"register" | "ask" | null>(null);
   const [layersOpen, setLayersOpen] = useState(false);
   const [selected, setSelected] = useState<ParcelProps | null>(null);
@@ -106,7 +107,7 @@ export default function HobartParcelMap() {
   useEffect(() => {
     fetch("/api/map/session", { cache: "no-store" })
       .then((r) => r.json())
-      .then((s) => { if (s?.registered) { setRegistered(true); setSessionName(s.name ?? null); setAdmin(!!s.admin); } })
+      .then((s) => { if (s?.registered) { setRegistered(true); setSessionName(s.name ?? null); setAdmin(!!s.admin); setLoginViewer(!!s.login && !s.admin); } })
       .catch(() => {});
   }, []);
 
@@ -690,7 +691,7 @@ export default function HobartParcelMap() {
             ))}
             {registered && !admin && (
               <button
-                onClick={async () => { await fetch("/api/map/session", { method: "DELETE" }); setRegistered(false); setSessionName(null); if (selected) loadDetail(selected.pid); }}
+                onClick={async () => { await fetch("/api/map/session", { method: "DELETE" }); setRegistered(false); setSessionName(null); setLoginViewer(false); if (selected) loadDetail(selected.pid); }}
                 className="mt-2 w-full border-t border-slate-200 pt-2 text-left text-[12px] text-slate-500 hover:text-slate-800"
               >
                 Not {sessionName?.split(" ")[0] ?? "you"}? Sign out
@@ -698,6 +699,8 @@ export default function HobartParcelMap() {
             )}
             {admin ? (
               <a href="/cre-os/today" className="mt-2 block border-t border-slate-200 pt-2 text-[12px] font-semibold text-blue-700 hover:underline">Open CRM →</a>
+            ) : loginViewer ? (
+              <div className="mt-2 border-t border-slate-200 pt-2 text-[12px] text-slate-500">Signed in · all data tiers unlocked</div>
             ) : (
               <a href="/login?next=/map/hobart" className="mt-2 block border-t border-slate-200 pt-2 text-[12px] text-slate-500 hover:text-slate-800">Broker sign in</a>
             )}

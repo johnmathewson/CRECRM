@@ -8,6 +8,7 @@
  */
 
 import { createHmac, timingSafeEqual } from "crypto";
+import { isMapViewer } from "@/lib/auth-role";
 import type { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
@@ -75,6 +76,8 @@ export function setSessionCookie(res: NextResponse, s: Omit<MapSession, "exp">):
  *  decides. The CRM is single-user, so "any CRM session" == admin. */
 export interface Viewer {
   admin: boolean;
+  /** Signed in with a Supabase login (John, or a partner with the map_viewer role). */
+  login: boolean;
   registered: boolean;
   name: string | null;
   email: string | null;
@@ -90,11 +93,11 @@ export async function resolveViewer(req: NextRequest): Promise<Viewer> {
     if (data.user) {
       const email = data.user.email ?? null;
       const name = (data.user.user_metadata?.full_name as string | undefined) ?? (email === "john@johnmathewson.co" ? "John Mathewson" : email);
-      return { admin: true, registered: true, name, email, contactId: null };
+      return { admin: !isMapViewer(data.user), login: true, registered: true, name, email, contactId: null };
     }
   } catch {
     /* no CRM session */
   }
   const s = readSession(req);
-  return s ? { admin: false, registered: true, name: s.name, email: null, contactId: s.contactId } : { admin: false, registered: false, name: null, email: null, contactId: null };
+  return s ? { admin: false, login: false, registered: true, name: s.name, email: null, contactId: s.contactId } : { admin: false, login: false, registered: false, name: null, email: null, contactId: null };
 }

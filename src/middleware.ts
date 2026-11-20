@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { isMapViewer, mapViewerAllowed } from "@/lib/auth-role";
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request: { headers: request.headers } });
@@ -62,10 +63,25 @@ export async function middleware(request: NextRequest) {
       url.pathname = "/map/hobart";
       return NextResponse.rewrite(url);
     }
-    if (!isMapRoute && !p.startsWith("/login") && !p.startsWith("/auth")) {
+    if (!isMapRoute && !p.startsWith("/login") && !p.startsWith("/auth") && !p.startsWith("/api/")) {
       return NextResponse.redirect(new URL(p + request.nextUrl.search, process.env.CRM_ORIGIN ?? "https://crm.stewardshipcre.com"));
     }
   }
+
+  // Map viewers (partners with a login, role in app_metadata) get the public
+  // map with every tier unlocked and nothing else: CRM pages bounce to the
+  // map, CRM API calls get 403. See src/lib/auth-role.ts.
+  const path = request.nextUrl.pathname;
+  const isApi = path.startsWith("/api/");
+  if (user && isMapViewer(user) && !mapViewerAllowed(path)) {
+    if (isApi) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    const url = request.nextUrl.clone();
+    url.pathname = "/map/hobart";
+    url.search = "";
+    return NextResponse.redirect(url);
+  }
+  // API routes handle their own auth; middleware only gates map viewers above.
+  if (isApi) return response;
 
   if (
     !user &&
@@ -85,7 +101,8 @@ export async function middleware(request: NextRequest) {
   if (user && request.nextUrl.pathname.startsWith("/login")) {
     const url = request.nextUrl.clone();
     const next = request.nextUrl.searchParams.get("next") ?? "";
-    url.pathname = /^\/(?!\/)[\w\-./]*$/.test(next) ? next : "/cre-os";
+    const wanted = /^\/(?!\/)[\w\-./]*$/.test(next) ? next : null;
+    url.pathname = isMapViewer(user) ? (wanted && mapViewerAllowed(wanted) ? wanted : "/map/hobart") : (wanted ?? "/cre-os");
     url.search = "";
     return NextResponse.redirect(url);
   }
@@ -100,11 +117,12 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
-     * - api routes (let them handle their own auth)
+     * - (api routes DO pass through now: they handle their own auth, but
+     *   middleware fences map viewers off the CRM API — see above)
      * - .netlify/functions/* (Netlify Functions handle their own auth;
      *   without this exclusion, background functions get redirected
      *   to /login and never execute)
      */
-    "/((?!_next/static|_next/image|favicon.ico|api|\\.netlify).*)",
+    "/((?!_next/static|_next/image|favicon.ico|\\.netlify).*)",
   ],
 };
