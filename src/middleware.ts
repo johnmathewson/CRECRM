@@ -65,7 +65,9 @@ export async function middleware(request: NextRequest) {
   // avoids a double bounce.)
   if (user && request.nextUrl.pathname.startsWith("/login")) {
     const url = request.nextUrl.clone();
-    url.pathname = "/cre-os";
+    const next = request.nextUrl.searchParams.get("next") ?? "";
+    url.pathname = /^\/(?!\/)[\w\-./]*$/.test(next) ? next : "/cre-os";
+    url.search = "";
     return NextResponse.redirect(url);
   }
 

@@ -56,6 +56,7 @@ export default function HobartParcelMap() {
   const [overlays, setOverlays] = useState<Overlays>({ lines: true, buildings: true, tif: false, flood: false, historic: false });
   const [registered, setRegistered] = useState(false);
   const [sessionName, setSessionName] = useState<string | null>(null);
+  const [admin, setAdmin] = useState(false);
   const [modal, setModal] = useState<"register" | "ask" | null>(null);
   const [layersOpen, setLayersOpen] = useState(false);
   const [selected, setSelected] = useState<ParcelProps | null>(null);
@@ -84,7 +85,7 @@ export default function HobartParcelMap() {
   useEffect(() => {
     fetch("/api/map/session", { cache: "no-store" })
       .then((r) => r.json())
-      .then((s) => { if (s?.registered) { setRegistered(true); setSessionName(s.name ?? null); } })
+      .then((s) => { if (s?.registered) { setRegistered(true); setSessionName(s.name ?? null); setAdmin(!!s.admin); } })
       .catch(() => {});
   }, []);
 
@@ -457,7 +458,7 @@ export default function HobartParcelMap() {
             <div className="min-w-0 flex-1 leading-tight">
               <div className="truncate text-[14px] font-bold text-slate-900">Hobart Parcel Map <span className="font-medium text-slate-400">· Indiana</span></div>
               <div className="hidden text-[11px] text-slate-500 md:block">
-                Stewardship CRE · {meta ? `${meta.counts.parcels.toLocaleString()} parcels` : "…"} · {registered ? <span className="font-semibold text-emerald-700">Registered{sessionName ? ` · ${sessionName}` : ""}</span> : "public records"}
+                Stewardship CRE · {meta ? `${meta.counts.parcels.toLocaleString()} parcels` : "…"} · {admin ? <span className="font-semibold text-blue-700">Admin{sessionName ? ` · ${sessionName.split(" ")[0]}` : ""}</span> : registered ? <span className="font-semibold text-emerald-700">Registered{sessionName ? ` · ${sessionName}` : ""}</span> : "public records"}
               </div>
             </div>
             {listings.length > 0 && (
@@ -555,13 +556,18 @@ export default function HobartParcelMap() {
                 {l}
               </label>
             ))}
-            {registered && (
+            {registered && !admin && (
               <button
                 onClick={async () => { await fetch("/api/map/session", { method: "DELETE" }); setRegistered(false); setSessionName(null); if (selected) loadDetail(selected.pid); }}
                 className="mt-2 w-full border-t border-slate-200 pt-2 text-left text-[12px] text-slate-500 hover:text-slate-800"
               >
                 Not {sessionName?.split(" ")[0] ?? "you"}? Sign out
               </button>
+            )}
+            {admin ? (
+              <a href="/cre-os/today" className="mt-2 block border-t border-slate-200 pt-2 text-[12px] font-semibold text-blue-700 hover:underline">Open CRM →</a>
+            ) : (
+              <a href="/login?next=/map/hobart" className="mt-2 block border-t border-slate-200 pt-2 text-[12px] text-slate-500 hover:text-slate-800">Broker sign in</a>
             )}
             {meta && <div className="mt-2 border-t border-slate-200 pt-2 text-[10px] text-slate-400">Records pulled {new Date(meta.pulled_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</div>}
           </div>

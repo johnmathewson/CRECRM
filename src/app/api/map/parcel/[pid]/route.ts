@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { readSession } from "@/lib/parcel-map/session";
+import { resolveViewer } from "@/lib/parcel-map/session";
 import { getParcel } from "@/lib/parcel-map/data";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest, { params }: { params: { pid: string } }) {
   const pid = decodeURIComponent(params.pid ?? "").trim();
   if (!/^[\d.\-]{10,40}$/.test(pid)) return NextResponse.json({ error: "bad pid" }, { status: 400 });
-  const gated = !!readSession(req);
+  const gated = (await resolveViewer(req)).registered;
   try {
     const row = await getParcel(pid, gated);
     if (!row) return NextResponse.json({ error: "not found" }, { status: 404 });

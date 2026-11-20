@@ -35,7 +35,12 @@ export default function LoginPage() {
       return;
     }
 
-    router.push("/cre-os");
+    // Where to land after sign-in. Internal paths only (e.g. the public parcel
+    // map's "Broker sign in" link passes ?next=/map/hobart). Read from
+    // window rather than useSearchParams so the page keeps static rendering.
+    const rawNext = new URLSearchParams(window.location.search).get("next") ?? "";
+    const next = /^\/(?!\/)[\w\-./?=&%]*$/.test(rawNext) ? rawNext : "/cre-os";
+    router.push(next);
     router.refresh();
   };
 

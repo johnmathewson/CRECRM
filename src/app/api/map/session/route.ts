@@ -4,13 +4,13 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { readSession, MAP_SESSION_COOKIE } from "@/lib/parcel-map/session";
+import { resolveViewer, MAP_SESSION_COOKIE } from "@/lib/parcel-map/session";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const s = readSession(req);
-  return NextResponse.json(s ? { registered: true, name: s.name } : { registered: false }, {
+  const v = await resolveViewer(req);
+  return NextResponse.json({ registered: v.registered, admin: v.admin, name: v.name }, {
     headers: { "cache-control": "no-store" },
   });
 }

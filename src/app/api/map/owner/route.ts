@@ -4,13 +4,13 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { readSession } from "@/lib/parcel-map/session";
+import { resolveViewer } from "@/lib/parcel-map/session";
 import { parcelsByOwner } from "@/lib/parcel-map/data";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  if (!readSession(req)) return NextResponse.json({ error: "Please register first." }, { status: 401 });
+  if (!(await resolveViewer(req)).registered) return NextResponse.json({ error: "Please register first." }, { status: 401 });
   const name = (req.nextUrl.searchParams.get("name") ?? "").trim();
   if (!name) return NextResponse.json({ parcels: [] });
   try {

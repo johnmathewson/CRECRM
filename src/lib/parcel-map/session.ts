@@ -9,6 +9,7 @@
 
 import { createHmac, timingSafeEqual } from "crypto";
 import type { NextRequest, NextResponse } from "next/server";
+import { createServerClient } from "@supabase/ssr";
 
 export const MAP_SESSION_COOKIE = "pm_session";
 const ONE_YEAR = 60 * 60 * 24 * 365;
@@ -66,4 +67,34 @@ export function setSessionCookie(res: NextResponse, s: Omit<MapSession, "exp">):
     path: "/",
     maxAge: ONE_YEAR,
   });
+}
+
+
+/** Who is looking at the map. A signed-in CRM user (John) is the admin and
+ *  sees every tier without registering; otherwise the registration cookie
+ *  decides. The CRM is single-user, so "any CRM session" == admin. */
+export interface Viewer {
+  admin: boolean;
+  registered: boolean;
+  name: string | null;
+  email: string | null;
+  contactId: string | null;
+}
+
+export async function resolveViewer(req: NextRequest): Promise<Viewer> {
+  try {
+    const sb = createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+      cookies: { getAll: () => req.cookies.getAll(), setAll: () => {} },
+    });
+    const { data } = await sb.auth.getUser();
+    if (data.user) {
+      const email = data.user.email ?? null;
+      const name = (data.user.user_metadata?.full_name as string | undefined) ?? (email === "john@johnmathewson.co" ? "John Mathewson" : email);
+      return { admin: true, registered: true, name, email, contactId: null };
+    }
+  } catch {
+    /* no CRM session */
+  }
+  const s = readSession(req);
+  return s ? { admin: false, registered: true, name: s.name, email: null, contactId: s.contactId } : { admin: false, registered: false, name: null, email: null, contactId: null };
 }

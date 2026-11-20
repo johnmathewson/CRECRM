@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { readSession } from "@/lib/parcel-map/session";
+import { resolveViewer } from "@/lib/parcel-map/session";
 import { searchParcels } from "@/lib/parcel-map/data";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   const q = (req.nextUrl.searchParams.get("q") ?? "").trim();
   if (q.length < 2) return NextResponse.json({ results: [] });
-  const gated = !!readSession(req);
+  const gated = (await resolveViewer(req)).registered;
   try {
     const results = await searchParcels(q.slice(0, 80), gated, 8);
     return NextResponse.json({ results, gated });
