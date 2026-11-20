@@ -113,6 +113,10 @@ def match_pid(lon, lat):
 
 STATUS = {"OPERATIONAL": "open", "CLOSED_PERMANENTLY": "closed", "CLOSED_TEMPORARILY": "unknown"}
 SKIP_TYPES = {"route", "street_address", "premise", "subpremise", "locality", "political", "neighborhood", "postal_code", "bus_stop", "transit_station", "intersection"}
+# Places that are not businesses occupying space: amenities, infrastructure, landmarks.
+SKIP_PRIMARY = {"atm", "public_bathroom", "restroom", "parking", "parking_lot", "bus_stop", "bus_station", "train_station", "transit_station",
+                "historical_landmark", "park", "playground", "dog_park", "cemetery", "point_of_interest", "establishment", "premise", "route",
+                "electric_vehicle_charging_station", "tourist_attraction", "hiking_area", "trailhead", "monument"}
 rows = []
 for p in places.values():
     types = set(p.get("types") or [])
@@ -123,6 +127,7 @@ for p in places.values():
     in_city = CITY.lower() in addr.lower()
     if not pid and not in_city: continue
     prim = p.get("primaryType")
+    if (prim or "") in SKIP_PRIMARY: continue
     rows.append({
         "google_id": p["id"], "name": p["displayName"]["text"], "category": prim, "category_alt": sorted(types - {prim} if prim else types)[:8],
         "type_label": (prim or "").replace("_", " ").capitalize() or None,
