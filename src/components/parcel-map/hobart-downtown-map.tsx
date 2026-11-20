@@ -71,15 +71,6 @@ export default function HobartParcelMap() {
   const [admin, setAdmin] = useState(false);
   const [modal, setModal] = useState<"register" | "ask" | null>(null);
   const [layersOpen, setLayersOpen] = useState(false);
-  // On phones the toolbar sits under the header card, whose height changes with the chip rows.
-  const headerRef = useRef<HTMLDivElement>(null);
-  const [headerH, setHeaderH] = useState(96);
-  useEffect(() => {
-    const el = headerRef.current; if (!el) return;
-    const ro = new ResizeObserver(() => setHeaderH(el.getBoundingClientRect().height));
-    ro.observe(el); setHeaderH(el.getBoundingClientRect().height);
-    return () => ro.disconnect();
-  }, []);
   const [selected, setSelected] = useState<ParcelProps | null>(null);
   const [site, setSite] = useState<PlanSite | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -571,7 +562,7 @@ export default function HobartParcelMap() {
       )}
 
       {/* Top-left: title + search */}
-      <div ref={headerRef} className="absolute left-3 top-3 z-20 w-[calc(100%-24px)] md:left-4 md:top-4 md:w-[380px]">
+      <div className="absolute left-3 top-3 z-20 w-[calc(100%-24px)] md:left-4 md:top-4 md:w-[380px]">
         <div className="rounded-[10px] bg-white shadow-lg ring-1 ring-slate-900/5">
           <div className="flex items-center gap-2 px-3 pt-2.5">
             <span className="grid h-6 w-6 place-items-center rounded-[6px] bg-blue-600 text-[11px] font-extrabold text-white">H</span>
@@ -717,7 +708,7 @@ export default function HobartParcelMap() {
       </div>
 
       {/* Top-right: view controls */}
-      <div className="absolute right-3 z-20 flex flex-col items-end gap-2 md:right-4 md:top-4" style={isMobile ? { top: headerH + 20 } : undefined}>
+      <div className={`absolute z-20 flex flex-col items-end gap-2 ${isMobile ? "bottom-9 left-3" : "right-4 top-4"}`}>
         <div className="flex overflow-hidden rounded-[10px] bg-white shadow-lg ring-1 ring-slate-900/5">
           <button onClick={() => setThreeD((v) => !v)} className={btn} title="Toggle 3D">{threeD ? "3D" : "2D"}</button>
           <span className="w-px bg-slate-200" />
