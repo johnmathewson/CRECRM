@@ -71,6 +71,15 @@ export default function HobartParcelMap() {
   const [admin, setAdmin] = useState(false);
   const [modal, setModal] = useState<"register" | "ask" | null>(null);
   const [layersOpen, setLayersOpen] = useState(false);
+  // On phones the toolbar sits under the header card, whose height changes with the chip rows.
+  const headerRef = useRef<HTMLDivElement>(null);
+  const [headerH, setHeaderH] = useState(96);
+  useEffect(() => {
+    const el = headerRef.current; if (!el) return;
+    const ro = new ResizeObserver(() => setHeaderH(el.getBoundingClientRect().height));
+    ro.observe(el); setHeaderH(el.getBoundingClientRect().height);
+    return () => ro.disconnect();
+  }, []);
   const [selected, setSelected] = useState<ParcelProps | null>(null);
   const [site, setSite] = useState<PlanSite | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -563,7 +572,7 @@ export default function HobartParcelMap() {
       )}
 
       {/* Top-left: title + search */}
-      <div className="absolute left-3 top-3 z-20 w-[calc(100%-24px)] md:left-4 md:top-4 md:w-[380px]">
+      <div ref={headerRef} className="absolute left-3 top-3 z-20 w-[calc(100%-24px)] md:left-4 md:top-4 md:w-[380px]">
         <div className="rounded-[10px] bg-white shadow-lg ring-1 ring-slate-900/5">
           <div className="flex items-center gap-2 px-3 pt-2.5">
             <span className="grid h-6 w-6 place-items-center rounded-[6px] bg-blue-600 text-[11px] font-extrabold text-white">H</span>
@@ -643,7 +652,7 @@ export default function HobartParcelMap() {
       </div>
 
       {/* Top-right: view controls */}
-      <div className={`absolute right-3 z-20 flex flex-col items-end gap-2 md:right-4 md:top-4 ${isMobile ? "top-[104px]" : ""}`}>
+      <div className="absolute right-3 z-20 flex flex-col items-end gap-2 md:right-4 md:top-4" style={isMobile ? { top: headerH + 20 } : undefined}>
         <div className="flex overflow-hidden rounded-[10px] bg-white shadow-lg ring-1 ring-slate-900/5">
           <button onClick={() => setLayersOpen((v) => !v)} className={layersOpen ? btnOn : btn}>Layers</button>
           <span className="w-px bg-slate-200" />
@@ -657,18 +666,19 @@ export default function HobartParcelMap() {
         </div>
 
         {layersOpen && (
-          <div className="w-[260px] rounded-[10px] bg-white p-3 text-[13px] shadow-xl ring-1 ring-slate-900/5">
-            <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">Color parcels by <span className="font-medium normal-case tracking-normal text-slate-400">· tap again to turn off</span></div>
-            <div className="grid grid-cols-2 gap-1">
-              {([["zoning", "Zoning"], ["plan", "2040 Plan"], ["flu", "Land use (city GIS)"], ["height", "Building height"], ["none", "None"]] as [Mode, string][]).map(([m, l]) => (
-                <button key={m} onClick={() => setMode((cur) => (cur === m && m !== "none" ? "none" : m))} className={`rounded-[6px] px-2 py-1.5 text-left font-semibold ${mode === m ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}>{l}</button>
-              ))}
+          <div className="max-h-[calc(100dvh-220px)] w-[260px] overflow-y-auto rounded-[10px] bg-white p-3 text-[13px] shadow-xl ring-1 ring-slate-900/5">
+            {/* Legend for whatever the chip row has turned on. Fills and
+                highlights are chosen in the Show row under the search box;
+                this panel reads them back and holds the rarer controls. */}
+            <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+              {mode === "zoning" ? "Zoning" : mode === "plan" ? "2040 plan · future land use" : mode === "flu" ? "Land use (city GIS)" : mode === "height" ? "Building height" : "Legend"}
             </div>
+            {mode === "none" && <div className="text-[12px] text-slate-500">No parcel coloring. Tap <span className="font-semibold text-slate-700">Zoning</span> or <span className="font-semibold text-slate-700">2040 Plan</span> in the Show row.</div>}
             {mode === "plan" && (
-              <div className="mt-2 text-[11px] leading-snug text-slate-500">Future land use from the <span className="font-semibold text-slate-700">Hobart 2040 Comprehensive Plan</span> (adopted Sept 2023), digitized parcel by parcel. Orange outlines are the plan&apos;s four opportunity sites — tap one. Dashed black lines are proposed street extensions.</div>
+              <div className="mb-2 text-[11px] leading-snug text-slate-500">Future land use from the <span className="font-semibold text-slate-700">Hobart 2040 Comprehensive Plan</span> (adopted Sept 2023), digitized parcel by parcel. Orange outlines are the plan&apos;s four opportunity sites — tap one. Dashed black lines are proposed street extensions.</div>
             )}
             {legend.length > 0 && (
-              <ul className="mt-2 grid grid-cols-1 gap-y-0.5 border-t border-slate-200 pt-2">
+              <ul className="grid grid-cols-1 gap-y-0.5">
                 {legend.map((l) => (
                   <li key={l.k + l.label} className="flex items-center gap-2 text-[12px] text-slate-700">
                     <span className="inline-block h-3 w-3 rounded-[3px] ring-1 ring-slate-900/10" style={{ background: l.fill }} />
@@ -678,13 +688,18 @@ export default function HobartParcelMap() {
                 ))}
               </ul>
             )}
-            <div className="mt-3 mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">On market</div>
+            {(showSale || showLease || showBusiness) && (
+              <div className="mt-2 border-t border-slate-200 pt-2 text-[11px] leading-snug text-slate-500">
+                {(showSale || showLease) && <>Listings from CREXi, LoopNet and our CRM, refreshed daily. </>}
+                {showBusiness && <>Businesses: Google Business Profiles first ({googlePids.length} parcels, solid); City of Hobart licenses and Overture as backup ({backupPids.length} parcels, faint).</>}
+              </div>
+            )}
+            <div className="mt-3 mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">Other colorings</div>
             <div className="grid grid-cols-2 gap-1">
-              {MARKET_FILTERS.map((f) => (
-                <button key={f.id} onClick={() => setFilter(f.id)} className={`rounded-[6px] px-2 py-1.5 text-left font-semibold ${filter === f.id ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}>{f.id === "all" ? "All" : f.label}</button>
+              {([["flu", "Land use (city GIS)"], ["height", "Building height"]] as [Mode, string][]).map(([m, l]) => (
+                <button key={m} onClick={() => setMode((cur) => (cur === m ? "none" : m))} className={`rounded-[6px] px-2 py-1.5 text-left font-semibold ${mode === m ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}>{l}</button>
               ))}
             </div>
-            <div className="mt-1 text-[11px] text-slate-500">Listings from CREXi, LoopNet and our CRM (daily). Businesses: Google Business Profiles first ({googlePids.length} parcels, solid); City of Hobart licenses and Overture as backup ({backupPids.length} parcels, faint).</div>
             <div className="mt-3 mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">Overlays</div>
             {([["lines", "Parcel lines"], ["buildings", "3D buildings"], ["plan_sites", "2040 opportunity sites"], ["plan_concepts", "2040 concept site plans (with sites)"], ["plan_roads", "2040 planned streets"], ["tif", "TIF districts (dashed)"], ["flood", "FEMA AE flood zone"], ["historic", "Historic district"]] as [keyof Overlays, string][]).map(([k, l]) => (
               <label key={k} className="flex cursor-pointer items-center gap-2 py-1 text-slate-700">
