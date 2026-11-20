@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
   const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
   const { data: props, error } = await sb
     .from("properties")
-    .select("id, name, address, city, status, transaction_type, asking_price, lease_rate, sqft, acreage, asset_type, apn, latitude, longitude, crexi_url, loopnet_url, slug")
+    .select("id, name, address, city, status, transaction_type, asking_price, lease_rate, sqft, acreage, asset_type, apn, latitude, longitude, crexi_url, loopnet_url, slug, images")
     .eq("organization_id", ORG_ID)
     .ilike("city", "hobart")
     .in("status", ACTIVE);

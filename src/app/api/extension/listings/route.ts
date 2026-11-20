@@ -58,6 +58,7 @@ export async function POST(req: NextRequest) {
       price_text: str(l.price_text), price: parsePrice(l.price_text),
       lease_rate_text: kind === "lease" ? str(l.price_text) : null,
       sqft: num(l.sqft), acres: num(l.acres), asset_type: str(l.asset_type), broker_company: str(l.broker_company),
+      photo_url: typeof l.photo_url === "string" && /^https:\/\//.test(l.photo_url) ? l.photo_url.slice(0, 600) : null,
       seen_at: seenAt, raw: { search_url: str(body.search_url), captured: l },
     }));
 

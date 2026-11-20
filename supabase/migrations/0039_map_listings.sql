@@ -153,3 +153,7 @@ grant execute on function public.map_parcel_match(text, text, text, double preci
 -- exact normalized → number + street core → number + core containment → point;
 -- map_listings_rematch(p_key) retries unmatched rows. See Supabase migration
 -- history for the full bodies; kept out of this file to avoid drift.
+
+-- ── photo_url (applied as migration map_listings_photo) ─────────────────────
+-- alter table map_listings add column photo_url text; map_listings_upsert
+-- accepts r->>'photo_url' (coalesce on update); map_listings_active returns it.

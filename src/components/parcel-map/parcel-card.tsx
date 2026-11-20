@@ -14,7 +14,8 @@ export type Permit = { num: string | null; date: number | null; cost: number | n
 export type Listing = {
   id: string; pid: string | null; source: string; url: string | null; kind: "sale" | "lease" | "both"; status: string;
   title: string | null; address: string | null; price: number | null; price_text: string | null; lease_rate_text: string | null;
-  sqft: number | null; acres: number | null; asset_type: string | null; broker_company: string | null; first_seen_at: string; last_seen_at: string;
+  sqft: number | null; acres: number | null; asset_type: string | null; broker_company: string | null; photo_url: string | null;
+  first_seen_at: string; last_seen_at: string;
 };
 
 export type ParcelProps = {
@@ -110,8 +111,13 @@ export function ParcelCard({
                   const c = LISTING[l.kind] ?? LISTING.sale;
                   const src = l.source === "crm" ? "Stewardship CRE" : l.source === "crexi" ? "CREXi" : l.source === "loopnet" ? "LoopNet" : l.source;
                   return (
-                    <div key={l.id} className="rounded-[10px] border p-3" style={{ borderColor: c.fill, background: `${c.fill}14` }}>
-                      <div className="flex items-start justify-between gap-2">
+                    <div key={l.id} className="overflow-hidden rounded-[10px] border" style={{ borderColor: c.fill, background: `${c.fill}14` }}>
+                      {l.photo_url && (
+                        <a href={l.url ?? undefined} target="_blank" rel="noreferrer" className="block">
+                          <img src={l.photo_url} alt={l.title ?? "Listing photo"} className="h-[150px] w-full object-cover" loading="lazy" />
+                        </a>
+                      )}
+                      <div className="flex items-start justify-between gap-2 p-3">
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5">
                             <span className="rounded-[4px] px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-white" style={{ background: c.fill }}>{c.label}{l.status === "under_contract" ? " · under contract" : ""}</span>
@@ -127,7 +133,7 @@ export function ParcelCard({
                           <div className="text-[11px] text-slate-500">seen {dt(Date.parse(l.last_seen_at))}</div>
                         </div>
                       </div>
-                      {l.url && <a href={l.url} target="_blank" rel="noreferrer" className="mt-2 inline-block text-[12px] font-semibold text-blue-700 hover:underline">View listing ↗</a>}
+                      {l.url && <a href={l.url} target="_blank" rel="noreferrer" className="mb-3 ml-3 inline-block text-[12px] font-semibold text-blue-700 hover:underline">View listing ↗</a>}
                     </div>
                   );
                 })}

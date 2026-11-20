@@ -30,6 +30,22 @@
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+  /** First real listing photo in a card: skip broker logos, icons, data: URIs. */
+  function cardPhoto(card) {
+    const imgs = Array.from(card.querySelectorAll("img"));
+    for (const img of imgs) {
+      const cls = String(img.className || "");
+      if (/logo|icon|avatar|badge/i.test(cls) || /logo|icon/i.test(img.alt || "")) continue;
+      const src = img.currentSrc || img.getAttribute("src") || img.getAttribute("data-src") || "";
+      if (!/^https:\/\//.test(src) || /\.svg(\?|$)/i.test(src) || /user-accounts|broker/i.test(src)) continue;
+      if (img.naturalWidth && img.naturalWidth < 80) continue;
+      return src;
+    }
+    const bg = card.querySelector('[style*="background-image"]');
+    const m = bg && bg.getAttribute("style").match(/url\(["']?(https:[^"')]+)/);
+    return m ? m[1] : null;
+  }
+
   // ── CREXi ────────────────────────────────────────────────────────────────
   function crexiTotal() {
     const m = document.body.innerText.match(/([\d,]+)\s+propert(?:y|ies)/i);
@@ -74,6 +90,8 @@
       const id = (href.match(/\/properties\/(\d+)/) || [])[1];
       if (!id || seen.has(id)) continue;
       const card = a.closest('[class*="ctw:grid"]') || a.parentElement?.parentElement?.parentElement?.parentElement || a;
+      // The photo carousel sits beside the text grid inside the <cui-card>.
+      const outer = a.closest("cui-card") || card.parentElement || card;
       const leaves = leafText(card);
       const label = leaves.find((l) => /^For (Sale|Lease)$/i.test(l.t));
       const price = leaves.find((l) => /text-heading/.test(l.cls) || /^(\$[\d,.]+|Unpriced|Auction|Call for)/i.test(l.t));
@@ -92,6 +110,7 @@
         address: street && city ? `${street}, ${city}` : street || city,
         price_text: price ? price.t : null,
         asset_type: details ? details.t.split("|")[0].trim() : null,
+        photo_url: outer.querySelector("img.slide-content-img")?.getAttribute("src") || cardPhoto(outer),
         kind: label ? (/lease/i.test(label.t) ? "lease" : "sale") : null,
         raw: { label: label?.t, details: details?.t, description: titles[1] || null, city },
       });
@@ -127,6 +146,7 @@
         asset_type: art.getAttribute("data-automation-property-type") || null,
         broker_name: art.querySelector(".broker-name")?.textContent.trim() || null,
         broker_company: art.querySelector(".broker-company")?.textContent.trim() || null,
+        photo_url: art.querySelector("img.embla__slide__img")?.getAttribute("src") || cardPhoto(art),
         kind: /lease/i.test(txn) ? "lease" : /sale/i.test(txn) ? "sale" : null,
         raw: { listing_type: art.getAttribute("data-automation-listing-type"), city, state: art.getAttribute("data-automation-state") },
       });

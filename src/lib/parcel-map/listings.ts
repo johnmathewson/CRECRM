@@ -39,6 +39,7 @@ export interface ListingIn {
   asset_type?: string | null;
   broker_name?: string | null;
   broker_company?: string | null;
+  photo_url?: string | null;
   property_id?: string | null;
   apn?: string | null;
   lon?: number | null;
@@ -51,7 +52,7 @@ export interface ListingOut {
   id: string; pid: string | null; source: ListingSource; external_id: string | null; url: string | null; kind: ListingKind;
   status: string; title: string | null; address: string | null; price: number | null; price_text: string | null;
   lease_rate_text: string | null; sqft: number | null; acres: number | null; asset_type: string | null; broker_company: string | null;
-  first_seen_at: string; last_seen_at: string;
+  photo_url: string | null; first_seen_at: string; last_seen_at: string;
 }
 
 /** Match a listing to a parcel by APN, then address (normalized), then point;
@@ -131,7 +132,11 @@ export function listingFromProperty(p: {
   id: string; name: string | null; address: string | null; city: string | null; status: string | null; transaction_type: string | null;
   asking_price: number | null; lease_rate: number | null; sqft: number | null; acreage: number | null; asset_type: string | null;
   apn: string | null; latitude: number | null; longitude: number | null; crexi_url: string | null; loopnet_url: string | null; slug: string | null;
+  images?: unknown;
 }): ListingIn {
+  const imgs = Array.isArray(p.images) ? p.images : [];
+  const first = imgs.find((i: any) => typeof i === "string" || (i && typeof i.url === "string"));
+  const photo = typeof first === "string" ? first : first ? (first as any).url : null;
   const kind: ListingKind = p.status === "for_lease" || p.transaction_type === "lease" ? "lease" : "sale";
   return {
     source: "crm", external_id: p.id, url: p.crexi_url ?? p.loopnet_url ?? (p.slug ? `https://stewardshipcre.com/listings/${p.slug}` : null),
@@ -139,7 +144,7 @@ export function listingFromProperty(p: {
     title: p.name, address: p.address, city: "Hobart",
     price: p.asking_price, price_text: p.asking_price ? `$${Number(p.asking_price).toLocaleString()}` : null,
     lease_rate_text: p.lease_rate ? `$${p.lease_rate}/SF/YR` : null,
-    sqft: p.sqft, acres: p.acreage, asset_type: p.asset_type, broker_company: "Stewardship CRE",
+    sqft: p.sqft, acres: p.acreage, asset_type: p.asset_type, broker_company: "Stewardship CRE", photo_url: photo,
     property_id: p.id, apn: p.apn, lon: p.longitude, lat: p.latitude,
   };
 }

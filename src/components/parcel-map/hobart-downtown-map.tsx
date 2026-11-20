@@ -24,6 +24,14 @@ const DATA = "/data/hobart";
 const STYLES = { light: "https://tiles.openfreemap.org/styles/positron", dark: "https://tiles.openfreemap.org/styles/dark" };
 
 type Mode = "zoning" | "flu" | "height" | "none";
+/** Top-level filters shown as chips under the search box. Add future filters
+ *  (asset type, price band, lot size, zoning…) as more entries. */
+type MarketFilter = "all" | "sale" | "lease";
+const MARKET_FILTERS: { id: MarketFilter; label: string; kinds: Array<"sale" | "lease" | "both"> }[] = [
+  { id: "all", label: "All parcels", kinds: ["sale", "lease", "both"] },
+  { id: "sale", label: "For sale", kinds: ["sale", "both"] },
+  { id: "lease", label: "For lease", kinds: ["lease", "both"] },
+];
 type Basemap = "light" | "dark";
 type Overlays = { lines: boolean; buildings: boolean; tif: boolean; flood: boolean; historic: boolean };
 /** Lite feature properties as written by fetch-hobart.py. */
@@ -68,9 +76,15 @@ export default function HobartParcelMap() {
   const [serverHits, setServerHits] = useState<ParcelProps[]>([]);
   const [meta, setMeta] = useState<Meta | null>(null);
   const [listings, setListings] = useState<Listing[]>([]);
-  const [showSale, setShowSale] = useState(true);
-  const [showLease, setShowLease] = useState(true);
-  const [onlyMarket, setOnlyMarket] = useState(false);
+  const [filter, setFilter] = useState<MarketFilter>("all");
+  // Derived from the chip: which overlay kinds paint, and whether the rest fades.
+  const showSale = filter === "all" || filter === "sale";
+  const showLease = filter === "all" || filter === "lease";
+  const onlyMarket = filter !== "all";
+  const setOnlyMarket = (v: boolean | ((b: boolean) => boolean)) => {
+    const next = typeof v === "function" ? v(onlyMarket) : v;
+    setFilter(next ? (filter === "all" ? "sale" : filter) : "all");
+  };
   const [width, setWidth] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -462,13 +476,7 @@ export default function HobartParcelMap() {
               </div>
             </div>
             {listings.length > 0 && (
-              <button
-                onClick={() => setOnlyMarket((v) => !v)}
-                className={`shrink-0 rounded-[6px] px-2 py-1 text-[11px] font-semibold ${onlyMarket ? "bg-emerald-600 text-white" : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"}`}
-                title="Show only on-market parcels"
-              >
-                {byPid.size} on market
-              </button>
+              <span className="shrink-0 rounded-[6px] bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">{byPid.size} on market</span>
             )}
             {!registered && (
               <button onClick={() => setModal("register")} className="hidden shrink-0 rounded-[6px] bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700 hover:bg-blue-100 md:block">Unlock owners</button>
@@ -499,6 +507,25 @@ export default function HobartParcelMap() {
                 ))}
               </ul>
             )}
+          </div>
+          {/* Filter chips — one row, scrolls sideways on phones */}
+          <div className="flex items-center gap-1.5 overflow-x-auto border-t border-slate-100 px-2 py-1.5">
+            <span className="shrink-0 pl-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Show</span>
+            {MARKET_FILTERS.map((f) => {
+              const n = f.id === "all" ? null : f.id === "sale" ? marketPids.sale.length + marketPids.both.length : marketPids.lease.length + marketPids.both.length;
+              const on = filter === f.id;
+              const dot = f.id === "sale" ? LISTING.sale.fill : f.id === "lease" ? LISTING.lease.fill : null;
+              return (
+                <button
+                  key={f.id}
+                  onClick={() => setFilter(on && f.id !== "all" ? "all" : f.id)}
+                  className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-semibold ring-1 transition ${on ? "bg-slate-900 text-white ring-slate-900" : "bg-white text-slate-700 ring-slate-200 hover:bg-slate-50"}`}
+                >
+                  {dot && <span className="inline-block h-2 w-2 rounded-full" style={{ background: dot }} />}
+                  {f.label}{n != null && <span className={on ? "text-slate-300" : "text-slate-400"}>{n}</span>}
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -537,18 +564,12 @@ export default function HobartParcelMap() {
               </ul>
             )}
             <div className="mt-3 mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">On market</div>
-            <label className="flex cursor-pointer items-center gap-2 py-1 text-slate-700">
-              <input type="checkbox" checked={showSale} onChange={(e) => setShowSale(e.target.checked)} className="h-4 w-4 accent-emerald-600" />
-              <span className="inline-block h-3 w-3 rounded-[3px]" style={{ background: LISTING.sale.fill }} /> For sale <span className="text-slate-400">({marketPids.sale.length + marketPids.both.length})</span>
-            </label>
-            <label className="flex cursor-pointer items-center gap-2 py-1 text-slate-700">
-              <input type="checkbox" checked={showLease} onChange={(e) => setShowLease(e.target.checked)} className="h-4 w-4 accent-cyan-600" />
-              <span className="inline-block h-3 w-3 rounded-[3px]" style={{ background: LISTING.lease.fill }} /> For lease <span className="text-slate-400">({marketPids.lease.length + marketPids.both.length})</span>
-            </label>
-            <label className="flex cursor-pointer items-center gap-2 py-1 text-slate-700">
-              <input type="checkbox" checked={onlyMarket} onChange={(e) => setOnlyMarket(e.target.checked)} className="h-4 w-4 accent-blue-600" />
-              Fade everything else
-            </label>
+            <div className="grid grid-cols-3 gap-1">
+              {MARKET_FILTERS.map((f) => (
+                <button key={f.id} onClick={() => setFilter(f.id)} className={`rounded-[6px] px-2 py-1.5 text-left font-semibold ${filter === f.id ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}>{f.id === "all" ? "All" : f.label}</button>
+              ))}
+            </div>
+            <div className="mt-1 text-[11px] text-slate-500">Listings come from CREXi, LoopNet and our own CRM, refreshed daily.</div>
             <div className="mt-3 mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">Overlays</div>
             {([["lines", "Parcel lines"], ["buildings", "3D buildings"], ["tif", "TIF districts (dashed)"], ["flood", "FEMA AE flood zone"], ["historic", "Historic district"]] as [keyof Overlays, string][]).map(([k, l]) => (
               <label key={k} className="flex cursor-pointer items-center gap-2 py-1 text-slate-700">
@@ -606,12 +627,25 @@ export default function HobartParcelMap() {
         © <a className="underline" href="https://openfreemap.org" target="_blank" rel="noreferrer">OpenFreeMap</a> © OpenMapTiles © <a className="underline" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>
       </div>
 
-      {hover && !isMobile && hover.p.pid !== selected?.pid && (
-        <div className="pointer-events-none absolute z-10 rounded-[8px] bg-slate-900 px-2.5 py-1.5 text-white shadow-lg" style={{ left: hover.x + 14, top: hover.y + 14 }}>
-          <div className="text-[12px] font-semibold">{hover.p.address || "No situs address"}</div>
-          <div className="text-[11px] text-slate-300">{hover.p.zoning ?? "—"} · {hover.p.acres != null ? `${hover.p.acres} ac` : "—"}</div>
-        </div>
-      )}
+      {hover && !isMobile && hover.p.pid !== selected?.pid && (() => {
+        const hl = byPid.get(hover.p.pid) ?? [];
+        const first = hl[0];
+        return (
+          <div className="pointer-events-none absolute z-10 w-[220px] overflow-hidden rounded-[8px] bg-slate-900 text-white shadow-lg" style={{ left: hover.x + 14, top: hover.y + 14 }}>
+            {first?.photo_url && <img src={first.photo_url} alt="" className="h-[110px] w-full object-cover" />}
+            <div className="px-2.5 py-1.5">
+              {first && (
+                <div className="mb-0.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider" style={{ color: (LISTING[first.kind] ?? LISTING.sale).fill }}>
+                  {(LISTING[first.kind] ?? LISTING.sale).label}
+                  <span className="font-semibold normal-case tracking-normal text-white">{first.price_text || first.lease_rate_text || ""}</span>
+                </div>
+              )}
+              <div className="text-[12px] font-semibold">{hover.p.address || "No situs address"}</div>
+              <div className="text-[11px] text-slate-300">{hover.p.zoning ?? "—"} · {hover.p.acres != null ? `${hover.p.acres} ac` : "—"}{hl.length > 1 ? ` · ${hl.length} listings` : ""}</div>
+            </div>
+          </div>
+        );
+      })()}
 
       {modal === "register" && (
         <RegisterModal
