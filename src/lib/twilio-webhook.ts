@@ -12,6 +12,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyTwilioSignature } from "@/lib/twilio";
 
+/**
+ * The origin the caller actually used. On Netlify `req.nextUrl.origin` is the
+ * deploy's internal name (main--stewardship-crm.netlify.app), not the public
+ * host, so Twilio's signature (computed over the URL it called) and the
+ * deeplinks we text back must be built from the forwarded host instead.
+ */
+export function requestOrigin(req: NextRequest): string {
+  const host = (req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "").split(",")[0].trim();
+  if (!host) return req.nextUrl.origin;
+  const proto = (req.headers.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https")).split(",")[0].trim();
+  return `${proto}://${host}`;
+}
+
 export async function parseTwilioWebhook(
   req: NextRequest
 ): Promise<{ params: Record<string, string>; valid: boolean }> {
@@ -26,7 +39,7 @@ export async function parseTwilioWebhook(
     skipSig ||
     verifyTwilioSignature({
       signature: req.headers.get("x-twilio-signature"),
-      url: `${req.nextUrl.origin}${req.nextUrl.pathname}`,
+      url: `${requestOrigin(req)}${req.nextUrl.pathname}`,
       params,
     });
   return { params, valid };

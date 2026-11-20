@@ -13,6 +13,7 @@
  * localhost. Session-authed; runs on Netlify where the Twilio creds live.
  */
 
+import { requestOrigin } from "@/lib/twilio-webhook";
 import { NextRequest, NextResponse } from "next/server";
 import twilio from "twilio";
 import { getTwilioConfig } from "@/lib/twilio";
@@ -48,7 +49,7 @@ export async function GET(req: NextRequest) {
   if (missing.length > 0) return page("Twilio not configured", `<h1>Twilio isn't fully configured</h1><p class="warn">Missing: ${esc(missing.join(", "))}</p>`);
 
   const apply = req.nextUrl.searchParams.get("apply") === "true";
-  const base = req.nextUrl.searchParams.get("base") ?? req.nextUrl.origin;
+  const base = req.nextUrl.searchParams.get("base") ?? requestOrigin(req);
   if (apply && base.includes("localhost")) return page("Not from localhost", `<h1>Open this on the deployed site</h1><p>Applying from a dev server would point Twilio at URLs it can't reach.</p>`);
   const target = `${base}/api/webhooks/twilio/sms`;
 

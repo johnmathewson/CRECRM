@@ -19,7 +19,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { toE164 } from "@/lib/twilio";
-import { parseTwilioWebhook } from "@/lib/twilio-webhook";
+import { parseTwilioWebhook, requestOrigin } from "@/lib/twilio-webhook";
 import {
   getCallRow,
   updateCallRow,
@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
       );
 
       const who = contact.full_name ?? normalizedFrom;
-      const origin = req.nextUrl.origin;
+      const origin = requestOrigin(req);
       await notifyJohn(
         lead
           ? `${who} called the business line and hung up before it connected — worth a callback. ${origin}/cre-os/inbox/${lead.id}`

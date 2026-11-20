@@ -16,6 +16,7 @@
  * for the HELP auto-reply.
  */
 
+import { requestOrigin } from "@/lib/twilio-webhook";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { verifyTwilioSignature, classifyInboundSms, toE164 } from "@/lib/twilio";
@@ -93,7 +94,7 @@ export async function POST(req: NextRequest) {
   if (!skipSig) {
     const sigValid = verifyTwilioSignature({
       signature: req.headers.get("x-twilio-signature"),
-      url: `${req.nextUrl.origin}${req.nextUrl.pathname}`,
+      url: `${requestOrigin(req)}${req.nextUrl.pathname}`,
       params,
     });
     if (!sigValid) {
@@ -381,7 +382,7 @@ export async function POST(req: NextRequest) {
       const who = contact?.full_name ?? normalizedFrom;
       await notifyJohn(
         lead
-          ? `Text from ${who}: "${snippet(body)}" — reply: ${req.nextUrl.origin}/cre-os/inbox/${lead.id}`
+          ? `Text from ${who}: "${snippet(body)}" — reply: ${requestOrigin(req)}/cre-os/inbox/${lead.id}`
           : `Text from ${who}: "${snippet(body)}"`
       );
     }

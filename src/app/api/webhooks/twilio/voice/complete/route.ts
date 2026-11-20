@@ -14,7 +14,7 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { toE164 } from "@/lib/twilio";
-import { parseTwilioWebhook, twiml, escapeXml } from "@/lib/twilio-webhook";
+import { parseTwilioWebhook, twiml, escapeXml, requestOrigin } from "@/lib/twilio-webhook";
 import {
   getCallRow,
   updateCallRow,
@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
   const dialStatus = params["DialCallStatus"] ?? "";
   const duration = params["DialCallDuration"] ?? null;
   const answered = dialStatus === "completed";
-  const origin = req.nextUrl.origin;
+  const origin = requestOrigin(req);
 
   const voicemailTwiml =
     `<Say voice="Polly.Matthew-Neural">${escapeXml(GREETING)}</Say>` +

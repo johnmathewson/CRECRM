@@ -16,7 +16,7 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { toE164 } from "@/lib/twilio";
-import { parseTwilioWebhook, twiml, escapeXml } from "@/lib/twilio-webhook";
+import { parseTwilioWebhook, twiml, escapeXml, requestOrigin } from "@/lib/twilio-webhook";
 import { ORG_ID, forwardToNumber, resolveCaller } from "@/lib/twilio-voice";
 import { recordTouch, alarm } from "@/lib/cre-os/record-touch";
 
@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
   // consent states) callers are routine here; continuing after the notice
   // is implied consent everywhere. Do not remove the <Say> while the
   // record attribute is on.
-  const origin = req.nextUrl.origin;
+  const origin = requestOrigin(req);
   return twiml(
     `<Say voice="Polly.Matthew-Neural">This call may be recorded for quality purposes.</Say>` +
       `<Dial action="${origin}/api/webhooks/twilio/voice/complete" method="POST" timeout="20" answerOnBridge="true"` +

@@ -13,6 +13,7 @@
  * URLs); override the base with ?base=https://... if ever needed.
  */
 
+import { requestOrigin } from "@/lib/twilio-webhook";
 import { NextRequest, NextResponse } from "next/server";
 import twilio from "twilio";
 import { getTwilioConfig } from "@/lib/twilio";
@@ -60,7 +61,7 @@ export async function GET(req: NextRequest) {
       <p class="muted">These live in Netlify → Site settings → Environment variables. After adding them, redeploy the site.</p>`);
   }
 
-  const base = req.nextUrl.searchParams.get("base") ?? req.nextUrl.origin;
+  const base = req.nextUrl.searchParams.get("base") ?? requestOrigin(req);
   const apply = req.nextUrl.searchParams.get("apply") === "true";
 
   if (apply && base.includes("localhost")) {
