@@ -33,7 +33,8 @@ const MARKET_FILTERS: { id: MarketFilter; label: string; dot: string | null }[] 
   { id: "lease", label: "For lease", dot: LISTING.lease.fill },
   { id: "business", label: "Has business", dot: BUSINESS_FILL },
 ];
-type BizLite = { id: string; pid: string | null; name: string; type_label: string | null; status: string; lon: number | null; lat: number | null };
+type BizLite = { id: string; pid: string | null; name: string; type_label: string | null; status: string; lon: number | null; lat: number | null; sources?: Array<{ source: string; id: string }> };
+const onGoogle = (b: BizLite) => !!b.sources?.some((x) => x.source === "google");
 type Basemap = "light" | "dark";
 type Overlays = { lines: boolean; buildings: boolean; tif: boolean; flood: boolean; historic: boolean };
 /** Lite feature properties as written by fetch-hobart.py. */
@@ -119,6 +120,8 @@ export default function HobartParcelMap() {
     return m;
   }, [businesses]);
   const businessPids = useMemo(() => Array.from(bizByPid.keys()), [bizByPid]);
+  const googlePids = useMemo(() => Array.from(bizByPid.entries()).filter(([, bs]) => bs.some(onGoogle)).map(([pid]) => pid), [bizByPid]);
+  const backupPids = useMemo(() => businessPids.filter((p) => !googlePids.includes(p)), [businessPids, googlePids]);
 
   /** pid → listings, and the kind to paint (sale / lease / both). */
   const byPid = useMemo(() => {
@@ -223,7 +226,8 @@ export default function HobartParcelMap() {
     map.addLayer({ id: "listing-sale", type: "fill", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "fill-color": LISTING.sale.fill, "fill-opacity": 0.6 } }, labelLayer);
     map.addLayer({ id: "listing-lease", type: "fill", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "fill-color": LISTING.lease.fill, "fill-opacity": 0.6 } }, labelLayer);
     map.addLayer({ id: "listing-both", type: "fill", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "fill-color": LISTING.both.fill, "fill-opacity": 0.6 } }, labelLayer);
-    map.addLayer({ id: "business-fill", type: "fill", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "fill-color": BUSINESS_FILL, "fill-opacity": 0.55 } }, labelLayer);
+    map.addLayer({ id: "business-fill-backup", type: "fill", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "fill-color": BUSINESS_FILL, "fill-opacity": 0.22 } }, labelLayer);
+    map.addLayer({ id: "business-fill", type: "fill", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "fill-color": BUSINESS_FILL, "fill-opacity": 0.6 } }, labelLayer);
     map.addLayer({ id: "business-line", type: "line", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "line-color": "#1E1B4B", "line-width": 1.5 } }, labelLayer);
     map.addLayer({ id: "listing-sale-line", type: "line", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "line-color": LISTING.sale.line, "line-width": 2 } }, labelLayer);
     map.addLayer({ id: "listing-lease-line", type: "line", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "line-color": LISTING.lease.line, "line-width": 2 } }, labelLayer);
@@ -354,9 +358,10 @@ export default function HobartParcelMap() {
       map.setPaintProperty("zoning-fill", "fill-opacity", mode === "zoning" ? 0.12 : 0);
       map.setPaintProperty("flu-fill", "fill-opacity", mode === "flu" ? 0.12 : 0);
     }
-    const bf: any = ["in", ["get", "pid"], ["literal", showBusiness ? businessPids : []]];
+    const bf: any = ["in", ["get", "pid"], ["literal", showBusiness ? googlePids : []]];
     map.setFilter("business-fill", bf);
     map.setFilter("business-line", bf);
+    map.setFilter("business-fill-backup", ["in", ["get", "pid"], ["literal", showBusiness ? backupPids : []]] as any);
     // Markers + building colors
     const d = dataRef.current;
     if (d) {
@@ -389,7 +394,7 @@ export default function HobartParcelMap() {
       (map as any).__listedBuildings = now;
     }
     map.setPaintProperty("buildings-3d", "fill-extrusion-color", buildingColor(mode === "height" ? (heightExpr() as any) : BUILDING_NEUTRAL));
-  }, [mode, overlays, threeD, ownerPids, ready, styleEpoch, marketPids, showSale, showLease, onlyMarket, showBusiness, businessPids]);
+  }, [mode, overlays, threeD, ownerPids, ready, styleEpoch, marketPids, showSale, showLease, onlyMarket, showBusiness, googlePids, backupPids]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -530,7 +535,7 @@ export default function HobartParcelMap() {
           <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-100 px-2 py-1.5">
             <span className="shrink-0 pl-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Show</span>
             {MARKET_FILTERS.map((f) => {
-              const n = f.id === "all" ? null : f.id === "sale" ? marketPids.sale.length + marketPids.both.length : f.id === "lease" ? marketPids.lease.length + marketPids.both.length : businessPids.length;
+              const n = f.id === "all" ? null : f.id === "sale" ? marketPids.sale.length + marketPids.both.length : f.id === "lease" ? marketPids.lease.length + marketPids.both.length : googlePids.length || businessPids.length;
               const on = filter === f.id;
               const dot = f.dot;
               return (
@@ -587,7 +592,7 @@ export default function HobartParcelMap() {
                 <button key={f.id} onClick={() => setFilter(f.id)} className={`rounded-[6px] px-2 py-1.5 text-left font-semibold ${filter === f.id ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}>{f.id === "all" ? "All" : f.label}</button>
               ))}
             </div>
-            <div className="mt-1 text-[11px] text-slate-500">Listings from CREXi, LoopNet and our CRM (daily). Businesses from the City of Hobart license list and Overture Maps.</div>
+            <div className="mt-1 text-[11px] text-slate-500">Listings from CREXi, LoopNet and our CRM (daily). Businesses: Google Business Profiles first ({googlePids.length} parcels, solid); City of Hobart licenses and Overture as backup ({backupPids.length} parcels, faint).</div>
             <div className="mt-3 mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">Overlays</div>
             {([["lines", "Parcel lines"], ["buildings", "3D buildings"], ["tif", "TIF districts (dashed)"], ["flood", "FEMA AE flood zone"], ["historic", "Historic district"]] as [keyof Overlays, string][]).map(([k, l]) => (
               <label key={k} className="flex cursor-pointer items-center gap-2 py-1 text-slate-700">
@@ -660,7 +665,13 @@ export default function HobartParcelMap() {
               )}
               <div className="text-[12px] font-semibold">{hover.p.address || "No situs address"}</div>
               <div className="text-[11px] text-slate-300">{hover.p.zoning ?? "—"} · {hover.p.acres != null ? `${hover.p.acres} ac` : "—"}{hl.length > 1 ? ` · ${hl.length} listings` : ""}</div>
-              {(() => { const bz = bizByPid.get(hover.p.pid) ?? []; return bz.length ? <div className="mt-0.5 truncate text-[11px] text-indigo-200">{bz.length === 1 ? bz[0].name : `${bz[0].name} +${bz.length - 1} more`}</div> : null; })()}
+              {(() => {
+                const bz = bizByPid.get(hover.p.pid) ?? [];
+                if (!bz.length) return null;
+                const g = bz.filter(onGoogle);
+                const lead = (g.length ? g : bz)[0];
+                return <div className={`mt-0.5 truncate text-[11px] ${g.length ? "text-indigo-200" : "text-slate-400"}`}>{lead.name}{bz.length > 1 ? ` +${bz.length - 1} more` : ""}{g.length ? "" : " · backup source only"}</div>;
+              })()}
             </div>
           </div>
         );

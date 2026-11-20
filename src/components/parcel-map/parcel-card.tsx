@@ -146,37 +146,55 @@ export function ParcelCard({
                 })}
               </div>
             )}
-            {p.businesses && p.businesses.length > 0 && (
-              <div className="mb-3 rounded-[10px] border border-slate-200 bg-white">
-                <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
-                  <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Businesses here</div>
-                  <div className="text-[11px] text-slate-400">{p.businesses.filter((b) => b.status !== "closed").length} open{p.businesses.some((b) => b.status === "closed") ? ` · ${p.businesses.filter((b) => b.status === "closed").length} closed` : ""}</div>
-                </div>
-                <ul className="divide-y divide-slate-100">
-                  {p.businesses.map((b) => {
-                    const src = b.sources.map((x) => x.source).filter((v, i, a) => a.indexOf(v) === i);
-                    return (
-                      <li key={b.id} className={`px-3 py-2 ${b.status === "closed" ? "opacity-60" : ""}`}>
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <div className="truncate text-[14px] font-semibold text-slate-900">{b.name}{b.status === "closed" && <span className="ml-1.5 rounded-[4px] bg-red-100 px-1 py-px text-[10px] font-bold uppercase text-red-700">Closed</span>}</div>
-                            <div className="truncate text-[12px] text-slate-600">{[b.type_label, b.description].filter(Boolean).join(" · ") || "Type not yet classified"}</div>
-                            <div className="mt-0.5 flex flex-wrap gap-x-2 text-[11px] text-slate-500">
-                              {b.phone && <a href={`tel:${b.phone}`} className="hover:text-slate-800">{b.phone}</a>}
-                              {b.website && <a href={b.website} target="_blank" rel="noreferrer" className="truncate hover:text-slate-800">{b.website.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}</a>}
-                            </div>
-                          </div>
-                          <div className="shrink-0 text-right text-[10px] text-slate-400">
-                            {src.includes("hobart_city") && <div className="rounded-[4px] bg-slate-100 px-1 py-px font-semibold text-slate-600">City license</div>}
-                            {src.includes("overture") && <div className="mt-0.5">Overture</div>}
-                          </div>
+            {p.businesses && p.businesses.length > 0 && (() => {
+              const isGoogle = (b: Business) => b.sources.some((x) => x.source === "google");
+              const primary = p.businesses.filter((b) => isGoogle(b) && b.status !== "closed");
+              const closedGoogle = p.businesses.filter((b) => isGoogle(b) && b.status === "closed");
+              const backup = p.businesses.filter((b) => !isGoogle(b));
+              const Row = ({ b, dim }: { b: Business; dim?: boolean }) => {
+                const src = b.sources.map((x) => x.source).filter((v, i, a) => a.indexOf(v) === i);
+                return (
+                  <li className={`px-3 py-2 ${dim || b.status === "closed" ? "opacity-55" : ""}`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="truncate text-[14px] font-semibold text-slate-900">
+                          {b.name}
+                          {b.status === "closed" && <span className="ml-1.5 rounded-[4px] bg-red-100 px-1 py-px text-[10px] font-bold uppercase text-red-700">Closed</span>}
                         </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            )}
+                        <div className="truncate text-[12px] text-slate-600">{[b.type_label, b.description].filter(Boolean).join(" · ") || "Type not yet classified"}</div>
+                        <div className="mt-0.5 flex flex-wrap gap-x-2 text-[11px] text-slate-500">
+                          {b.phone && <a href={`tel:${b.phone}`} className="hover:text-slate-800">{b.phone}</a>}
+                          {b.website && <a href={b.website} target="_blank" rel="noreferrer" className="truncate hover:text-slate-800">{b.website.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}</a>}
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-right text-[10px] text-slate-400">
+                        {src.includes("google") && <div className="rounded-[4px] bg-blue-600 px-1.5 py-px font-semibold text-white">Google</div>}
+                        {src.includes("hobart_city") && <div className="mt-0.5 rounded-[4px] bg-slate-100 px-1 py-px font-semibold text-slate-600">City license</div>}
+                        {src.includes("overture") && <div className="mt-0.5">Overture</div>}
+                      </div>
+                    </div>
+                  </li>
+                );
+              };
+              return (
+                <div className="mb-3 rounded-[10px] border border-slate-200 bg-white">
+                  <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Businesses here</div>
+                    <div className="text-[11px] text-slate-400">
+                      {primary.length > 0 ? `${primary.length} on Google` : "none on Google"}{backup.length ? ` · ${backup.length} other` : ""}{closedGoogle.length ? ` · ${closedGoogle.length} closed` : ""}
+                    </div>
+                  </div>
+                  {primary.length > 0 && <ul className="divide-y divide-slate-100">{primary.map((b) => <Row key={b.id} b={b} />)}</ul>}
+                  {closedGoogle.length > 0 && <ul className="divide-y divide-slate-100 border-t border-slate-100">{closedGoogle.map((b) => <Row key={b.id} b={b} dim />)}</ul>}
+                  {backup.length > 0 && (
+                    <div className="border-t border-dashed border-slate-200 bg-slate-50/70">
+                      <div className="px-3 pt-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">Backup sources · not on Google</div>
+                      <ul className="divide-y divide-slate-100">{backup.map((b) => <Row key={b.id} b={b} dim />)}</ul>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             {!p.businesses?.length && !loading && /^(4|3|6)/.test(p.class_code ?? "") && listings.length === 0 && (
               <div className="mb-3 rounded-[10px] border border-dashed border-amber-300 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
                 <span className="font-semibold">No business or listing found here.</span> Commercial-class parcel with no known occupant: a candidate for vacancy or under-use. Verify before acting.
