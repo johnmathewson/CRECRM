@@ -20,6 +20,13 @@ export default async function handler() {
     });
     const text = await res.text();
     console.log(`[map-listings-sync] status=${res.status} body=${text.slice(0, 400)}`);
+    // Classify any businesses still missing a type/description (idempotent).
+    try {
+      const e = await fetch(`${baseUrl}/api/map/businesses/enrich?limit=100`, { method: "POST", headers: { "x-cron-secret": secret } });
+      console.log(`[map-listings-sync] enrich status=${e.status} body=${(await e.text()).slice(0, 200)}`);
+    } catch (err) {
+      console.warn("[map-listings-sync] enrich failed", err);
+    }
     return new Response(text, { status: res.status });
   } catch (err) {
     console.error("[map-listings-sync] fetch error:", err);

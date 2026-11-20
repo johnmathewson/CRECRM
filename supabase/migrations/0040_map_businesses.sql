@@ -1,0 +1,8 @@
+-- 0040: map_businesses (occupancy layer) — applied via Supabase MCP as
+-- migrations `map_businesses` and `map_businesses_for_parcel`. Table: one row per
+-- business (source_key unique: overture:<id> | hobart:<globalid>), pid FK to
+-- map_parcels, raw Overture taxonomy + human type_label + AI description,
+-- status open|closed|unknown, sources jsonb. RLS, no policies. RPCs:
+-- map_businesses_upsert(p_key, p_rows), map_businesses_active(p_key, p_city),
+-- map_businesses_for_parcel(p_key, p_pid), map_business_enrich(p_key, p_id, p_type, p_desc).
+-- Full bodies live in the Supabase migration history.

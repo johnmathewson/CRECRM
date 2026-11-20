@@ -6,7 +6,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { ParcelCard, type ParcelProps, type Listing } from "./parcel-card";
 import { RegisterModal, AskModal } from "./map-forms";
 import {
-  ZONING, ZONING_FALLBACK, LAND_USE, HEIGHT_LEGEND, BUILDING_NEUTRAL, PARCEL_LINE, SELECTION, OWNER_MATCH, LISTING,
+  ZONING, ZONING_FALLBACK, LAND_USE, HEIGHT_LEGEND, BUILDING_NEUTRAL, PARCEL_LINE, SELECTION, OWNER_MATCH, LISTING, BUSINESS_FILL,
   matchExpr, heightExpr,
 } from "./map-theme";
 
@@ -26,12 +26,14 @@ const STYLES = { light: "https://tiles.openfreemap.org/styles/positron", dark: "
 type Mode = "zoning" | "flu" | "height" | "none";
 /** Top-level filters shown as chips under the search box. Add future filters
  *  (asset type, price band, lot size, zoning…) as more entries. */
-type MarketFilter = "all" | "sale" | "lease";
-const MARKET_FILTERS: { id: MarketFilter; label: string; kinds: Array<"sale" | "lease" | "both"> }[] = [
-  { id: "all", label: "All parcels", kinds: ["sale", "lease", "both"] },
-  { id: "sale", label: "For sale", kinds: ["sale", "both"] },
-  { id: "lease", label: "For lease", kinds: ["lease", "both"] },
+type MarketFilter = "all" | "sale" | "lease" | "business";
+const MARKET_FILTERS: { id: MarketFilter; label: string; dot: string | null }[] = [
+  { id: "all", label: "All", dot: null },
+  { id: "sale", label: "For sale", dot: LISTING.sale.fill },
+  { id: "lease", label: "For lease", dot: LISTING.lease.fill },
+  { id: "business", label: "Has business", dot: BUSINESS_FILL },
 ];
+type BizLite = { id: string; pid: string | null; name: string; type_label: string | null; status: string; lon: number | null; lat: number | null };
 type Basemap = "light" | "dark";
 type Overlays = { lines: boolean; buildings: boolean; tif: boolean; flood: boolean; historic: boolean };
 /** Lite feature properties as written by fetch-hobart.py. */
@@ -76,10 +78,12 @@ export default function HobartParcelMap() {
   const [serverHits, setServerHits] = useState<ParcelProps[]>([]);
   const [meta, setMeta] = useState<Meta | null>(null);
   const [listings, setListings] = useState<Listing[]>([]);
+  const [businesses, setBusinesses] = useState<BizLite[]>([]);
   const [filter, setFilter] = useState<MarketFilter>("all");
   // Derived from the chip: which overlay kinds paint, and whether the rest fades.
   const showSale = filter === "all" || filter === "sale";
   const showLease = filter === "all" || filter === "lease";
+  const showBusiness = filter === "business";
   const onlyMarket = filter !== "all";
   const setOnlyMarket = (v: boolean | ((b: boolean) => boolean)) => {
     const next = typeof v === "function" ? v(onlyMarket) : v;
@@ -105,7 +109,16 @@ export default function HobartParcelMap() {
 
   useEffect(() => {
     fetch("/api/map/listings?city=Hobart").then((r) => r.json()).then((d) => setListings(d.listings ?? [])).catch(() => {});
+    fetch("/api/map/businesses?city=Hobart").then((r) => r.json()).then((d) => setBusinesses(d.businesses ?? [])).catch(() => {});
   }, []);
+
+  /** pid → open businesses. */
+  const bizByPid = useMemo(() => {
+    const m = new Map<string, BizLite[]>();
+    for (const b of businesses) if (b.pid && b.status !== "closed") m.set(b.pid, [...(m.get(b.pid) ?? []), b]);
+    return m;
+  }, [businesses]);
+  const businessPids = useMemo(() => Array.from(bizByPid.keys()), [bizByPid]);
 
   /** pid → listings, and the kind to paint (sale / lease / both). */
   const byPid = useMemo(() => {
@@ -139,7 +152,7 @@ export default function HobartParcelMap() {
       const out = await r.json();
       if (n !== detailReq.current) return;
       if (r.ok && out.parcel) {
-        setSelected((cur) => (cur && cur.pid === pid ? { ...cur, ...out.parcel, sales: out.parcel.sales ?? [], permits: out.parcel.permits ?? [] } : cur));
+        setSelected((cur) => (cur && cur.pid === pid ? { ...cur, ...out.parcel, sales: out.parcel.sales ?? [], permits: out.parcel.permits ?? [], businesses: out.businesses ?? [] } : cur));
         if (out.gated && out.parcel.owner) {
           const o = await fetch(`/api/map/owner?name=${encodeURIComponent(out.parcel.owner)}`).then((x) => x.json()).catch(() => null);
           if (n === detailReq.current) setOwnerCount(o?.parcels?.length ?? null);
@@ -210,6 +223,8 @@ export default function HobartParcelMap() {
     map.addLayer({ id: "listing-sale", type: "fill", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "fill-color": LISTING.sale.fill, "fill-opacity": 0.6 } }, labelLayer);
     map.addLayer({ id: "listing-lease", type: "fill", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "fill-color": LISTING.lease.fill, "fill-opacity": 0.6 } }, labelLayer);
     map.addLayer({ id: "listing-both", type: "fill", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "fill-color": LISTING.both.fill, "fill-opacity": 0.6 } }, labelLayer);
+    map.addLayer({ id: "business-fill", type: "fill", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "fill-color": BUSINESS_FILL, "fill-opacity": 0.55 } }, labelLayer);
+    map.addLayer({ id: "business-line", type: "line", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "line-color": "#1E1B4B", "line-width": 1.5 } }, labelLayer);
     map.addLayer({ id: "listing-sale-line", type: "line", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "line-color": LISTING.sale.line, "line-width": 2 } }, labelLayer);
     map.addLayer({ id: "listing-lease-line", type: "line", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "line-color": LISTING.lease.line, "line-width": 2 } }, labelLayer);
     map.addLayer({ id: "listing-both-line", type: "line", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "line-color": LISTING.both.line, "line-width": 2, "line-dasharray": [2, 1] } }, labelLayer);
@@ -339,6 +354,9 @@ export default function HobartParcelMap() {
       map.setPaintProperty("zoning-fill", "fill-opacity", mode === "zoning" ? 0.12 : 0);
       map.setPaintProperty("flu-fill", "fill-opacity", mode === "flu" ? 0.12 : 0);
     }
+    const bf: any = ["in", ["get", "pid"], ["literal", showBusiness ? businessPids : []]];
+    map.setFilter("business-fill", bf);
+    map.setFilter("business-line", bf);
     // Markers + building colors
     const d = dataRef.current;
     if (d) {
@@ -371,7 +389,7 @@ export default function HobartParcelMap() {
       (map as any).__listedBuildings = now;
     }
     map.setPaintProperty("buildings-3d", "fill-extrusion-color", buildingColor(mode === "height" ? (heightExpr() as any) : BUILDING_NEUTRAL));
-  }, [mode, overlays, threeD, ownerPids, ready, styleEpoch, marketPids, showSale, showLease, onlyMarket]);
+  }, [mode, overlays, threeD, ownerPids, ready, styleEpoch, marketPids, showSale, showLease, onlyMarket, showBusiness, businessPids]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -509,12 +527,12 @@ export default function HobartParcelMap() {
             )}
           </div>
           {/* Filter chips — one row, scrolls sideways on phones */}
-          <div className="flex items-center gap-1.5 overflow-x-auto border-t border-slate-100 px-2 py-1.5">
+          <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-100 px-2 py-1.5">
             <span className="shrink-0 pl-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Show</span>
             {MARKET_FILTERS.map((f) => {
-              const n = f.id === "all" ? null : f.id === "sale" ? marketPids.sale.length + marketPids.both.length : marketPids.lease.length + marketPids.both.length;
+              const n = f.id === "all" ? null : f.id === "sale" ? marketPids.sale.length + marketPids.both.length : f.id === "lease" ? marketPids.lease.length + marketPids.both.length : businessPids.length;
               const on = filter === f.id;
-              const dot = f.id === "sale" ? LISTING.sale.fill : f.id === "lease" ? LISTING.lease.fill : null;
+              const dot = f.dot;
               return (
                 <button
                   key={f.id}
@@ -564,12 +582,12 @@ export default function HobartParcelMap() {
               </ul>
             )}
             <div className="mt-3 mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">On market</div>
-            <div className="grid grid-cols-3 gap-1">
+            <div className="grid grid-cols-2 gap-1">
               {MARKET_FILTERS.map((f) => (
                 <button key={f.id} onClick={() => setFilter(f.id)} className={`rounded-[6px] px-2 py-1.5 text-left font-semibold ${filter === f.id ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}>{f.id === "all" ? "All" : f.label}</button>
               ))}
             </div>
-            <div className="mt-1 text-[11px] text-slate-500">Listings come from CREXi, LoopNet and our own CRM, refreshed daily.</div>
+            <div className="mt-1 text-[11px] text-slate-500">Listings from CREXi, LoopNet and our CRM (daily). Businesses from the City of Hobart license list and Overture Maps.</div>
             <div className="mt-3 mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">Overlays</div>
             {([["lines", "Parcel lines"], ["buildings", "3D buildings"], ["tif", "TIF districts (dashed)"], ["flood", "FEMA AE flood zone"], ["historic", "Historic district"]] as [keyof Overlays, string][]).map(([k, l]) => (
               <label key={k} className="flex cursor-pointer items-center gap-2 py-1 text-slate-700">
@@ -642,6 +660,7 @@ export default function HobartParcelMap() {
               )}
               <div className="text-[12px] font-semibold">{hover.p.address || "No situs address"}</div>
               <div className="text-[11px] text-slate-300">{hover.p.zoning ?? "—"} · {hover.p.acres != null ? `${hover.p.acres} ac` : "—"}{hl.length > 1 ? ` · ${hl.length} listings` : ""}</div>
+              {(() => { const bz = bizByPid.get(hover.p.pid) ?? []; return bz.length ? <div className="mt-0.5 truncate text-[11px] text-indigo-200">{bz.length === 1 ? bz[0].name : `${bz[0].name} +${bz.length - 1} more`}</div> : null; })()}
             </div>
           </div>
         );

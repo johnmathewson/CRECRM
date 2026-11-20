@@ -50,3 +50,16 @@ export async function parcelsByOwner(owner: string) {
   if (error) throw new Error(error.message);
   return (data ?? []) as Array<{ pid: string; address: string | null; acres: number | null; av_total: number | null; lon: number; lat: number }>;
 }
+
+export interface Business {
+  id: string; name: string; brand: string | null; category: string | null; type_label: string | null; description: string | null;
+  address: string | null; phone: string | null; website: string | null; status: "open" | "closed" | "unknown"; confidence: number | null;
+  sources: Array<{ source: string; id: string }>; last_seen_at: string;
+}
+
+/** Businesses matched to one parcel (public information). */
+export async function businessesForParcel(pid: string): Promise<Business[]> {
+  const { data, error } = await sb().rpc("map_businesses_for_parcel", { p_key: key(), p_pid: pid });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as Business[];
+}

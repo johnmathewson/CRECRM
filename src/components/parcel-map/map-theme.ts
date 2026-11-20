@@ -95,3 +95,7 @@ export const LISTING = {
   lease: { fill: "#0891B2", line: "#164E63", label: "For lease" },
   both: { fill: "#16A34A", line: "#164E63", label: "Sale or lease" },
 };
+
+/** Occupancy overlay (parcels with at least one operating business). Indigo:
+ *  clear of the zoning families, the listing green/cyan and the owner amber. */
+export const BUSINESS_FILL = "#4F46E5";
