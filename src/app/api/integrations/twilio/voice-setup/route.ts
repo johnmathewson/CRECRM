@@ -66,7 +66,7 @@ export async function GET(req: NextRequest) {
   if (apply && base.includes("localhost")) {
     return page("Wrong environment", `<h1>Run this from the live site</h1>
       <p>This page was opened from a local dev server, so activating here would point the phone number at URLs Twilio can't reach.</p>
-      <p>Open it on the deployed site instead: <span class="num">stewardship-crm.netlify.app</span></p>`);
+      <p>Open it on the deployed site instead: <span class="num">crm.stewardshipcre.com</span></p>`);
   }
 
   try {

@@ -12,7 +12,7 @@ Pulls weekly performance metrics from CREXi and LoopNet into the Stewardship CRM
 
 ## Configure (one-time, ~1 minute)
 
-1. In your CRM at `https://stewardship-crm.netlify.app/settings/integrations`, scroll to **Stewardship Chrome Extension** card → **Generate new API key**
+1. In your CRM at `https://crm.stewardshipcre.com/settings/integrations`, scroll to **Stewardship Chrome Extension** card → **Generate new API key**
 2. Copy the API key (it's only shown once)
 3. Right-click the extension icon → **Options** (or click "Settings" in the popup)
 4. Paste the API key, leave the CRM URL at the default

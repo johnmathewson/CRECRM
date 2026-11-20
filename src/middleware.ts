@@ -63,7 +63,7 @@ export async function middleware(request: NextRequest) {
       return NextResponse.rewrite(url);
     }
     if (!isMapRoute && !p.startsWith("/login") && !p.startsWith("/auth")) {
-      return NextResponse.redirect(new URL(p + request.nextUrl.search, process.env.CRM_ORIGIN ?? "https://stewardship-crm.netlify.app"));
+      return NextResponse.redirect(new URL(p + request.nextUrl.search, process.env.CRM_ORIGIN ?? "https://crm.stewardshipcre.com"));
     }
   }
 

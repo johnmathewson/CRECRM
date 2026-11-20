@@ -88,7 +88,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 async function pollAndDispatch() {
   const cfg = await chrome.storage.local.get(["crmUrl", "apiKey"]);
   if (!cfg.apiKey) return;
-  const url = (cfg.crmUrl || "https://stewardship-crm.netlify.app").replace(/\/+$/, "");
+  const url = (cfg.crmUrl || "https://crm.stewardshipcre.com").replace(/\/+$/, "");
 
   let pending;
   try {
@@ -149,7 +149,7 @@ async function startLeadsCycle() {
   }
 
   // Stale or empty — start fresh
-  const baseUrl = (cfg.crmUrl || "https://stewardship-crm.netlify.app").replace(/\/+$/, "");
+  const baseUrl = (cfg.crmUrl || "https://crm.stewardshipcre.com").replace(/\/+$/, "");
   let properties = [];
   try {
     const res = await fetch(`${baseUrl}/api/extension/properties`, {

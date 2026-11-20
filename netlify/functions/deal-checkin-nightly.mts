@@ -22,7 +22,7 @@ export default async function handler() {
     return new Response("not 8 PM in Chicago", { status: 200 });
   }
 
-  const baseUrl = process.env.URL || "https://stewardship-crm.netlify.app";
+  const baseUrl = process.env.URL || "https://crm.stewardshipcre.com";
   const bgUrl = `${baseUrl}/.netlify/functions/deal-checkin-run-background`;
   console.log(`[deal-checkin-nightly] ${now.toISOString()} kicking ${bgUrl}`);
   try {

@@ -367,7 +367,7 @@ function TwilioSection() {
         <p className="mt-3 font-body text-[11px] text-cream-subtle leading-relaxed">
           Configure the inbound webhook in Twilio: Messaging Services →
           your service → Integration → "When a message comes in" →
-          <code className="font-mono text-coral-300 mx-1">https://stewardship-crm.netlify.app/api/webhooks/twilio/sms</code>
+          <code className="font-mono text-coral-300 mx-1">https://crm.stewardshipcre.com/api/webhooks/twilio/sms</code>
         </p>
       </details>
     </Panel>

@@ -225,7 +225,7 @@
 
   async function syncToCrm(payload) {
     const cfg = await chrome.storage.local.get(["crmUrl", "apiKey"]);
-    const url = (cfg.crmUrl || "https://stewardship-crm.netlify.app").replace(/\/+$/, "");
+    const url = (cfg.crmUrl || "https://crm.stewardshipcre.com").replace(/\/+$/, "");
     if (!cfg.apiKey) return { ok: false, error: "API key not set" };
 
     const res = await fetch(`${url}/api/extension/sync`, {

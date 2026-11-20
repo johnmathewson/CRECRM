@@ -932,7 +932,7 @@
     if (!cfg.apiKey) {
       return { ok: false, error: "API key not set", leads: enriched };
     }
-    const url = (cfg.crmUrl || "https://stewardship-crm.netlify.app").replace(/\/+$/, "");
+    const url = (cfg.crmUrl || "https://crm.stewardshipcre.com").replace(/\/+$/, "");
 
     let result = null;
     try {

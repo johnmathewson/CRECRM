@@ -157,7 +157,7 @@
   // ── Capture + post ───────────────────────────────────────────────────────
   async function capture(opts = {}) {
     const cfg = await chrome.storage.local.get(["crmUrl", "apiKey", "listingsCity"]);
-    const crm = (cfg.crmUrl || "https://stewardship-crm.netlify.app").replace(/\/+$/, "");
+    const crm = (cfg.crmUrl || "https://crm.stewardshipcre.com").replace(/\/+$/, "");
     const city = opts.city || cfg.listingsCity || "Hobart";
     if (!cfg.apiKey) return { ok: false, error: "No API key configured" };
 

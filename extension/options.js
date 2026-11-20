@@ -1,4 +1,4 @@
-const DEFAULT_CRM = "https://stewardship-crm.netlify.app";
+const DEFAULT_CRM = "https://crm.stewardshipcre.com";
 
 const els = {
   crm: document.getElementById("crm"),

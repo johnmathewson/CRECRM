@@ -463,7 +463,7 @@ export async function runDealCheckin(opts: RunDealCheckinOptions = {}): Promise<
 
   let notified = false;
   if (!opts.skipNotify && picked.length > 0) {
-    const base = process.env.URL || "https://stewardship-crm.netlify.app";
+    const base = process.env.URL || "https://crm.stewardshipcre.com";
     const names = picked
       .slice(0, 3)
       .map((p) => clip(p.ctx.deal.property?.name || p.ctx.deal.deal_name, 28))

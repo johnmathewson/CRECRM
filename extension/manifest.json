@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Stewardship CRE \u2014 Listing Sync",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Syncs listing performance metrics from CREXi/LoopNet into the Stewardship CRM and captures active Hobart listings daily for the parcel map. Lead scraping was retired 2026-10-13.",
   "permissions": [
     "storage",
@@ -15,6 +15,7 @@
     "https://*.loopnet.com/*",
     "https://listingmanager.costar.com/*",
     "https://stewardship-crm.netlify.app/*",
+    "https://crm.stewardshipcre.com/*",
     "http://localhost:3000/*"
   ],
   "background": {

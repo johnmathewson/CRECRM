@@ -47,7 +47,7 @@ export default async function handler() {
     console.error(`[poll-gmail] heartbeat write failed: ${heartbeatErr}`);
   }
 
-  const baseUrl = process.env.URL || "https://stewardship-crm.netlify.app";
+  const baseUrl = process.env.URL || "https://crm.stewardshipcre.com";
   const secret = process.env.CRON_SECRET;
 
   if (!secret) {

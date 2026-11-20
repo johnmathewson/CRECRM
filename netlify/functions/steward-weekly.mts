@@ -14,7 +14,7 @@ import type { Config } from "@netlify/functions";
 
 export default async function handler() {
   const startedAt = new Date().toISOString();
-  const baseUrl = process.env.URL || "https://stewardship-crm.netlify.app";
+  const baseUrl = process.env.URL || "https://crm.stewardshipcre.com";
   const bgUrl = `${baseUrl}/.netlify/functions/steward-run-background`;
 
   console.log(`[steward-weekly] ${startedAt} kicking ${bgUrl}`);

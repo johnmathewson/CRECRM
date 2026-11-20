@@ -22,7 +22,7 @@ export default async function handler() {
   const startedAt = new Date().toISOString();
   console.log(`[draft-crexi-leads] start ${startedAt}`);
 
-  const baseUrl = process.env.URL || "https://stewardship-crm.netlify.app";
+  const baseUrl = process.env.URL || "https://crm.stewardshipcre.com";
   const secret = process.env.CRON_SECRET;
 
   if (!secret) {

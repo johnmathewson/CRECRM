@@ -10,7 +10,7 @@
 import type { Config } from "@netlify/functions";
 
 export default async function handler() {
-  const baseUrl = process.env.URL || "https://stewardship-crm.netlify.app";
+  const baseUrl = process.env.URL || "https://crm.stewardshipcre.com";
   const secret = process.env.CRON_SECRET;
   if (!secret) return new Response("CRON_SECRET not configured", { status: 500 });
   try {
