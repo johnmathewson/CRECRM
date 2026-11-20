@@ -557,7 +557,6 @@ export default function HobartParcelMap() {
   }, [mode]);
 
   const btn = "h-9 px-3 text-[13px] font-semibold text-slate-700 hover:bg-slate-100 active:bg-slate-200";
-  const btnOn = "h-9 px-3 text-[13px] font-semibold bg-blue-600 text-white";
 
   return (
     <div className="relative h-full w-full select-none bg-slate-100 text-slate-900" style={{ fontFamily: "var(--font-archivo), system-ui, sans-serif" }}>
@@ -647,26 +646,17 @@ export default function HobartParcelMap() {
                 </button>
               );
             })}
+            <button
+              onClick={() => setLayersOpen((v) => !v)}
+              aria-expanded={layersOpen}
+              className={`ml-auto flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[12px] font-semibold ring-1 transition ${layersOpen ? "bg-slate-900 text-white ring-slate-900" : "bg-white text-slate-700 ring-slate-200 hover:bg-slate-50"}`}
+              title="Legend, other colorings and overlays"
+            >
+              {layersOpen ? "Less" : "Layers"} <span aria-hidden className="text-[10px]">{layersOpen ? "▴" : "▾"}</span>
+            </button>
           </div>
-        </div>
-      </div>
-
-      {/* Top-right: view controls */}
-      <div className="absolute right-3 z-20 flex flex-col items-end gap-2 md:right-4 md:top-4" style={isMobile ? { top: headerH + 20 } : undefined}>
-        <div className="flex overflow-hidden rounded-[10px] bg-white shadow-lg ring-1 ring-slate-900/5">
-          <button onClick={() => setLayersOpen((v) => !v)} className={layersOpen ? btnOn : btn}>Layers</button>
-          <span className="w-px bg-slate-200" />
-          <button onClick={() => setThreeD((v) => !v)} className={btn} title="Toggle 3D">{threeD ? "3D" : "2D"}</button>
-          <span className="w-px bg-slate-200" />
-          <button onClick={() => setBasemap((b) => (b === "light" ? "dark" : "light"))} className={btn} title="Basemap">{basemap === "light" ? "Dark" : "Light"}</button>
-          <span className="w-px bg-slate-200" />
-          <button onClick={resetView} className={btn} title="Back to downtown">Downtown</button>
-          <span className="w-px bg-slate-200" />
-          <button onClick={fitCity} className={btn} title="Whole city">City</button>
-        </div>
-
         {layersOpen && (
-          <div className="max-h-[calc(100dvh-220px)] w-[260px] overflow-y-auto rounded-[10px] bg-white p-3 text-[13px] shadow-xl ring-1 ring-slate-900/5">
+          <div className="max-h-[calc(100dvh-260px)] overflow-y-auto border-t border-slate-100 px-3 py-3 text-[13px]">
             {/* Legend for whatever the chip row has turned on. Fills and
                 highlights are chosen in the Show row under the search box;
                 this panel reads them back and holds the rarer controls. */}
@@ -723,6 +713,21 @@ export default function HobartParcelMap() {
             {meta && <div className="mt-2 border-t border-slate-200 pt-2 text-[10px] text-slate-400">Records pulled {new Date(meta.pulled_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</div>}
           </div>
         )}
+        </div>
+      </div>
+
+      {/* Top-right: view controls */}
+      <div className="absolute right-3 z-20 flex flex-col items-end gap-2 md:right-4 md:top-4" style={isMobile ? { top: headerH + 20 } : undefined}>
+        <div className="flex overflow-hidden rounded-[10px] bg-white shadow-lg ring-1 ring-slate-900/5">
+          <button onClick={() => setThreeD((v) => !v)} className={btn} title="Toggle 3D">{threeD ? "3D" : "2D"}</button>
+          <span className="w-px bg-slate-200" />
+          <button onClick={() => setBasemap((b) => (b === "light" ? "dark" : "light"))} className={btn} title="Basemap">{basemap === "light" ? "Dark" : "Light"}</button>
+          <span className="w-px bg-slate-200" />
+          <button onClick={resetView} className={btn} title="Back to downtown">Downtown</button>
+          <span className="w-px bg-slate-200" />
+          <button onClick={fitCity} className={btn} title="Whole city">City</button>
+        </div>
+
       </div>
 
       {!layersOpen && legend.length > 0 && !isMobile && (
