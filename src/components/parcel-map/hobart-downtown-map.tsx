@@ -5,6 +5,7 @@ import maplibregl, { type Map as MLMap, type MapGeoJSONFeature } from "maplibre-
 import "maplibre-gl/dist/maplibre-gl.css";
 import { ParcelCard, type ParcelProps, type Listing } from "./parcel-card";
 import { RegisterModal, AskModal } from "./map-forms";
+import { PlanSitePanel, type PlanSite, type SiteParcel } from "./plan-site-panel";
 import {
   ZONING, ZONING_FALLBACK, LAND_USE, HEIGHT_LEGEND, BUILDING_NEUTRAL, PARCEL_LINE, SELECTION, OWNER_MATCH, LISTING, BUSINESS_FILL, PLAN_2040, PLAN_ORDER, PLAN_SITE,
   matchExpr, heightExpr,
@@ -36,7 +37,7 @@ const MARKET_FILTERS: { id: MarketFilter; label: string; dot: string | null }[] 
 type BizLite = { id: string; pid: string | null; name: string; type_label: string | null; status: string; lon: number | null; lat: number | null; sources?: Array<{ source: string; id: string }> };
 const onGoogle = (b: BizLite) => !!b.sources?.some((x) => x.source === "google");
 type Basemap = "light" | "dark";
-type Overlays = { lines: boolean; buildings: boolean; tif: boolean; flood: boolean; historic: boolean; plan_sites: boolean; plan_roads: boolean };
+type Overlays = { lines: boolean; buildings: boolean; tif: boolean; flood: boolean; historic: boolean; plan_sites: boolean; plan_roads: boolean; plan_concepts: boolean };
 /** Lite feature properties as written by fetch-hobart.py. */
 type Lite = { pid: string; a: string | null; z: string | null; f: string | null; f2?: string | null; ac: number | null; cc: string | null; t: 0 | 1; fl: string | null; h: 0 | 1 };
 type FC = { type: "FeatureCollection"; features: Array<{ type: "Feature"; geometry: any; properties: Lite }> };
@@ -64,13 +65,14 @@ export default function HobartParcelMap() {
   const [mode, setMode] = useState<Mode>("zoning");
   const [basemap, setBasemap] = useState<Basemap>("light");
   const [threeD, setThreeD] = useState(true);
-  const [overlays, setOverlays] = useState<Overlays>({ lines: true, buildings: true, tif: false, flood: false, historic: false, plan_sites: false, plan_roads: false });
+  const [overlays, setOverlays] = useState<Overlays>({ lines: true, buildings: true, tif: false, flood: false, historic: false, plan_sites: false, plan_roads: false, plan_concepts: true });
   const [registered, setRegistered] = useState(false);
   const [sessionName, setSessionName] = useState<string | null>(null);
   const [admin, setAdmin] = useState(false);
   const [modal, setModal] = useState<"register" | "ask" | null>(null);
   const [layersOpen, setLayersOpen] = useState(false);
   const [selected, setSelected] = useState<ParcelProps | null>(null);
+  const [site, setSite] = useState<PlanSite | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [hover, setHover] = useState<{ x: number; y: number; p: ParcelProps } | null>(null);
   const [ownerPids, setOwnerPids] = useState<{ owner: string; pids: string[] } | null>(null);
@@ -173,6 +175,7 @@ export default function HobartParcelMap() {
     selectedIdRef.current = p?.pid ?? null;
     if (p) map.setFeatureState({ source: "parcels", id: p.pid }, { selected: true });
     setSelected(p);
+    if (p) setSite(null);
     setOwnerPids(null);
     setOwnerCount(null);
     const url = new URL(window.location.href);
@@ -188,6 +191,30 @@ export default function HobartParcelMap() {
   }, [isMobile, loadDetail]);
   const selectRef = useRef(select);
   useEffect(() => { selectRef.current = select; }, [select]);
+
+  /** Opportunity site → panel (closes any parcel card). Props come from the
+   *  loaded GeoJSON, not the rendered feature, so nested objects stay objects. */
+  const openSite = useCallback((num: number) => {
+    const f = (dataRef.current?.plan?.features ?? []).find((x: any) => x.properties.kind === "site" && x.properties.num === num);
+    if (!f) return;
+    selectRef.current(null, false);
+    setSite({ ...(f.properties as PlanSite) });
+  }, []);
+  const openSiteRef = useRef(openSite);
+  useEffect(() => { openSiteRef.current = openSite; }, [openSite]);
+  const siteGeom = useMemo(() => site ? (dataRef.current?.plan?.features ?? []).find((x: any) => x.properties.kind === "site" && x.properties.num === site.num)?.geometry ?? null : null, [site]);
+  /** Parcels whose centroid falls inside the open site (what is on the ground today). */
+  const siteParcels = useMemo<SiteParcel[]>(() => {
+    const d = dataRef.current; if (!d || !siteGeom) return [];
+    const bb = bboxOf(siteGeom); const out: SiteParcel[] = [];
+    for (const f of d.parcels.features) {
+      const c = centroidOf(f.geometry);
+      if (c[0] < bb[0] || c[0] > bb[2] || c[1] < bb[1] || c[1] > bb[3] || !pointInGeom(c, siteGeom)) continue;
+      const l = f.properties;
+      out.push({ pid: l.pid, address: l.a, acres: l.ac, zoning: l.z, plan: l.f2 ?? null, onMarket: byPid.has(l.pid) });
+    }
+    return out;
+  }, [siteGeom, byPid]);
 
   // Re-fetch the open parcel when the visitor registers (gated fields appear).
   useEffect(() => { if (registered && selected) loadDetail(selected.pid); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [registered]);
@@ -206,6 +233,13 @@ export default function HobartParcelMap() {
     if (!map.getSource("parcels")) map.addSource("parcels", { type: "geojson", data: d.parcels as any, promoteId: "pid" });
     if (!map.getSource("buildings")) map.addSource("buildings", { type: "geojson", data: d.buildings, generateId: true });
     if (!map.getSource("plan")) map.addSource("plan", { type: "geojson", data: d.plan });
+    if (!map.getSource("plan-site-points")) {
+      const pts = ((d.plan?.features ?? []) as any[]).filter((f) => f.properties?.kind === "site").map((f) => {
+        const bb = bboxOf(f.geometry);
+        return { type: "Feature", geometry: { type: "Point", coordinates: [(bb[0] + bb[2]) / 2, (bb[1] + bb[3]) / 2] }, properties: { num: f.properties.num, name: f.properties.name } };
+      });
+      map.addSource("plan-site-points", { type: "geojson", data: { type: "FeatureCollection", features: pts } as any });
+    }
 
     map.addLayer({ id: "zoning-fill", type: "fill", source: "parcels", paint: { "fill-color": matchExpr(["get", "z"], ZONING, ZONING_FALLBACK) as any, "fill-opacity": 0.45 } }, labelLayer);
     map.addLayer({ id: "flu-fill", type: "fill", source: "parcels", paint: { "fill-color": matchExpr(["get", "f"], LAND_USE, ZONING_FALLBACK) as any, "fill-opacity": 0 } }, labelLayer);
@@ -237,7 +271,13 @@ export default function HobartParcelMap() {
     map.addLayer({ id: "listing-lease-line", type: "line", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "line-color": LISTING.lease.line, "line-width": 2 } }, labelLayer);
     map.addLayer({ id: "listing-both-line", type: "line", source: "parcels", filter: ["in", ["get", "pid"], ["literal", []]], paint: { "line-color": LISTING.both.line, "line-width": 2, "line-dasharray": [2, 1] } }, labelLayer);
     // 2040 plan: opportunity sites + planned street extensions (toggle overlays; always on in plan mode).
-    map.addLayer({ id: "plan-sites-fill", type: "fill", source: "plan", filter: ["==", ["get", "kind"], "site"], layout: { visibility: "none" }, paint: { "fill-color": PLAN_SITE.fill, "fill-opacity": 0.3 } }, labelLayer);
+    for (const f of (d.plan?.features ?? []) as any[]) {
+      const c = f.properties?.concept; if (f.properties?.kind !== "site" || !c) continue;
+      const sid = `plan-concept-${f.properties.num}`;
+      if (!map.getSource(sid)) map.addSource(sid, { type: "image", url: c.src, coordinates: c.coordinates });
+      map.addLayer({ id: sid, type: "raster", source: sid, layout: { visibility: "none" }, paint: { "raster-opacity": 0.95, "raster-fade-duration": 0 } }, labelLayer);
+    }
+    map.addLayer({ id: "plan-sites-fill", type: "fill", source: "plan", filter: ["==", ["get", "kind"], "site"], layout: { visibility: "none" }, paint: { "fill-color": PLAN_SITE.fill, "fill-opacity": ["case", ["has", "concept"], 0.04, 0.3] as any } }, labelLayer);
     // dasharray cannot be data-driven: one solid layer for surveyed sites, one dashed for the approximate circle.
     map.addLayer({ id: "plan-sites-line", type: "line", source: "plan", filter: ["all", ["==", ["get", "kind"], "site"], ["!=", ["get", "approx"], true]], layout: { visibility: "none" }, paint: { "line-color": PLAN_SITE.line, "line-width": 2.5 } }, labelLayer);
     map.addLayer({ id: "plan-sites-line-approx", type: "line", source: "plan", filter: ["all", ["==", ["get", "kind"], "site"], ["==", ["get", "approx"], true]], layout: { visibility: "none" }, paint: { "line-color": PLAN_SITE.line, "line-width": 2.5, "line-dasharray": [2, 1.5] } }, labelLayer);
@@ -249,7 +289,7 @@ export default function HobartParcelMap() {
       paint: { "text-color": PLAN_SITE.road, "text-halo-color": "#FFFFFF", "text-halo-width": 1.6 },
     });
     map.addLayer({
-      id: "plan-sites-label", type: "symbol", source: "plan", filter: ["==", ["get", "kind"], "site"],
+      id: "plan-sites-label", type: "symbol", source: "plan-site-points",
       layout: { visibility: "none", "text-field": ["concat", "Site ", ["to-string", ["get", "num"]], "\n", ["get", "name"]], "text-size": 12, "text-font": ["Noto Sans Bold"], "text-anchor": "center", "text-allow-overlap": true },
       paint: { "text-color": PLAN_SITE.line, "text-halo-color": "#FFFFFF", "text-halo-width": 1.8 },
     });
@@ -333,17 +373,10 @@ export default function HobartParcelMap() {
       });
       map.on("click", (e) => {
         if (!map.getLayer("parcel-hit")) return;
-        // An opportunity site (when shown) explains itself instead of selecting the parcel under it.
+        // An opportunity site (when shown) opens its panel instead of selecting the parcel under it.
         if (map.getLayer("plan-sites-fill") && map.getLayoutProperty("plan-sites-fill", "visibility") === "visible") {
-          const site = map.queryRenderedFeatures(e.point, { layers: ["plan-sites-fill"] })[0];
-          if (site) {
-            const sp = site.properties as { num: number; name: string; desc: string; approx: boolean };
-            const esc = (t: string) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
-            new maplibregl.Popup({ maxWidth: "300px" }).setLngLat(e.lngLat).setHTML(
-              `<div style="font-family:var(--font-archivo),system-ui,sans-serif;color:#0F172A"><div style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#C2410C">Hobart 2040 plan · opportunity site ${sp.num}</div><div style="font-size:15px;font-weight:700;margin:2px 0 4px">${esc(sp.name)}</div><div style="font-size:12px;line-height:1.4;color:#334155">${esc(sp.desc)}</div></div>`,
-            ).addTo(map);
-            return;
-          }
+          const hit = map.queryRenderedFeatures(e.point, { layers: ["plan-sites-fill"] })[0];
+          if (hit) { openSiteRef.current(Number((hit.properties as any).num)); return; }
         }
         const hits = map.queryRenderedFeatures(e.point, { layers: ["parcel-hit"] });
         if (hits.length) selectRef.current(fromLite((hits[0] as MapGeoJSONFeature).properties as Lite), false);
@@ -376,6 +409,7 @@ export default function HobartParcelMap() {
     map.setPaintProperty("plan-area-line", "line-opacity", mode === "plan" ? 0.75 : 0);
     const sitesOn = mode === "plan" || overlays.plan_sites, roadsOn = mode === "plan" || overlays.plan_roads;
     for (const id of ["plan-sites-fill", "plan-sites-line", "plan-sites-line-approx", "plan-sites-label"]) map.setLayoutProperty(id, "visibility", sitesOn ? "visible" : "none");
+    for (const l of map.getStyle().layers ?? []) if (l.id.startsWith("plan-concept-")) map.setLayoutProperty(l.id, "visibility", sitesOn && overlays.plan_concepts ? "visible" : "none");
     for (const id of ["plan-roads-casing", "plan-roads", "plan-roads-label"]) map.setLayoutProperty(id, "visibility", roadsOn ? "visible" : "none");
     map.setLayoutProperty("buildings-3d", "visibility", overlays.buildings && threeD ? "visible" : "none");
     map.setLayoutProperty("parcel-line", "visibility", overlays.lines ? "visible" : "none");
@@ -590,6 +624,20 @@ export default function HobartParcelMap() {
                 </button>
               );
             })}
+            <span className="mx-1 h-4 w-px shrink-0 bg-slate-200" />
+            {([["zoning", "Zoning", ZONING.R2.fill], ["plan", "2040 Plan", PLAN_2040.employment.fill]] as [Mode, string, string][]).map(([m, l, dot]) => {
+              const on = mode === m;
+              return (
+                <button
+                  key={m}
+                  onClick={() => setMode((cur) => (cur === m ? "none" : m))}
+                  title={on ? `Hide ${l} colors` : `Color parcels by ${l}`}
+                  className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-semibold ring-1 transition ${on ? "bg-blue-600 text-white ring-blue-600" : "bg-white text-slate-700 ring-slate-200 hover:bg-slate-50"}`}
+                >
+                  <span className="inline-block h-2 w-2 rounded-[2px]" style={{ background: dot }} />{l}
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -610,10 +658,10 @@ export default function HobartParcelMap() {
 
         {layersOpen && (
           <div className="w-[260px] rounded-[10px] bg-white p-3 text-[13px] shadow-xl ring-1 ring-slate-900/5">
-            <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">Color parcels by</div>
+            <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">Color parcels by <span className="font-medium normal-case tracking-normal text-slate-400">· tap again to turn off</span></div>
             <div className="grid grid-cols-2 gap-1">
               {([["zoning", "Zoning"], ["plan", "2040 Plan"], ["flu", "Land use (city GIS)"], ["height", "Building height"], ["none", "None"]] as [Mode, string][]).map(([m, l]) => (
-                <button key={m} onClick={() => setMode(m)} className={`rounded-[6px] px-2 py-1.5 text-left font-semibold ${mode === m ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}>{l}</button>
+                <button key={m} onClick={() => setMode((cur) => (cur === m && m !== "none" ? "none" : m))} className={`rounded-[6px] px-2 py-1.5 text-left font-semibold ${mode === m ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}>{l}</button>
               ))}
             </div>
             {mode === "plan" && (
@@ -638,7 +686,7 @@ export default function HobartParcelMap() {
             </div>
             <div className="mt-1 text-[11px] text-slate-500">Listings from CREXi, LoopNet and our CRM (daily). Businesses: Google Business Profiles first ({googlePids.length} parcels, solid); City of Hobart licenses and Overture as backup ({backupPids.length} parcels, faint).</div>
             <div className="mt-3 mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">Overlays</div>
-            {([["lines", "Parcel lines"], ["buildings", "3D buildings"], ["plan_sites", "2040 opportunity sites"], ["plan_roads", "2040 planned streets"], ["tif", "TIF districts (dashed)"], ["flood", "FEMA AE flood zone"], ["historic", "Historic district"]] as [keyof Overlays, string][]).map(([k, l]) => (
+            {([["lines", "Parcel lines"], ["buildings", "3D buildings"], ["plan_sites", "2040 opportunity sites"], ["plan_concepts", "2040 concept site plans (with sites)"], ["plan_roads", "2040 planned streets"], ["tif", "TIF districts (dashed)"], ["flood", "FEMA AE flood zone"], ["historic", "Historic district"]] as [keyof Overlays, string][]).map(([k, l]) => (
               <label key={k} className="flex cursor-pointer items-center gap-2 py-1 text-slate-700">
                 <input type="checkbox" checked={overlays[k]} onChange={(e) => setOverlays({ ...overlays, [k]: e.target.checked })} className="h-4 w-4 accent-blue-600" />
                 {l}
@@ -737,6 +785,16 @@ export default function HobartParcelMap() {
 
       {toast && <div className="absolute bottom-10 left-1/2 z-30 -translate-x-1/2 rounded-[8px] bg-slate-900 px-3 py-1.5 text-[13px] font-semibold text-white shadow-lg">{toast}</div>}
 
+      {site && !selected && (
+        <PlanSitePanel
+          site={site}
+          parcels={siteParcels}
+          mobile={isMobile}
+          onClose={() => setSite(null)}
+          onZoom={() => { const m = mapRef.current; if (m && siteGeom) flyToGeometry(m, siteGeom, isMobile); }}
+          onSelectParcel={(pid) => { const f = dataRef.current?.parcels.features.find((x) => x.properties.pid === pid); if (f) select(fromLite(f.properties), true); }}
+        />
+      )}
       {selected && (
         <ParcelCard
           p={selected}

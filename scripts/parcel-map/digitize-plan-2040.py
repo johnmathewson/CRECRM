@@ -67,6 +67,37 @@ SITES = {
     3: ("61st Ave & Wisconsin St", "Mixed-use commercial and residential hub serving St. Mary Medical Center visitors, staff and nearby neighborhoods. Depends on the Wisconsin Street extension."),
     4: ("Former Drag Strip", "Employment Center near the US 30 commercial area: light industrial, office and incubator space. Needs 78th Avenue and Underwood Drive."),
 }
+# The plan's own words (pp. 44-47), one section per heading, plus the page images.
+SITE_CONTENT = {
+    1: {"vision": "Industrial", "tag": "Needs further study",
+        "sections": [["About this site", "There are several developable sites surrounding the I-65 interchange on Ridge Road, located to the southwest of the interchange. Due to their prime location on the Hobart boundary and their highway accessibility, these sites have high redevelopment potential and should be considered for industrial uses. Before development activity occurs, Hobart must ensure that the area has adequate utilities to serve future uses. The primary development challenge will be consolidating sites, which currently have different owners."]],
+        "note": "Site 1 will require additional analysis before a design concept can be proposed.",
+        "aerial": ("clip", 15, (398, 113, 555, 277))},
+    2: {"vision": "Light industrial · commercial · senior housing", "tag": "Hobart Sanitary District land",
+        "sections": [["About this site", "This site is owned by the Hobart Sanitary District and located in close proximity to a key commercial area and natural wetlands. The site has the potential to be developed as light industrial, commercial, or higher density senior housing. A full site concept can be completed once nearby uses are assessed."],
+                     ["Noise assessment", "A nearby Hobart Police Department shooting range may pose a challenge to any residential development on this property. Though there is minimal safety risk, excess noise has the potential to impact the surrounding area. A noise assessment can be conducted to determine whether the range will affect future development."],
+                     ["Conservation zoning standards", "In order to reduce the adverse impacts of land uses on this site, future concepts should include ample buffering to protect the river and wetlands that border the site."],
+                     ["Street construction & extensions", "The extension of North Colonial Drive (N/S) and the service road (E/W) to the north of the Strack & Van Til shopping center will help with accessibility on this site. Any future development should consider these street extensions in their plans."]],
+        "character": (15, 862, "Multi-unit senior housing — character image"), "aerial": ("xref", 14, 736)},
+    3: {"vision": "Mixed-use hub for the medical district", "tag": "Concept plan",
+        "sections": [["About this concept", "This site is located near the St. Mary Medical Center and is the ideal location for a mixed-use hub that provides amenities for surrounding residents, hospital visitors, and hospital staff. The concept includes multiple commercial spaces and higher density housing that is well-suited for seniors, hospital workers, and other potential residents. It also includes a central gathering space, which lends to a community feel."],
+                     ["Mixed uses", "Commercial/entertainment spaces, residential buildings, and green space are in close proximity to one another in this concept. This helps to create an authentic neighborhood environment, while also providing amenities for the broader community."],
+                     ["Street construction & extensions", "This concept includes the extension of Wisconsin Street and additional roads that connect back to the Hobart street network."]],
+        "character": (16, 868, "Mixed-use commercial development — character image"), "aerial": ("xref", 14, 738),
+        # Concept site plan: north-up aerial. Control points = image pixel → (lon, lat) of road intersections on 61st Ave
+        # (TIGER/Line centerlines): Wisconsin St (the roundabout), Washington St, Lake Park Ave.
+        "concept": (16, 867, [((751, 236), (-87.26930, 41.51046)), ((1103, 212), (-87.26650, 41.51061)), ((2030, 202), (-87.25885, 41.51073))])},
+    4: {"vision": "Employment Center — light industrial, office, incubator", "tag": "Concept plan",
+        "sections": [["About this concept", "This site is primed for light industrial and office uses given its location near key regional routes. The Employment Center land use designation would allow for light industrial uses, such as incubator spaces, small distribution centers, and offices."],
+                     ["Conservation zoning standards", "In order to reduce the adverse impacts of land uses on this site, this concept includes ample buffering to protect surrounding neighborhoods and the natural environment."],
+                     ["Street construction & extensions", "This concept includes the construction of 78th Avenue (E/W) and the extension of Underwood Drive (N/S)."]],
+        "character": (17, 875, "Office space / industrial use — character image"), "aerial": ("xref", 14, 737),
+        # Control points: the concept's dashed site boundary is the drag-strip parcel (45-12-24-201-001, 7900 Clay St);
+        # its corners (NW, NE notch, SE, bottom step, SW) in image px → the parcel's vertices from parcels-lite.
+        "concept": (17, 873, [((155, 223), (-87.29231, 41.47825)), ((1615, 223), (-87.27975, 41.47831)), ((1843, 937), (-87.27782, 41.47371)),
+                              ((715, 937), (-87.28745, 41.47368)), ((135, 808), (-87.29228, 41.47464))])},
+}
+IMG_DIR = "public/data/hobart/plan"
 
 doc = fitz.open(PDF)
 
@@ -254,13 +285,71 @@ for d in sd:
     if rgb == (255, 85, 0) and d["rect"].x0 > b15.x0:
         for p in polys_of(d["items"]): site_polys.append(p)
 site_polys.sort(key=lambda p: -p.centroid.y)  # south → north: 4, 3, 2
+
+import os
+os.makedirs(IMG_DIR, exist_ok=True)
+def save_xref(pno, xref, out, max_w=1600, quality=82):
+    from PIL import Image
+    import io
+    pix = fitz.Pixmap(doc, xref)
+    if pix.n >= 5: pix = fitz.Pixmap(fitz.csRGB, pix)
+    im = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
+    if im.width > max_w: im = im.resize((max_w, round(im.height * max_w / im.width)), Image.LANCZOS)
+    im.save(out, "JPEG", quality=quality, optimize=True); return im.size
+def save_clip(pno, rect, out):
+    pix = doc[pno].get_pixmap(matrix=fitz.Matrix(3, 3), clip=fitz.Rect(*rect), alpha=False); pix.save(out.replace(".jpg", ".png"))
+    from PIL import Image
+    Image.open(out.replace(".jpg", ".png")).convert("RGB").save(out, "JPEG", quality=85); os.remove(out.replace(".jpg", ".png"))
+
+def concept_corners(pno, xref, ctrl):
+    """Similarity fit (scale, rotation, translation) image px → metres, then the four image corners as lon/lat."""
+    from PIL import Image
+    import io
+    pix = fitz.Pixmap(doc, xref); W, H = pix.width, pix.height
+    src = np.array([c[0] for c in ctrl], float); dst = np.array([to_m(*c[1]) for c in ctrl], float)
+    # x' = a x - b y + tx ; y' = b x + a y + ty  (image y down → flip first)
+    sx = np.c_[src[:, 0], -src[:, 1]]
+    M = np.zeros((2 * len(src), 4)); v = np.zeros(2 * len(src))
+    for i, ((x, y), (X, Y)) in enumerate(zip(sx, dst)):
+        M[2 * i] = [x, -y, 1, 0]; v[2 * i] = X
+        M[2 * i + 1] = [y, x, 0, 1]; v[2 * i + 1] = Y
+    (a, b, tx, ty), *_ = np.linalg.lstsq(M, v, rcond=None)
+    scale = math.hypot(a, b); rot = math.degrees(math.atan2(b, a))
+    res = np.hypot(M @ np.array([a, b, tx, ty]) - v, 0)
+    def px(x, y):
+        xx, yy = x, -y
+        return to_ll(a * xx - b * yy + tx, b * xx + a * yy + ty)
+    corners = [px(0, 0), px(W, 0), px(W, H), px(0, H)]  # TL, TR, BR, BL (MapLibre image source order)
+    print(f"concept xref {xref}: {scale:.3f} m/px, rotation {rot:.2f}°, control residuals {np.round(res, 1).tolist()} m", file=sys.stderr)
+    return corners, (W, H)
+
 for num, p in zip((4, 3, 2), site_polys):
     name, desc = SITES[num]
     features.append({"type": "Feature", "geometry": mapping(page_to_ll_geom(p15_to_p6(p))), "properties": {"kind": "site", "num": num, "name": name, "desc": desc, "approx": False}})
+
+def enrich_site(feat):
+    num = feat["properties"]["num"]; c = SITE_CONTENT[num]; pr = feat["properties"]
+    pr.update({"vision": c["vision"], "tag": c["tag"], "sections": c["sections"], "note": c.get("note")})
+    if c.get("character"):
+        pno, xref, cap = c["character"]; fn = f"site-{num}-character.jpg"; save_xref(pno, xref, f"{IMG_DIR}/{fn}", max_w=800)
+        pr["character"] = {"src": f"/data/hobart/plan/{fn}", "caption": cap}
+    if c.get("aerial"):
+        kind, pno, ref = c["aerial"]; fn = f"site-{num}-aerial.jpg"
+        if kind == "xref": save_xref(pno, ref, f"{IMG_DIR}/{fn}", max_w=1200)
+        else: save_clip(pno, ref, f"{IMG_DIR}/{fn}")
+        pr["aerial"] = f"/data/hobart/plan/{fn}"
+    if c.get("concept"):
+        pno, xref, ctrl = c["concept"]; fn = f"site-{num}-concept.jpg"
+        save_xref(pno, xref, f"{IMG_DIR}/{fn}", max_w=2100, quality=80)
+        corners, (W, H) = concept_corners(pno, xref, ctrl)
+        pr["concept"] = {"src": f"/data/hobart/plan/{fn}", "coordinates": [[round(x, 7), round(y, 7)] for x, y in corners], "px": [W, H]}
+for f in features:
+    if f["properties"]["kind"] == "site": enrich_site(f)
 ring = next(d for d in sd if d.get("color") and not d.get("fill") and (d.get("width") or 0) >= 2.5 and all(i[0] == "c" for i in d["items"]) and d["rect"].x0 > b15.x0 - 30)
 r = ring["rect"]; center = p15_to_p6(Point((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2))
 circle_m = affine_transform(center, A).buffer(k15 * r.width / 2 * math.hypot(a, c), resolution=24)
 features.append({"type": "Feature", "geometry": mapping(affine_transform(circle_m, [1 / MX, 0, 0, 1 / MY, LON0, LAT0])), "properties": {"kind": "site", "num": 1, "name": SITES[1][0], "desc": SITES[1][1], "approx": True}})
+enrich_site(features[-1])
 
 json.dump({"type": "FeatureCollection", "source": "Hobart 2040 Comprehensive Plan, Vision & Future Land Use chapter, Fig 11 (p.35) and Fig 12 (p.44); adopted Sept 6, 2023", "features": features}, open(OUT, "w"), separators=(",", ":"))
 json.dump(parcels, open(PARCELS, "w"), separators=(",", ":"))
